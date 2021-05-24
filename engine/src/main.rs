@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use wgpu::util::DeviceExt;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -38,9 +39,42 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         flags: wgpu::ShaderFlags::all(),
     });
 
+    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: None,
+        usage: wgpu::BufferUsage::UNIFORM,
+        contents: [1.0f32, 1., 1., 1.]
+            .iter()
+            .flat_map(|a| std::array::IntoIter::new(a.to_ne_bytes()))
+            .collect::<Vec<_>>()
+            .as_slice(),
+    });
+
+    let uniform_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                count: None,
+                visibility: wgpu::ShaderStage::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+            }],
+        });
+    let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &uniform_bind_group_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
+        }],
+    });
+
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: None,
-        bind_group_layouts: &[],
+        bind_group_layouts: &[&uniform_bind_group_layout],
         push_constant_ranges: &[],
     });
 
@@ -111,6 +145,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         }],
                         depth_stencil_attachment: None,
                     });
+                    rpass.set_bind_group(0, &uniform_bind_group, &[]);
                     rpass.set_pipeline(&render_pipeline);
                     rpass.draw(0..3, 0..1);
                 }
