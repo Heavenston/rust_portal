@@ -1,9 +1,20 @@
 mod material;
 mod shader;
+mod mesh;
 
 pub use material::*;
 pub use shader::*;
+pub use mesh::*;
 use smallvec::SmallVec;
+use bytemuck::{Pod, Zeroable};
+use wgpu::util::DeviceExt;
+
+#[derive(Copy, Clone, Zeroable, Pod)]
+#[repr(C)]
+pub struct RenderUniformBuffer {
+    pub view_projection: [f32; 16],
+    pub model: [f32; 16],
+}
 
 pub struct Renderer<'a> {
     pub instance: wgpu::Instance,
@@ -16,8 +27,13 @@ pub struct Renderer<'a> {
     pub(crate) swap_chain_format: wgpu::TextureFormat,
     pub(crate) swap_chain: wgpu::SwapChain,
 
+    pub render_uniform_buffer: wgpu::Buffer,
+    pub render_uniform_bind_group_layout: wgpu::BindGroupLayout,
+    pub render_uniform_bind_group: wgpu::BindGroup,
+
     pub shaders: Vec<Shader>,
     pub materials: Vec<Material<'a>>,
+    pub meshes: Vec<Mesh<'a>>,
 }
 
 impl<'a> Renderer<'a> {
@@ -56,6 +72,36 @@ impl<'a> Renderer<'a> {
         };
         let swap_chain = device.create_swap_chain(&surface, &swap_chain_descriptor);
 
+        let render_uniform_buffer = device.create_buffer(
+            &wgpu::BufferDescriptor {
+                label: Some("Vertex Buffer"),
+                size: std::mem::size_of::<RenderUniformBuffer>() as u64,
+                usage: wgpu::BufferUsage::VERTEX,
+                mapped_at_creation: true
+            }
+        );
+        let render_uniform_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStage::all(),
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None
+                },
+                count: None
+            }]
+        });
+        let render_uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &render_uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(render_uniform_buffer.as_entire_buffer_binding()),
+            }]
+        });
+
         Self {
             instance,
             surface,
@@ -67,8 +113,13 @@ impl<'a> Renderer<'a> {
             swap_chain_format,
             swap_chain,
 
+            render_uniform_buffer,
+            render_uniform_bind_group_layout,
+            render_uniform_bind_group,
+
             materials: Vec::new(),
             shaders: Vec::new(),
+            meshes: Vec::new(),
         }
     }
     pub fn resize(&'a mut self, width: u32, height: u32) {
@@ -93,7 +144,9 @@ impl<'a> Renderer<'a> {
             shader_module: self.device.create_shader_module(shader_module),
             render_pipeline_layout: self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
-                bind_group_layouts: bind_group_layouts.iter().collect::<Vec<_>>().as_slice(),
+                bind_group_layouts: std::iter::once(&self.render_uniform_bind_group_layout)
+                    .chain(bind_group_layouts.iter())
+                    .collect::<Vec<_>>().as_slice(),
                 push_constant_ranges: &[]
             }),
             bind_group_layouts,
@@ -132,13 +185,31 @@ impl<'a> Renderer<'a> {
                     label: None,
                     layout: &shader.bind_group_layouts[i],
                     entries
-                })).collect(),
+                }))
+                .collect(),
             shader,
 
             marker: Default::default()
         });
         &self.materials[i]
     }
-
-
+    pub fn create_mesh<T: Pod>(&'a mut self, material: &'a Material, indices: &[u32], vertices: &[T]) -> &'a Mesh<'a> {
+        let i = self.meshes.len();
+        self.meshes.push(Mesh {
+            material,
+            vertices: self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: bytemuck::cast_slice(vertices),
+                usage: wgpu::BufferUsage::VERTEX,
+            }),
+            vertices_size: vertices.len(),
+            indices: self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: bytemuck::cast_slice(indices),
+                usage: wgpu::BufferUsage::INDEX,
+            }),
+            indices_size: indices.len()
+        });
+        &self.meshes[i]
+    }
 }
