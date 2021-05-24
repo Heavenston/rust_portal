@@ -35,6 +35,8 @@ pub struct Renderer<'a> {
     pub shaders: Vec<Shader>,
     pub materials: Vec<Material<'a>>,
     pub meshes: Vec<Mesh<'a>>,
+
+    _unpin_marker: std::marker::PhantomPinned,
 }
 
 impl<'a> Renderer<'a> {
@@ -77,8 +79,8 @@ impl<'a> Renderer<'a> {
             &wgpu::BufferDescriptor {
                 label: Some("Vertex Buffer"),
                 size: std::mem::size_of::<RenderUniformBuffer>() as u64,
-                usage: wgpu::BufferUsage::UNIFORM,
-                mapped_at_creation: true
+                usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+                mapped_at_creation: false
             }
         );
         let render_uniform_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -121,6 +123,8 @@ impl<'a> Renderer<'a> {
             materials: Vec::new(),
             shaders: Vec::new(),
             meshes: Vec::new(),
+
+            _unpin_marker: Default::default(),
         }
     }
     pub fn resize(&'a mut self, width: u32, height: u32) {
