@@ -8,12 +8,13 @@ pub use mesh::*;
 use smallvec::SmallVec;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
+use crate::camera::Camera;
+use std::convert::TryInto;
 
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(C)]
 pub struct RenderUniformBuffer {
     pub view_projection: [f32; 16],
-    pub model: [f32; 16],
 }
 
 pub struct Renderer<'a> {
@@ -211,5 +212,59 @@ impl<'a> Renderer<'a> {
             indices_size: indices.len()
         });
         &self.meshes[i]
+    }
+
+    pub fn render(&self, camera: impl Camera, meshes: &[&'a Mesh]) {
+        self.queue.write_buffer(
+            &self.render_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&RenderUniformBuffer {
+                view_projection: camera.get_vp_matrix().as_slice().try_into().unwrap()
+            })
+        );
+
+        let frame = self.swap_chain
+            .get_current_frame()
+            .expect("Failed to acquire next swap chain texture")
+            .output;
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut r_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[wgpu::RenderPassColorAttachment {
+                    view: &frame.view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: true,
+                    },
+                }],
+                depth_stencil_attachment: None,
+            });
+            r_pass.set_bind_group(0, &self.render_uniform_bind_group, &[]);
+
+            let mut last_material = None;
+            for mesh in meshes {
+                if last_material.map(|a| a as *const Material) != Some(mesh.material as *const Material) {
+                    last_material = Some(mesh.material);
+                    let material = mesh.material;
+                    r_pass.set_pipeline(&material.render_pipeline);
+                    for (bg, i) in material.bind_groups.iter().zip(1..) {
+                        r_pass.set_bind_group(i, bg, &[]);
+                    }
+                }
+
+                r_pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                r_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+
+                r_pass.draw_indexed(
+                    0..mesh.indices_size as u32,
+                    0,
+                    0..1
+                );
+            }
+        }
+
+        self.queue.submit(Some(encoder.finish()));
     }
 }
