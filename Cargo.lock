@@ -1179,12 +1179,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb20dcc30536a1508e75d47dd0e399bb2fe7354dcf35cda9127f2bf1ed92e30e"
 
 [[package]]
-name = "portal"
+name = "portal_engine"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
  "nalgebra",
  "pollster",
+ "rust-embed",
+ "smallvec",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "portal_game"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "nalgebra",
+ "pollster",
+ "portal_engine",
  "rust-embed",
  "smallvec",
  "wgpu",
