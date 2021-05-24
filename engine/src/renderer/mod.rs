@@ -77,7 +77,7 @@ impl<'a> Renderer<'a> {
             &wgpu::BufferDescriptor {
                 label: Some("Vertex Buffer"),
                 size: std::mem::size_of::<RenderUniformBuffer>() as u64,
-                usage: wgpu::BufferUsage::VERTEX,
+                usage: wgpu::BufferUsage::UNIFORM,
                 mapped_at_creation: true
             }
         );
