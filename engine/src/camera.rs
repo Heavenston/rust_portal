@@ -1,4 +1,4 @@
-use nalgebra::{Vector3, Perspective3, Matrix4, Translation3, Rotation3, UnitQuaternion};
+use nalgebra::{Vector3, Perspective3, Matrix4, Translation3, UnitQuaternion};
 
 pub trait Camera {
     fn get_view_matrix(&self) -> Matrix4<f32>;
