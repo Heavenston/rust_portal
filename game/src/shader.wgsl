@@ -1,5 +1,5 @@
 [[stage(vertex)]]
-fn vertex([[location(0)]] position: vec2<f32>) -> [[builtin(position)]] vec4<f32> {
+fn vertex([[location(0)]] position: vec3<f32>) -> [[builtin(position)]] vec4<f32> {
     return vec4<f32>(position.xy, 0.0, 1.0);
 }
 

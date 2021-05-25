@@ -22,12 +22,6 @@ fn main() {
         usage: wgpu::BufferUsage::UNIFORM
     });
 
-    #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-    #[repr(C)]
-    struct Vertex {
-        position: [f32; 2],
-    }
-
     let shader = renderer.create_shader(
         &wgpu::ShaderModuleDescriptor {
             label: None,
@@ -49,10 +43,10 @@ fn main() {
         }],
         &[
             wgpu::VertexBufferLayout {
-                array_stride: std::mem::size_of::<Vertex>() as u64,
+                array_stride: 3 * std::mem::size_of::<f32>() as u64,
                 step_mode: wgpu::InputStepMode::Vertex,
                 attributes: &wgpu::vertex_attr_array![
-                    0 => Float32x2
+                    0 => Float32x3
                 ]
             }
         ]
@@ -66,17 +60,15 @@ fn main() {
         ]
     ]);
 
-    let mesh = renderer.create_mesh(material, &[0, 1, 2], &[
-        Vertex {
-            position: [-1., -1.]
-        },
-        Vertex {
-            position: [0., 1.]
-        },
-        Vertex {
-            position: [1., -1.]
-        }
-    ]);
+    let (model, _) = tobj::load_obj("resources/cube.obj", &tobj::LoadOptions {
+        single_index: true,
+        triangulate: true,
+        ignore_points: true,
+        ignore_lines: true,
+    }).unwrap();
+    let model = &model[0];
+
+    let mesh = renderer.create_mesh(material, &model.mesh.indices, &model.mesh.positions);
 
     event_loop.run(move |event, _, control_flow| {
         use winit::{
