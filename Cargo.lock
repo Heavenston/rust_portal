@@ -1223,6 +1223,7 @@ dependencies = [
  "portal_engine",
  "rust-embed",
  "smallvec",
+ "spirv-builder",
  "tobj",
  "wgpu",
  "winit",
@@ -1450,6 +1451,12 @@ dependencies = [
  "wayland-cursor",
  "wayland-protocols",
 ]
+
+[[package]]
+name = "spirv-builder"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64d84839f6cf919d12b3afab3b534599639dafd2429fc6092e56656064e0902c"
 
 [[package]]
 name = "spirv_cross"

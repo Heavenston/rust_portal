@@ -3,8 +3,7 @@ use super::*;
 pub struct Mesh {
     pub material: MaterialRef,
 
-    pub vertices: wgpu::Buffer,
-    pub vertices_size: usize,
+    pub vertex_buffers: SmallVec<[wgpu::Buffer; 2]>,
     pub indices: wgpu::Buffer,
     pub indices_size: usize,
 }

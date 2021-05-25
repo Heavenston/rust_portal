@@ -1,6 +1,23 @@
+[[block]] struct RenderUniforms {
+    view_projection: mat4x4<f32>;
+};
+[[group(0), binding(0)]]
+var<uniform> render_uniforms: RenderUniforms;
+
+struct VertexOutputs {
+    [[builtin(position)]] position: vec4<f32>;
+    [[location(0)]] uv: vec2<f32>;
+};
+
 [[stage(vertex)]]
-fn vertex([[location(0)]] position: vec3<f32>) -> [[builtin(position)]] vec4<f32> {
-    return vec4<f32>(position.xy, 0.0, 1.0);
+fn vertex(
+    [[location(0)]] position: vec3<f32>,
+    [[location(1)]] uv: vec2<f32>
+) -> VertexOutputs {
+    return VertexOutputs(
+        render_uniforms.view_projection * vec4<f32>(position, 1.0),
+        uv
+    );
 }
 
 [[block]] struct Uniforms {
@@ -10,6 +27,6 @@ fn vertex([[location(0)]] position: vec3<f32>) -> [[builtin(position)]] vec4<f32
 var<uniform> uniforms: Uniforms;
 
 [[stage(fragment)]]
-fn fragment() -> [[location(0)]] vec4<f32> {
-    return uniforms.color;
+fn fragment(vertex_output: VertexOutputs) -> [[location(0)]] vec4<f32> {
+    return vec4<f32>(vertex_output.uv, 0., 1.);
 }

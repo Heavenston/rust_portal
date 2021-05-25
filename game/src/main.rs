@@ -14,7 +14,8 @@ fn main() {
     println!("Creating renderer...");
     let mut renderer = Box::new(pollster::block_on(Renderer::new(&window, 100, 100)));
     println!("Created renderer");
-    let camera = PerspectiveCamera::new();
+    let mut camera = PerspectiveCamera::new();
+    camera.position.z = 2.;
 
     let uniform_buffer = renderer.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
@@ -40,24 +41,32 @@ fn main() {
                 },
                 count: None
             }]
-        }],
-        &[
-            wgpu::VertexBufferLayout {
-                array_stride: 3 * std::mem::size_of::<f32>() as u64,
-                step_mode: wgpu::InputStepMode::Vertex,
-                attributes: &wgpu::vertex_attr_array![
-                    0 => Float32x3
-                ]
-            }
-        ]
+        }]
     );
-    let material = renderer.create_material(shader, &[
-        &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(uniform_buffer.as_entire_buffer_binding()),
-            }
-        ]
+    let material = renderer.create_material(shader, &[&[
+        wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::Buffer(uniform_buffer.as_entire_buffer_binding()),
+        }
+    ]], &[
+        wgpu::VertexBufferLayout {
+            array_stride: 3 * std::mem::size_of::<f32>() as u64,
+            step_mode: wgpu::InputStepMode::Vertex,
+            attributes: &[wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x3,
+                offset: 0,
+                shader_location: 0
+            }]
+        },
+        wgpu::VertexBufferLayout {
+            array_stride: 2 * std::mem::size_of::<f32>() as u64,
+            step_mode: wgpu::InputStepMode::Vertex,
+            attributes: &[wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x2,
+                offset: 0,
+                shader_location: 1
+            }]
+        }
     ]);
 
     let (model, _) = tobj::load_obj("resources/cube.obj", &tobj::LoadOptions {
@@ -67,8 +76,10 @@ fn main() {
         ignore_lines: true,
     }).unwrap();
     let model = &model[0];
-
-    let mesh = renderer.create_mesh(material, &model.mesh.indices, &model.mesh.positions);
+    let mesh = renderer.create_mesh(material, &model.mesh.indices, &[
+        &model.mesh.positions,
+        &model.mesh.texcoords,
+    ]);
 
     event_loop.run(move |event, _, control_flow| {
         use winit::{

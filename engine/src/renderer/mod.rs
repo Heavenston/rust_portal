@@ -138,7 +138,6 @@ impl Renderer {
     pub fn create_shader(
         &mut self, shader_module: &wgpu::ShaderModuleDescriptor,
         bind_group_layouts: &[&wgpu::BindGroupLayoutDescriptor],
-        vertex_buffer_layout: &[wgpu::VertexBufferLayout<'static>],
     )-> ShaderRef
     {
         let i = self.shaders.len();
@@ -156,7 +155,6 @@ impl Renderer {
                 push_constant_ranges: &[]
             }),
             bind_group_layouts,
-            vertex_buffer_layouts: SmallVec::from(vertex_buffer_layout),
 
             marker: Default::default()
         });
@@ -165,7 +163,8 @@ impl Renderer {
     }
     pub fn create_material(
         &mut self, shader_ref: ShaderRef,
-        bind_groups: &[&[wgpu::BindGroupEntry]]
+        bind_groups: &[&[wgpu::BindGroupEntry]],
+        vertex_buffer_layouts: &[wgpu::VertexBufferLayout],
     ) -> MaterialRef
     {
         let i = self.materials.len();
@@ -177,7 +176,7 @@ impl Renderer {
                 vertex: wgpu::VertexState {
                     module: &shader.shader_module,
                     entry_point: "vertex",
-                    buffers: &shader.vertex_buffer_layouts
+                    buffers: &vertex_buffer_layouts
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader.shader_module,
@@ -203,16 +202,17 @@ impl Renderer {
 
         MaterialRef(i)
     }
-    pub fn create_mesh<T: Pod>(&mut self, material: MaterialRef, indices: &[u32], vertices: &[T]) -> MeshRef {
+    pub fn create_mesh<T: Pod>(&mut self, material: MaterialRef, indices: &[u32], vertex_buffers: &[&[T]]) -> MeshRef {
         let i = self.meshes.len();
         self.meshes.push(Mesh {
             material,
-            vertices: self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::cast_slice(vertices),
-                usage: wgpu::BufferUsage::VERTEX,
-            }),
-            vertices_size: vertices.len(),
+            vertex_buffers: vertex_buffers.iter().map(|vertices| {
+                self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: None,
+                    contents: bytemuck::cast_slice(vertices),
+                    usage: wgpu::BufferUsage::VERTEX,
+                })
+            }).collect(),
             indices: self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: None,
                 contents: bytemuck::cast_slice(indices),
@@ -266,7 +266,9 @@ impl Renderer {
                 }
 
                 r_pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-                r_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                for (vertex, i) in mesh.vertex_buffers.iter().zip(0..) {
+                    r_pass.set_vertex_buffer(i, vertex.slice(..));
+                }
 
                 r_pass.draw_indexed(
                     0..mesh.indices_size as u32,
