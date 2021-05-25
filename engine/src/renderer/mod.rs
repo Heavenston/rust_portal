@@ -137,7 +137,8 @@ impl Renderer {
 
     pub fn create_shader(
         &mut self, shader_module: &wgpu::ShaderModuleDescriptor,
-        bind_group_layouts: &[&wgpu::BindGroupLayoutDescriptor]
+        bind_group_layouts: &[&wgpu::BindGroupLayoutDescriptor],
+        vertex_buffer_layout: &[wgpu::VertexBufferLayout<'static>],
     )-> ShaderRef
     {
         let i = self.shaders.len();
@@ -155,6 +156,7 @@ impl Renderer {
                 push_constant_ranges: &[]
             }),
             bind_group_layouts,
+            vertex_buffer_layouts: SmallVec::from(vertex_buffer_layout),
 
             marker: Default::default()
         });
@@ -175,7 +177,7 @@ impl Renderer {
                 vertex: wgpu::VertexState {
                     module: &shader.shader_module,
                     entry_point: "vertex",
-                    buffers: &[]
+                    buffers: &shader.vertex_buffer_layouts
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader.shader_module,
