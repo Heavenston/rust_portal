@@ -9,8 +9,7 @@ fn main() {
     window.set_inner_size(LogicalSize::new(500,500));
 
     println!("Creating renderer...");
-    let renderer =
-        Box::into_raw(Box::new(pollster::block_on(Renderer::new(&window, 100, 100))));
+    let mut renderer = Box::new(pollster::block_on(Renderer::new(&window, 100, 100)));
     println!("Created renderer");
     let camera = PerspectiveCamera::new();
 
@@ -19,7 +18,6 @@ fn main() {
             event::{Event, WindowEvent},
             event_loop::{ControlFlow},
         };
-        let renderer = unsafe { &mut *renderer };
 
         *control_flow = ControlFlow::Wait;
         match event {

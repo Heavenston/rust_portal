@@ -8,3 +8,5 @@ pub struct Shader {
 
     pub(crate) marker: PhantomData<()>,
 }
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct ShaderRef(pub(crate) usize);

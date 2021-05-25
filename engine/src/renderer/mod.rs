@@ -17,7 +17,7 @@ pub struct RenderUniformBuffer {
     pub view_projection: [f32; 16],
 }
 
-pub struct Renderer<'a> {
+pub struct Renderer {
     pub instance: wgpu::Instance,
     pub surface: wgpu::Surface,
     pub adapter: wgpu::Adapter,
@@ -33,14 +33,14 @@ pub struct Renderer<'a> {
     pub render_uniform_bind_group: wgpu::BindGroup,
 
     pub shaders: Vec<Shader>,
-    pub materials: Vec<Material<'a>>,
-    pub meshes: Vec<Mesh<'a>>,
+    pub materials: Vec<Material>,
+    pub meshes: Vec<Mesh>,
 
     _unpin_marker: std::marker::PhantomPinned,
 }
 
-impl<'a> Renderer<'a> {
-    pub async fn new(window: &winit::window::Window, width: u32, height: u32) -> Renderer<'a> {
+impl Renderer {
+    pub async fn new(window: &winit::window::Window, width: u32, height: u32) -> Renderer {
         let instance = wgpu::Instance::new(wgpu::BackendBit::all());
         let surface = unsafe { instance.create_surface(window) };
         let adapter = instance
@@ -127,7 +127,7 @@ impl<'a> Renderer<'a> {
             _unpin_marker: Default::default(),
         }
     }
-    pub fn resize(&'a mut self, width: u32, height: u32) {
+    pub fn resize(&mut self, width: u32, height: u32) {
         self.swap_chain_descriptor.width = width;
         self.swap_chain_descriptor.height = height;
         self.swap_chain = self
@@ -136,9 +136,9 @@ impl<'a> Renderer<'a> {
     }
 
     pub fn create_shader(
-        &'a mut self, shader_module: &wgpu::ShaderModuleDescriptor,
+        &mut self, shader_module: &wgpu::ShaderModuleDescriptor,
         bind_group_layouts: &[&wgpu::BindGroupLayoutDescriptor]
-    )-> &'a Shader
+    )-> ShaderRef
     {
         let i = self.shaders.len();
         let bind_group_layouts: SmallVec<_> = bind_group_layouts.iter()
@@ -158,14 +158,16 @@ impl<'a> Renderer<'a> {
 
             marker: Default::default()
         });
-        &self.shaders[i]
+
+        ShaderRef(i)
     }
     pub fn create_material(
-        &'a mut self, shader: &'a Shader,
+        &mut self, shader_ref: ShaderRef,
         bind_groups: &[&[wgpu::BindGroupEntry]]
-    ) -> &'a Material<'a>
+    ) -> MaterialRef
     {
         let i = self.materials.len();
+        let shader = &self.shaders[shader_ref.0];
         self.materials.push(Material {
             render_pipeline: self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: None,
@@ -192,13 +194,14 @@ impl<'a> Renderer<'a> {
                     entries
                 }))
                 .collect(),
-            shader,
+            shader: shader_ref,
 
             marker: Default::default()
         });
-        &self.materials[i]
+
+        MaterialRef(i)
     }
-    pub fn create_mesh<T: Pod>(&'a mut self, material: &'a Material, indices: &[u32], vertices: &[T]) -> &'a Mesh<'a> {
+    pub fn create_mesh<T: Pod>(&mut self, material: MaterialRef, indices: &[u32], vertices: &[T]) -> MeshRef {
         let i = self.meshes.len();
         self.meshes.push(Mesh {
             material,
@@ -215,10 +218,11 @@ impl<'a> Renderer<'a> {
             }),
             indices_size: indices.len()
         });
-        &self.meshes[i]
+
+        MeshRef(i)
     }
 
-    pub fn render(&self, camera: impl Camera, meshes: &[&'a Mesh]) {
+    pub fn render(&self, camera: impl Camera, meshes: &[MeshRef]) {
         self.queue.write_buffer(
             &self.render_uniform_buffer,
             0,
@@ -248,10 +252,11 @@ impl<'a> Renderer<'a> {
             r_pass.set_bind_group(0, &self.render_uniform_bind_group, &[]);
 
             let mut last_material = None;
-            for mesh in meshes {
-                if last_material.map(|a| a as *const Material) != Some(mesh.material as *const Material) {
+            for mesh_ref in meshes {
+                let mesh = &self.meshes[mesh_ref.0];
+                if last_material != Some(mesh.material) {
                     last_material = Some(mesh.material);
-                    let material = mesh.material;
+                    let material = &self.materials[mesh.material.0];
                     r_pass.set_pipeline(&material.render_pipeline);
                     for (bg, i) in material.bind_groups.iter().zip(1..) {
                         r_pass.set_bind_group(i, bg, &[]);
