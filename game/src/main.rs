@@ -23,12 +23,14 @@ fn main() {
         usage: wgpu::BufferUsage::UNIFORM
     });
 
+    let shader_m = wgpu::ShaderModuleDescriptor {
+        label: None,
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
+        flags: Default::default()
+    };
     let shader = renderer.create_shader(
-        &wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
-            flags: Default::default()
-        },
+        &shader_m,
+        &shader_m,
         &[&wgpu::BindGroupLayoutDescriptor {
             label: None,
             entries: &[wgpu::BindGroupLayoutEntry {

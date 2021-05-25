@@ -136,7 +136,9 @@ impl Renderer {
     }
 
     pub fn create_shader(
-        &mut self, shader_module: &wgpu::ShaderModuleDescriptor,
+        &mut self,
+        vertex_shader_module: &wgpu::ShaderModuleDescriptor,
+        fragment_shader_module: &wgpu::ShaderModuleDescriptor,
         bind_group_layouts: &[&wgpu::BindGroupLayoutDescriptor],
     )-> ShaderRef
     {
@@ -146,7 +148,8 @@ impl Renderer {
             .collect();
 
         self.shaders.push(Shader {
-            shader_module: self.device.create_shader_module(shader_module),
+            vertex_shader_module: self.device.create_shader_module(vertex_shader_module),
+            fragment_shader_module: self.device.create_shader_module(fragment_shader_module),
             render_pipeline_layout: self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
                 bind_group_layouts: std::iter::once(&self.render_uniform_bind_group_layout)
@@ -174,12 +177,12 @@ impl Renderer {
                 label: None,
                 layout: Some(&shader.render_pipeline_layout),
                 vertex: wgpu::VertexState {
-                    module: &shader.shader_module,
+                    module: &shader.vertex_shader_module,
                     entry_point: "vertex",
                     buffers: &vertex_buffer_layouts
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &shader.shader_module,
+                    module: &shader.fragment_shader_module,
                     entry_point: "fragment",
                     targets: &[self.swap_chain_format.into()]
                 }),
