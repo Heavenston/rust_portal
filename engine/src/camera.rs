@@ -4,7 +4,7 @@ pub trait Camera {
     fn get_view_matrix(&self) -> Matrix4<f32>;
     fn get_projection_matrix(&self) -> Matrix4<f32>;
     fn get_vp_matrix(&self) -> Matrix4<f32> {
-        self.get_view_matrix() * self.get_projection_matrix()
+        self.get_projection_matrix() * self.get_view_matrix()
     }
 }
 impl<T: Camera> Camera for &T {
