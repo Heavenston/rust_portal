@@ -21,7 +21,7 @@ fn main() {
     println!("Creating renderer...");
     let mut renderer = Box::new(pollster::block_on(Renderer::new(&window, 100, 100)));
     println!("Created renderer");
-    world.push((CameraComponent {
+    let camera_entity = world.push((CameraComponent {
         matrix: Box::new(PerspectiveCameraMatrix::new()),
         is_enabled: true,
     }, {
@@ -119,6 +119,10 @@ fn main() {
                 ..
             } => {
                 renderer.resize(size.width, size.height);
+
+                let camera_component = <&mut CameraComponent>::query().get_mut(&mut world, camera_entity).unwrap();
+                let matrix: &mut Box<PerspectiveCameraMatrix> = unsafe { std::mem::transmute(&mut camera_component.matrix) };
+                matrix.0.set_aspect(size.width as f32 / size.height as f32);
             }
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
