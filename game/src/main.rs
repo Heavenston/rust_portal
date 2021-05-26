@@ -86,6 +86,15 @@ fn main() {
                 offset: 0,
                 shader_location: 1
             }]
+        },
+        wgpu::VertexBufferLayout {
+            array_stride: 2 * std::mem::size_of::<f32>() as u64,
+            step_mode: wgpu::InputStepMode::Vertex,
+            attributes: &[wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x2,
+                offset: 0,
+                shader_location: 2
+            }]
         }
     ], Some(wgpu::Face::Front));
 
@@ -100,7 +109,8 @@ fn main() {
     let _ = models.iter()
         .map(|model| renderer.create_mesh(material, &model.mesh.indices, &[
             &model.mesh.positions,
-            &model.mesh.normals
+            &model.mesh.normals,
+            &model.mesh.texcoords
         ]))
         .map(|mesh| world.push((
             MeshComponent(mesh),
