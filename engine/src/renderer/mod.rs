@@ -11,6 +11,7 @@ use wgpu::util::DeviceExt;
 use crate::camera::{CameraMatrix, CameraComponent};
 use std::convert::TryInto;
 use legion::query::IntoQuery;
+use crate::transform::TransformComponent;
 
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(C)]
@@ -161,6 +162,7 @@ impl Renderer {
         &mut self, shader_ref: ShaderRef,
         bind_groups: &[&[wgpu::BindGroupEntry]],
         vertex_buffer_layouts: &[wgpu::VertexBufferLayout],
+        cull_mode: Option<wgpu::Face>,
     ) -> MaterialRef
     {
         let i = self.materials.len();
@@ -179,7 +181,15 @@ impl Renderer {
                     entry_point: "fragment",
                     targets: &[self.swap_chain_format.into()]
                 }),
-                primitive: Default::default(),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Cw,
+                    cull_mode,
+                    clamp_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false
+                },
                 depth_stencil: None,
                 multisample: Default::default(),
             }),
@@ -240,21 +250,21 @@ impl Renderer {
     }
 
     pub fn render(&self, world: &legion::World) {
-        let current_camera = <&CameraComponent>::query()
+        let current_camera = <(&CameraComponent, &TransformComponent)>::query()
             .iter(world)
-            .filter(|c| c.is_enabled)
+            .filter(|(c, t)| c.is_enabled)
             .next();
 
-        if let Some(current_camera) = current_camera {
-            self.render_camera(&*current_camera.matrix, world);
+        if let Some((current_camera, transform)) = current_camera {
+            self.render_camera(&*current_camera.matrix, &transform, world);
         }
     }
-    pub fn render_camera(&self, camera: &dyn CameraMatrix, world: &legion::World) {
+    pub fn render_camera(&self, camera: &dyn CameraMatrix, camera_transform: &TransformComponent, world: &legion::World) {
         self.queue.write_buffer(
             &self.render_uniform_buffer,
             0,
             bytemuck::bytes_of(&RenderUniformBuffer {
-                view_projection: camera.get_vp_matrix().as_slice().try_into().unwrap()
+                view_projection: camera.get_vp_matrix(camera_transform).as_slice().try_into().unwrap()
             })
         );
 

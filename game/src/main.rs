@@ -3,6 +3,7 @@ use portal_engine::camera::{PerspectiveCameraMatrix, CameraComponent};
 use winit::dpi::LogicalSize;
 use std::borrow::Cow;
 use wgpu::util::DeviceExt;
+use portal_engine::transform::TransformComponent;
 
 fn main() {
     let mut world = legion::World::new(legion::WorldOptions::default());
@@ -17,13 +18,13 @@ fn main() {
     let mut renderer = Box::new(pollster::block_on(Renderer::new(&window, 100, 100)));
     println!("Created renderer");
     world.push((CameraComponent {
-        matrix: {
-            let mut camera_matrix = Box::new(PerspectiveCameraMatrix::new());
-            camera_matrix.position.z = 2.;
-            camera_matrix
-        },
+        matrix: Box::new(PerspectiveCameraMatrix::new()),
         is_enabled: true,
-    },));
+    }, {
+        let mut transform = TransformComponent::default();
+        transform.position.z = 2.;
+        transform
+    }));
 
     let uniform_buffer = renderer.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
@@ -77,7 +78,7 @@ fn main() {
                 shader_location: 1
             }]
         }
-    ]);
+    ], Some(wgpu::Face::Front));
 
     let (model, _) = tobj::load_obj("resources/cube.obj", &tobj::LoadOptions {
         single_index: true,
