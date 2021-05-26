@@ -9,8 +9,7 @@ edition = "2018"
 [dependencies]
 wgpu = "0.8"
 winit = "0.25"
-rust-embed = "5.8"
-pollster = "0.2"
 nalgebra = "0.26"
 smallvec = { version = "1.6", features = ["const_generics"] }
 bytemuck = { version = "1.5", features = ["derive"] }
+legion = "0.4.0"

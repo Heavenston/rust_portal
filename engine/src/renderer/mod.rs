@@ -10,6 +10,7 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 use crate::camera::Camera;
 use std::convert::TryInto;
+use legion::query::IntoQuery;
 
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(C)]
@@ -227,7 +228,7 @@ impl Renderer {
         MeshRef(i)
     }
 
-    pub fn render(&self, camera: impl Camera, meshes: &[MeshRef]) {
+    pub fn render(&self, camera: impl Camera, world: &legion::World) {
         self.queue.write_buffer(
             &self.render_uniform_buffer,
             0,
@@ -257,7 +258,7 @@ impl Renderer {
             r_pass.set_bind_group(0, &self.render_uniform_bind_group, &[]);
 
             let mut last_material = None;
-            for mesh_ref in meshes {
+            <&MeshComponent>::query().for_each(world, |MeshComponent(mesh_ref)| {
                 let mesh = &self.meshes[mesh_ref.0];
                 if last_material != Some(mesh.material) {
                     last_material = Some(mesh.material);
@@ -278,7 +279,7 @@ impl Renderer {
                     0,
                     0..1
                 );
-            }
+            });
         }
 
         self.queue.submit(Some(encoder.finish()));

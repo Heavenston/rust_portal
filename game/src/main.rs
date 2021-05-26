@@ -1,10 +1,12 @@
-use portal_engine::renderer::Renderer;
+use portal_engine::renderer::{Renderer, MeshComponent};
 use portal_engine::camera::PerspectiveCamera;
 use winit::dpi::LogicalSize;
 use std::borrow::Cow;
 use wgpu::util::DeviceExt;
 
 fn main() {
+    let mut world = legion::World::new(legion::WorldOptions::default());
+
     let event_loop = winit::event_loop::EventLoop::new();
     let window = winit::window::Window::new(&event_loop).unwrap();
     window.set_title("Portal !");
@@ -83,6 +85,8 @@ fn main() {
         &model.mesh.texcoords,
     ]);
 
+    world.push((MeshComponent(mesh),));
+
     event_loop.run(move |event, _, control_flow| {
         use winit::{
             event::{Event, WindowEvent},
@@ -98,7 +102,7 @@ fn main() {
                 renderer.resize(size.width, size.height);
             }
             Event::RedrawRequested(_) => {
-                renderer.render(&camera, &[mesh]);
+                renderer.render(&camera, &world);
             }
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,

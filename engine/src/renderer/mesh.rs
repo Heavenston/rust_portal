@@ -9,3 +9,5 @@ pub struct Mesh {
 }
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct MeshRef(pub(crate) usize);
+
+pub struct MeshComponent(pub MeshRef);

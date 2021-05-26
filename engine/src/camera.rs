@@ -12,6 +12,8 @@ impl<T: Camera> Camera for &T {
     fn get_projection_matrix(&self) -> Matrix4<f32> { (*self).get_projection_matrix() }
 }
 
+pub struct CameraComponent(pub Box<dyn Camera>);
+
 pub struct PerspectiveCamera {
     pub position: Vector3<f32>,
     pub rotation: UnitQuaternion<f32>,
