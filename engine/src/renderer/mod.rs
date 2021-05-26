@@ -19,23 +19,21 @@ pub struct RenderUniformBuffer {
 }
 
 pub struct Renderer {
-    pub instance: wgpu::Instance,
-    pub surface: wgpu::Surface,
-    pub adapter: wgpu::Adapter,
+    surface: wgpu::Surface,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
 
-    pub(crate) swap_chain_descriptor: wgpu::SwapChainDescriptor,
-    pub(crate) swap_chain_format: wgpu::TextureFormat,
-    pub(crate) swap_chain: wgpu::SwapChain,
+    swap_chain_descriptor: wgpu::SwapChainDescriptor,
+    swap_chain_format: wgpu::TextureFormat,
+    swap_chain: wgpu::SwapChain,
 
-    pub render_uniform_buffer: wgpu::Buffer,
-    pub render_uniform_bind_group_layout: wgpu::BindGroupLayout,
-    pub render_uniform_bind_group: wgpu::BindGroup,
+    render_uniform_buffer: wgpu::Buffer,
+    render_uniform_bind_group_layout: wgpu::BindGroupLayout,
+    render_uniform_bind_group: wgpu::BindGroup,
 
-    pub shaders: Vec<Shader>,
-    pub materials: Vec<Material>,
-    pub meshes: Vec<Mesh>,
+    shaders: Vec<Shader>,
+    materials: Vec<Material>,
+    meshes: Vec<Mesh>,
 
     _unpin_marker: std::marker::PhantomPinned,
 }
@@ -107,9 +105,7 @@ impl Renderer {
         });
 
         Self {
-            instance,
             surface,
-            adapter,
             device,
             queue,
 
@@ -226,6 +222,25 @@ impl Renderer {
         });
 
         MeshRef(i)
+    }
+
+    pub fn get_shader(&self, reference: ShaderRef) -> Option<&Shader> {
+        self.shaders.get(reference.0)
+    }
+    pub fn get_shader_mut(&mut self, reference: ShaderRef) -> Option<&mut Shader> {
+        self.shaders.get_mut(reference.0)
+    }
+    pub fn get_material(&self, reference: MaterialRef) -> Option<&Material> {
+        self.materials.get(reference.0)
+    }
+    pub fn get_material_mut(&mut self, reference: MaterialRef) -> Option<&mut Material> {
+        self.materials.get_mut(reference.0)
+    }
+    pub fn get_mesh(&self, reference: MeshRef) -> Option<&Mesh> {
+        self.meshes.get(reference.0)
+    }
+    pub fn get_mesh_mut(&mut self, reference: MeshRef) -> Option<&mut Mesh> {
+        self.meshes.get_mut(reference.0)
     }
 
     pub fn render(&self, camera: impl Camera, world: &legion::World) {
