@@ -25,7 +25,7 @@ fn main() {
         clear_color: Some(wgpu::Color { r: 88. / 255., g: 101. / 255., b: 242. / 255., a: 1. }),
         matrix: Box::new({
             let mut m = PerspectiveCameraMatrix::new();
-            m.0.set_znear_and_zfar(0.01, 5_000.);
+            m.0.set_znear_and_zfar(0.1, 2000.);
             m
         }),
         is_enabled: true,
