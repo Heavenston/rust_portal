@@ -18,7 +18,7 @@ pub struct CameraComponent {
 pub struct PerspectiveCameraMatrix(pub Perspective3<f32>);
 impl PerspectiveCameraMatrix {
     pub fn new() -> Self {
-        Self(Perspective3::new(1., 90., 0.01, 200.))
+        Self(Perspective3::new(1., 60.0f32.to_radians(), 0.01, 200.))
     }
 }
 impl CameraMatrix for PerspectiveCameraMatrix {

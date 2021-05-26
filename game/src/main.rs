@@ -4,6 +4,8 @@ use winit::dpi::LogicalSize;
 use std::borrow::Cow;
 use wgpu::util::DeviceExt;
 use portal_engine::transform::TransformComponent;
+use nalgebra::UnitQuaternion;
+use std::f32;
 
 fn main() {
     let mut world = legion::World::new(legion::WorldOptions::default());
@@ -22,7 +24,7 @@ fn main() {
         is_enabled: true,
     }, {
         let mut transform = TransformComponent::default();
-        transform.position.z = 2.;
+        transform.position.z = 5.;
         transform
     }));
 
@@ -92,7 +94,14 @@ fn main() {
         &model.mesh.texcoords,
     ]);
 
-    world.push((MeshComponent(mesh),));
+    world.push((
+        MeshComponent(mesh),
+        {
+            let mut transform = TransformComponent::default();
+            transform.rotation = UnitQuaternion::from_euler_angles(0., 45f32.to_radians(), 0.);
+            transform
+        }
+    ));
 
     event_loop.run(move |event, _, control_flow| {
         use winit::{

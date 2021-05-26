@@ -9,14 +9,15 @@ use smallvec::SmallVec;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 use crate::camera::{CameraMatrix, CameraComponent};
-use std::convert::TryInto;
 use legion::query::IntoQuery;
 use crate::transform::TransformComponent;
+use memoffset::offset_of;
 
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(C)]
 pub struct RenderUniformBuffer {
     pub view_projection: [f32; 16],
+    pub model_matrix: [f32; 16],
 }
 
 pub struct Renderer {
@@ -262,10 +263,8 @@ impl Renderer {
     pub fn render_camera(&self, camera: &dyn CameraMatrix, camera_transform: &TransformComponent, world: &legion::World) {
         self.queue.write_buffer(
             &self.render_uniform_buffer,
-            0,
-            bytemuck::bytes_of(&RenderUniformBuffer {
-                view_projection: camera.get_vp_matrix(camera_transform).as_slice().try_into().unwrap()
-            })
+            offset_of!(RenderUniformBuffer, view_projection) as u64,
+            bytemuck::cast_slice(camera.get_vp_matrix(camera_transform).as_slice())
         );
 
         let frame = self.swap_chain
@@ -289,7 +288,7 @@ impl Renderer {
             r_pass.set_bind_group(0, &self.render_uniform_bind_group, &[]);
 
             let mut last_material = None;
-            <&MeshComponent>::query().for_each(world, |MeshComponent(mesh_ref)| {
+            <(&TransformComponent, &MeshComponent)>::query().for_each(world, |(transform, MeshComponent(mesh_ref))| {
                 let mesh = &self.meshes[mesh_ref.0];
                 if last_material != Some(mesh.material) {
                     last_material = Some(mesh.material);
@@ -299,6 +298,12 @@ impl Renderer {
                         r_pass.set_bind_group(i, bg, &[]);
                     }
                 }
+
+                self.queue.write_buffer(
+                    &self.render_uniform_buffer,
+                    offset_of!(RenderUniformBuffer, model_matrix) as u64,
+                    bytemuck::cast_slice(transform.to_homogeneous().as_slice())
+                );
 
                 r_pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 for (vertex, i) in mesh.vertex_buffers.iter().zip(0..) {

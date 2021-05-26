@@ -14,3 +14,4 @@ smallvec = { version = "1.6", features = ["const_generics"] }
 bytemuck = { version = "1.5", features = ["derive"] }
 legion = "0.4.0"
 approx = "0.4"
+memoffset = "0.6"
