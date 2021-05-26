@@ -34,8 +34,6 @@ pub struct Renderer {
     shaders: Vec<Shader>,
     materials: Vec<Material>,
     meshes: Vec<Mesh>,
-
-    _unpin_marker: std::marker::PhantomPinned,
 }
 
 impl Renderer {
@@ -120,8 +118,6 @@ impl Renderer {
             materials: Vec::new(),
             shaders: Vec::new(),
             meshes: Vec::new(),
-
-            _unpin_marker: Default::default(),
         }
     }
     pub fn resize(&mut self, width: u32, height: u32) {
