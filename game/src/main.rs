@@ -138,7 +138,7 @@ fn main() {
             Event::RedrawRequested(_) => {
                 {
                     let t = <&mut TransformComponent>::query().get_mut(&mut world, camera_entity).unwrap();
-                    t.rotation = UnitQuaternion::from_euler_angles(0., start.elapsed().as_secs_f32(), 0.);
+                    t.rotation = UnitQuaternion::from_euler_angles(0., start.elapsed().as_secs_f32() / 3., 0.);
                 }
                 renderer.render(&world);
             }
