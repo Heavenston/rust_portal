@@ -29,6 +29,9 @@ pub struct Renderer {
     swap_chain_format: wgpu::TextureFormat,
     swap_chain: wgpu::SwapChain,
 
+    depth_buffer_texture: wgpu::Texture,
+    depth_buffer_texture_view: wgpu::TextureView,
+
     render_uniform_buffer: wgpu::Buffer,
     render_uniform_bind_group_layout: wgpu::BindGroupLayout,
     render_uniform_bind_group: wgpu::BindGroup,
@@ -39,6 +42,31 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    fn create_depth_texture(device: &wgpu::Device, sc_desc: &wgpu::SwapChainDescriptor)
+        -> (wgpu::Texture, wgpu::TextureView) {
+        let size = wgpu::Extent3d {
+            width: sc_desc.width,
+            height: sc_desc.height,
+            depth_or_array_layers: 1,
+        };
+        let desc = wgpu::TextureDescriptor {
+            label: None,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsage::RENDER_ATTACHMENT
+                 | wgpu::TextureUsage::COPY_DST,
+        };
+        let texture = device.create_texture(&desc);
+
+        let view = texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        (texture, view)
+    }
+
     pub async fn new(window: &winit::window::Window, width: u32, height: u32) -> Renderer {
         let instance = wgpu::Instance::new(wgpu::BackendBit::all());
         let surface = unsafe { instance.create_surface(window) };
@@ -104,6 +132,11 @@ impl Renderer {
             }]
         });
 
+        let (depth_buffer_texture, depth_buffer_texture_view) = Self::create_depth_texture(
+            &device,
+            &swap_chain_descriptor
+        );
+
         Self {
             surface,
             device,
@@ -117,6 +150,9 @@ impl Renderer {
             render_uniform_bind_group_layout,
             render_uniform_bind_group,
 
+            depth_buffer_texture,
+            depth_buffer_texture_view,
+
             materials: Vec::new(),
             shaders: Vec::new(),
             meshes: Vec::new(),
@@ -128,6 +164,13 @@ impl Renderer {
         self.swap_chain = self
             .device
             .create_swap_chain(&self.surface, &self.swap_chain_descriptor);
+
+        let (depth_buffer_texture, depth_buffer_texture_view) = Self::create_depth_texture(
+            &self.device,
+            &self.swap_chain_descriptor
+        );
+        self.depth_buffer_texture = depth_buffer_texture;
+        self.depth_buffer_texture_view = depth_buffer_texture_view;
     }
 
     pub fn create_shader(
@@ -191,7 +234,13 @@ impl Renderer {
                     polygon_mode: wgpu::PolygonMode::Fill,
                     conservative: false
                 },
-                depth_stencil: None,
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth32Float,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default()
+                }),
                 multisample: Default::default(),
             }),
             bind_groups: bind_groups.iter()
@@ -288,7 +337,14 @@ impl Renderer {
                         store: true,
                     },
                 }],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_buffer_texture_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.),
+                        store: true
+                    }),
+                    stencil_ops: None
+                }),
             });
             r_pass.set_bind_group(0, &self.render_uniform_bind_group, &[]);
 

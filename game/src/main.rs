@@ -23,11 +23,15 @@ fn main() {
     println!("Created renderer");
     let camera_entity = world.push((CameraComponent {
         clear_color: Some(wgpu::Color { r: 88. / 255., g: 101. / 255., b: 242. / 255., a: 1. }),
-        matrix: Box::new(PerspectiveCameraMatrix::new()),
+        matrix: Box::new({
+            let mut m = PerspectiveCameraMatrix::new();
+            m.0.set_znear_and_zfar(0.01, 5_000.);
+            m
+        }),
         is_enabled: true,
     }, {
         let mut transform = TransformComponent::default();
-        transform.position.z = 5.;
+        transform.position.y = 100.;
         transform
     }));
 
@@ -75,36 +79,34 @@ fn main() {
             }]
         },
         wgpu::VertexBufferLayout {
-            array_stride: 2 * std::mem::size_of::<f32>() as u64,
+            array_stride: 3 * std::mem::size_of::<f32>() as u64,
             step_mode: wgpu::InputStepMode::Vertex,
             attributes: &[wgpu::VertexAttribute {
-                format: wgpu::VertexFormat::Float32x2,
+                format: wgpu::VertexFormat::Float32x3,
                 offset: 0,
                 shader_location: 1
             }]
         }
     ], Some(wgpu::Face::Front));
 
-    let (model, _) = tobj::load_obj("resources/cube.obj", &tobj::LoadOptions {
+    let (models, materials) = tobj::load_obj("resources/crytek-sponza-huge-vray-obj/crytek-sponza-huge-vray.obj", &tobj::LoadOptions {
         single_index: true,
         triangulate: true,
         ignore_points: true,
         ignore_lines: true,
     }).unwrap();
-    let model = &model[0];
-    let mesh = renderer.create_mesh(material, &model.mesh.indices, &[
-        &model.mesh.positions,
-        &model.mesh.texcoords,
-    ]);
-
-    let cube_entity = world.push((
-        MeshComponent(mesh),
-        {
-            let mut transform = TransformComponent::default();
-            transform.rotation = UnitQuaternion::from_euler_angles(0., 45f32.to_radians(), 0.);
-            transform
-        }
-    ));
+    let materials = materials.unwrap();
+    println!("Loading {} models and {} materials", models.len(), materials.len());
+    let _ = models.iter()
+        .map(|model| renderer.create_mesh(material, &model.mesh.indices, &[
+            &model.mesh.positions,
+            &model.mesh.normals
+        ]))
+        .map(|mesh| world.push((
+            MeshComponent(mesh),
+            TransformComponent::default()
+        )))
+        .collect::<Vec<_>>();
 
     let start = Instant::now();
     event_loop.run(move |event, _, control_flow| {
@@ -135,9 +137,8 @@ fn main() {
             }
             Event::RedrawRequested(_) => {
                 {
-                    let t = <&mut TransformComponent>::query().get_mut(&mut world, cube_entity).unwrap();
+                    let t = <&mut TransformComponent>::query().get_mut(&mut world, camera_entity).unwrap();
                     t.rotation = UnitQuaternion::from_euler_angles(0., start.elapsed().as_secs_f32(), 0.);
-                    t.position.y = start.elapsed().as_secs_f32().sin();
                 }
                 renderer.render(&world);
             }
