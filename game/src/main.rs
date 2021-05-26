@@ -1,5 +1,5 @@
 use portal_engine::renderer::{Renderer, MeshComponent};
-use portal_engine::camera::PerspectiveCamera;
+use portal_engine::camera::{PerspectiveCameraMatrix, CameraComponent};
 use winit::dpi::LogicalSize;
 use std::borrow::Cow;
 use wgpu::util::DeviceExt;
@@ -16,8 +16,14 @@ fn main() {
     println!("Creating renderer...");
     let mut renderer = Box::new(pollster::block_on(Renderer::new(&window, 100, 100)));
     println!("Created renderer");
-    let mut camera = PerspectiveCamera::new();
-    camera.position.z = 2.;
+    world.push((CameraComponent {
+        matrix: {
+            let mut camera_matrix = Box::new(PerspectiveCameraMatrix::new());
+            camera_matrix.position.z = 2.;
+            camera_matrix
+        },
+        is_enabled: true,
+    },));
 
     let uniform_buffer = renderer.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
@@ -102,7 +108,7 @@ fn main() {
                 renderer.resize(size.width, size.height);
             }
             Event::RedrawRequested(_) => {
-                renderer.render(&camera, &world);
+                renderer.render(&world);
             }
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,

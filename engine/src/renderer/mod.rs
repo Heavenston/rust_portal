@@ -8,7 +8,7 @@ pub use mesh::*;
 use smallvec::SmallVec;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
-use crate::camera::Camera;
+use crate::camera::{CameraMatrix, CameraComponent};
 use std::convert::TryInto;
 use legion::query::IntoQuery;
 
@@ -239,7 +239,17 @@ impl Renderer {
         self.meshes.get_mut(reference.0)
     }
 
-    pub fn render(&self, camera: impl Camera, world: &legion::World) {
+    pub fn render(&self, world: &legion::World) {
+        let current_camera = <&CameraComponent>::query()
+            .iter(world)
+            .filter(|c| c.is_enabled)
+            .next();
+
+        if let Some(current_camera) = current_camera {
+            self.render_camera(&*current_camera.matrix, world);
+        }
+    }
+    pub fn render_camera(&self, camera: &dyn CameraMatrix, world: &legion::World) {
         self.queue.write_buffer(
             &self.render_uniform_buffer,
             0,
