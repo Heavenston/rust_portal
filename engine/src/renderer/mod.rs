@@ -8,7 +8,7 @@ pub use mesh::*;
 use smallvec::SmallVec;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
-use crate::camera::{CameraMatrix, CameraComponent};
+use crate::camera::CameraComponent;
 use legion::query::IntoQuery;
 use crate::transform::TransformComponent;
 use memoffset::offset_of;
@@ -253,18 +253,20 @@ impl Renderer {
     pub fn render(&self, world: &legion::World) {
         let current_camera = <(&CameraComponent, &TransformComponent)>::query()
             .iter(world)
-            .filter(|(c, t)| c.is_enabled)
+            .filter(|(c, _)| c.is_enabled)
             .next();
 
         if let Some((current_camera, transform)) = current_camera {
-            self.render_camera(&*current_camera.matrix, &transform, world);
+            self.render_camera(current_camera, &transform, world);
         }
     }
-    pub fn render_camera(&self, camera: &dyn CameraMatrix, camera_transform: &TransformComponent, world: &legion::World) {
+    pub fn render_camera(&self, camera: &CameraComponent, camera_transform: &TransformComponent, world: &legion::World) {
+        let camera_matrix = &*camera.matrix;
+
         self.queue.write_buffer(
             &self.render_uniform_buffer,
             offset_of!(RenderUniformBuffer, view_projection) as u64,
-            bytemuck::cast_slice(camera.get_vp_matrix(camera_transform).as_slice())
+            bytemuck::cast_slice(camera_matrix.get_vp_matrix(camera_transform).as_slice())
         );
 
         let frame = self.swap_chain
@@ -279,7 +281,10 @@ impl Renderer {
                     view: &frame.view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                        load: match camera.clear_color {
+                            None => wgpu::LoadOp::Load,
+                            Some(c) => wgpu::LoadOp::Clear(c),
+                        },
                         store: true,
                     },
                 }],

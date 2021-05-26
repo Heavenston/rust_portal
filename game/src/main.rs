@@ -22,6 +22,7 @@ fn main() {
     let mut renderer = Box::new(pollster::block_on(Renderer::new(&window, 100, 100)));
     println!("Created renderer");
     let camera_entity = world.push((CameraComponent {
+        clear_color: Some(wgpu::Color { r: 88. / 255., g: 101. / 255., b: 242. / 255., a: 1. }),
         matrix: Box::new(PerspectiveCameraMatrix::new()),
         is_enabled: true,
     }, {

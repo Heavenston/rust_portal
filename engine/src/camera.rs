@@ -1,4 +1,4 @@
-use nalgebra::{Perspective3, Matrix4, Translation3, UnitQuaternion};
+use nalgebra::{Perspective3, Matrix4};
 use crate::transform::TransformComponent;
 
 pub trait CameraMatrix: Send + Sync {
@@ -11,6 +11,7 @@ pub trait CameraMatrix: Send + Sync {
     }
 }
 pub struct CameraComponent {
+    pub clear_color: Option<wgpu::Color>,
     pub matrix: Box<dyn CameraMatrix>,
     pub is_enabled: bool,
 }
