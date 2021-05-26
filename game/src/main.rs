@@ -6,6 +6,8 @@ use wgpu::util::DeviceExt;
 use portal_engine::transform::TransformComponent;
 use nalgebra::UnitQuaternion;
 use std::f32;
+use std::time::Instant;
+use legion::query::IntoQuery;
 
 fn main() {
     let mut world = legion::World::new(legion::WorldOptions::default());
@@ -94,7 +96,7 @@ fn main() {
         &model.mesh.texcoords,
     ]);
 
-    world.push((
+    let cube_entity = world.push((
         MeshComponent(mesh),
         {
             let mut transform = TransformComponent::default();
@@ -103,13 +105,14 @@ fn main() {
         }
     ));
 
+    let start = Instant::now();
     event_loop.run(move |event, _, control_flow| {
         use winit::{
             event::{Event, WindowEvent},
             event_loop::{ControlFlow},
         };
 
-        *control_flow = ControlFlow::Wait;
+        *control_flow = ControlFlow::Poll;
         match event {
             Event::WindowEvent {
                 event: WindowEvent::Resized(size),
@@ -117,13 +120,23 @@ fn main() {
             } => {
                 renderer.resize(size.width, size.height);
             }
-            Event::RedrawRequested(_) => {
-                renderer.render(&world);
-            }
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
             } => *control_flow = ControlFlow::Exit,
+
+            Event::MainEventsCleared  => {
+                window.request_redraw();
+            }
+            Event::RedrawRequested(_) => {
+                {
+                    let t = <&mut TransformComponent>::query().get_mut(&mut world, cube_entity).unwrap();
+                    t.rotation = UnitQuaternion::from_euler_angles(0., start.elapsed().as_secs_f32(), 0.);
+                    t.position.y = start.elapsed().as_secs_f32().sin();
+                }
+                renderer.render(&world);
+            }
+
             _ => {}
         }
     });
