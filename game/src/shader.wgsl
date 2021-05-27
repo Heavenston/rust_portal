@@ -29,8 +29,12 @@ fn vertex(
 };
 [[group(1), binding(0)]]
 var<uniform> uniforms: Uniforms;
+[[group(1), binding(1)]]
+var u_diffuse_texture: texture_2d<f32>;
+[[group(1), binding(2)]]
+var u_diffuse_sampler: sampler;
 
 [[stage(fragment)]]
 fn fragment(vertex_outputs: VertexOutputs) -> [[location(0)]] vec4<f32> {
-    return vec4<f32>(vertex_outputs.uv, 0.0, 1.0);
+    return textureSample(u_diffuse_texture, u_diffuse_sampler, vec2<f32>(vertex_outputs.uv.x, 1. - vertex_outputs.uv.y));
 }
