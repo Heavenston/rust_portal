@@ -36,5 +36,10 @@ var u_diffuse_sampler: sampler;
 
 [[stage(fragment)]]
 fn fragment(vertex_outputs: VertexOutputs) -> [[location(0)]] vec4<f32> {
-    return textureSample(u_diffuse_texture, u_diffuse_sampler, vec2<f32>(vertex_outputs.uv.x, 1. - vertex_outputs.uv.y));
+    let diffuse = textureSample(u_diffuse_texture, u_diffuse_sampler, vec2<f32>(vertex_outputs.uv.x, 1. - vertex_outputs.uv.y));
+    let directional_light_factor = (dot(vertex_outputs.normal, vec3<f32>(1., 0., 0.)) + 1.) / 2.;
+
+    let light_factor = max(0.25, directional_light_factor);
+
+    return diffuse * light_factor;
 }
