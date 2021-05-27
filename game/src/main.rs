@@ -81,7 +81,7 @@ fn main() {
         is_enabled: true,
     }, {
         let mut transform = TransformComponent::default();
-        transform.position.y = 100.;
+        transform.position.y = 200.;
         transform
     }));
 
@@ -250,6 +250,7 @@ fn main() {
                 {
                     let t = <&mut TransformComponent>::query().get_mut(&mut world, camera_entity).unwrap();
                     t.rotation = UnitQuaternion::from_euler_angles(0., start.elapsed().as_secs_f32() / 5., 0.);
+                    t.position.x = (start.elapsed().as_secs_f32() / 5.).cos() * 1000.;
                 }
                 renderer.render(&world);
             }
