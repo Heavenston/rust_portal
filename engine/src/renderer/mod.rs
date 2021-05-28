@@ -9,9 +9,14 @@ use smallvec::SmallVec;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 use crate::camera::CameraComponent;
-use legion::query::IntoQuery;
+use legion::query::{IntoQuery, DefaultFilter};
 use crate::transform::TransformComponent;
 use memoffset::offset_of;
+use legion::Query;
+use legion::internals::query::view::IntoView;
+use std::sync::RwLock;
+
+type LegionQueryOf<A: IntoView> = Query<A, <A::View as DefaultFilter>::Filter>;
 
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(C)]
@@ -20,7 +25,7 @@ pub struct RenderUniformBuffer {
     pub model_matrix: [f32; 16],
 }
 
-pub struct Renderer {
+pub struct Renderer<'a> {
     surface: wgpu::Surface,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -39,9 +44,11 @@ pub struct Renderer {
     shaders: Vec<Shader>,
     materials: Vec<Material>,
     meshes: Vec<Mesh>,
+
+    mesh_query: RwLock<LegionQueryOf<(&'a TransformComponent, &'a MeshComponent)>>,
 }
 
-impl Renderer {
+impl<'a> Renderer<'a> {
     fn create_depth_texture(device: &wgpu::Device, sc_desc: &wgpu::SwapChainDescriptor)
         -> (wgpu::Texture, wgpu::TextureView) {
         let size = wgpu::Extent3d {
@@ -67,7 +74,7 @@ impl Renderer {
         (texture, view)
     }
 
-    pub async fn new(window: &winit::window::Window, width: u32, height: u32) -> Renderer {
+    pub async fn new(window: &winit::window::Window, width: u32, height: u32) -> Renderer<'a> {
         let instance = wgpu::Instance::new(wgpu::BackendBit::all());
         let surface = unsafe { instance.create_surface(window) };
         let adapter = instance
@@ -156,6 +163,8 @@ impl Renderer {
             materials: Vec::new(),
             shaders: Vec::new(),
             meshes: Vec::new(),
+
+            mesh_query: RwLock::new(<(&TransformComponent, &MeshComponent)>::query()),
         }
     }
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -349,7 +358,7 @@ impl Renderer {
             r_pass.set_bind_group(0, &self.render_uniform_bind_group, &[]);
 
             let mut last_material = None;
-            <(&TransformComponent, &MeshComponent)>::query().for_each(world, |(transform, MeshComponent(mesh_ref))| {
+            self.mesh_query.write().unwrap().for_each(world, |(transform, MeshComponent(mesh_ref))| {
                 let mesh = &self.meshes[mesh_ref.0];
                 if last_material != Some(mesh.material) {
                     last_material = Some(mesh.material);
