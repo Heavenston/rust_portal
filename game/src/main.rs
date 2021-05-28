@@ -8,7 +8,11 @@ use nalgebra::UnitQuaternion;
 use std::f32;
 use std::time::Instant;
 use legion::query::IntoQuery;
-use image::EncodableLayout;
+use image::{EncodableLayout, RgbaImage};
+use portal_engine::resource_manager::{ResourceManager, Texture};
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::convert::TryInto;
 
 fn create_flat_texture(renderer: &Renderer, color: [f32; 4]) -> (wgpu::Texture, wgpu::TextureView) {
     let texture = renderer.device.create_texture_with_data(&renderer.queue, &wgpu::TextureDescriptor {
@@ -71,6 +75,9 @@ fn main() {
     println!("Creating renderer...");
     let mut renderer = Box::new(pollster::block_on(Renderer::new(&window, 100, 100)));
     println!("Created renderer");
+
+    let resource_manager = ResourceManager::new();
+
     let camera_entity = world.push((CameraComponent {
         clear_color: Some(wgpu::Color { r: 88. / 255., g: 101. / 255., b: 242. / 255., a: 1. }),
         matrix: Box::new({
@@ -148,19 +155,26 @@ fn main() {
 
     let material_refs = materials.iter()
         .map(|material| {
-            let (_, view) = match material.diffuse_texture.as_str() {
-                "" => create_flat_texture(&renderer, [material.diffuse[0], material.diffuse[1], material.diffuse[2], 1.]),
-                p => load_texture(&renderer, &("resources/crytek-sponza-huge-vray-obj/".to_string()+p))
+            let mut texture = if material.diffuse_texture != "" {
+                resource_manager.load_texture_from_file(
+                    &renderer,
+                    &PathBuf::from_str("resources/crytek-sponza-huge-vray-obj").unwrap().join(&material.diffuse_texture)
+                ).unwrap()
+            }
+            else {
+                Texture::create_plain_color_texture(&renderer, image::Rgba::<u8>(
+                    material.diffuse.iter()
+                        .map(|a| (a * 255.) as u8)
+                        .chain(std::iter::once(255u8))
+                        .collect::<Vec<_>>().try_into().unwrap()
+                ), Some(&material.name))
             };
-            let sampler = renderer.device.create_sampler(&wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::Repeat,
-                address_mode_v: wgpu::AddressMode::Repeat,
-                address_mode_w: wgpu::AddressMode::Repeat,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Nearest,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                ..Default::default()
-            });
+            texture.create_sampler(
+                &renderer,
+                wgpu::AddressMode::Repeat,
+                wgpu::FilterMode::Linear,
+                wgpu::FilterMode::Linear,
+            );
 
             renderer.create_material(shader, &[&[
                 wgpu::BindGroupEntry {
@@ -169,11 +183,11 @@ fn main() {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&view),
+                    resource: wgpu::BindingResource::TextureView(&texture.view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
+                    resource: wgpu::BindingResource::Sampler(texture.sampler.as_ref().unwrap()),
                 }
             ]], &[
                 wgpu::VertexBufferLayout {

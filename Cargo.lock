@@ -1461,6 +1461,7 @@ version = "0.1.0"
 dependencies = [
  "approx",
  "bytemuck",
+ "image",
  "legion",
  "memoffset 0.6.3",
  "nalgebra",
