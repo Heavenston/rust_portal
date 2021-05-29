@@ -1,6 +1,8 @@
-use super::*;
-use smallvec::SmallVec;
 use std::marker::PhantomData;
+
+use smallvec::SmallVec;
+
+use super::*;
 
 pub struct Material {
     pub shader: ShaderRef,

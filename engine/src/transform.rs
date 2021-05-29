@@ -1,7 +1,7 @@
-use approx::*;
 use std::f32;
-use nalgebra::{Vector3, UnitQuaternion, Matrix4, Vector4, Translation3};
-use nalgebra::base::dimension::Dim;
+
+use approx::*;
+use nalgebra::{base::dimension::Dim, Matrix4, Translation3, UnitQuaternion, Vector3, Vector4};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct TransformComponent {
@@ -12,17 +12,13 @@ pub struct TransformComponent {
 impl TransformComponent {
     pub fn from_homogeneous(matrix: &Matrix4<f32>) -> Self {
         Self {
-            scale: Vector3::from_iterator(
-                matrix.column_iter().map(|a| a.xyz().norm())
-            ),
+            scale: Vector3::from_iterator(matrix.column_iter().map(|a| a.xyz().norm())),
             position: matrix.column(3).xyz(),
-            rotation: UnitQuaternion::from_matrix(
-                &matrix.resize_generic(
-                    Dim::from_usize(3),
-                    Dim::from_usize(3),
-                    1.
-                )
-            ),
+            rotation: UnitQuaternion::from_matrix(&matrix.resize_generic(
+                Dim::from_usize(3),
+                Dim::from_usize(3),
+                1.,
+            )),
         }
     }
 
@@ -44,32 +40,33 @@ impl Default for TransformComponent {
 impl AbsDiffEq for TransformComponent {
     type Epsilon = f32;
 
-    fn default_epsilon() -> f32 {
-        <f32 as AbsDiffEq>::default_epsilon()
-    }
+    fn default_epsilon() -> f32 { <f32 as AbsDiffEq>::default_epsilon() }
 
     fn abs_diff_eq(&self, other: &Self, epsilon: f32) -> bool {
         other.scale.abs_diff_eq(&self.scale, epsilon)
-         && other.position.abs_diff_eq(&self.position, epsilon)
-         && other.rotation.abs_diff_eq(&self.rotation, epsilon)
+            && other.position.abs_diff_eq(&self.position, epsilon)
+            && other.rotation.abs_diff_eq(&self.rotation, epsilon)
     }
 }
-impl RelativeEq for TransformComponent where  {
-    fn default_max_relative() -> f32 {
-        <f32 as RelativeEq>::default_max_relative()
-    }
+impl RelativeEq for TransformComponent {
+    fn default_max_relative() -> f32 { <f32 as RelativeEq>::default_max_relative() }
 
     fn relative_eq(&self, other: &Self, epsilon: f32, max_relative: f32) -> bool {
         other.scale.relative_eq(&self.scale, epsilon, max_relative)
-            && other.position.relative_eq(&self.position, epsilon, max_relative)
-            && other.rotation.relative_eq(&self.rotation, epsilon, max_relative)
+            && other
+                .position
+                .relative_eq(&self.position, epsilon, max_relative)
+            && other
+                .rotation
+                .relative_eq(&self.rotation, epsilon, max_relative)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use nalgebra::{UnitQuaternion, Vector3};
+
     use super::*;
-    use nalgebra::{Vector3, UnitQuaternion};
 
     #[test]
     fn matrix_transform_conversion() {

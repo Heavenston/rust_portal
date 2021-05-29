@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+
 use smallvec::SmallVec;
 
 pub struct Shader {

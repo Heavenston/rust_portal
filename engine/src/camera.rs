@@ -1,4 +1,5 @@
-use nalgebra::{Perspective3, Matrix4};
+use nalgebra::{Matrix4, Perspective3};
+
 use crate::transform::TransformComponent;
 
 pub trait CameraMatrix: Send + Sync {
@@ -18,14 +19,10 @@ pub struct CameraComponent {
 
 pub struct PerspectiveCameraMatrix(pub Perspective3<f32>);
 impl PerspectiveCameraMatrix {
-    pub fn new() -> Self {
-        Self(Perspective3::new(1., 60.0f32.to_radians(), 0.01, 200.))
-    }
+    pub fn new() -> Self { Self(Perspective3::new(1., 60.0f32.to_radians(), 0.01, 200.)) }
 }
 impl CameraMatrix for PerspectiveCameraMatrix {
-    fn get_projection_matrix(&self) -> Matrix4<f32> {
-        self.0.to_homogeneous()
-    }
+    fn get_projection_matrix(&self) -> Matrix4<f32> { self.0.to_homogeneous() }
 }
 
 pub struct PerspectiveCameraSystem(pub PerspectiveCameraMatrix);
