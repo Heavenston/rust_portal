@@ -37,7 +37,7 @@ pub struct Renderer<'a> {
     swap_chain_format: wgpu::TextureFormat,
     swap_chain: wgpu::SwapChain,
 
-    depth_buffer_texture: wgpu::Texture,
+    _depth_buffer_texture: wgpu::Texture,
     depth_buffer_texture_view: wgpu::TextureView,
 
     render_uniform_buffer: wgpu::Buffer,
@@ -142,7 +142,7 @@ impl<'a> Renderer<'a> {
             }],
         });
 
-        let (depth_buffer_texture, depth_buffer_texture_view) =
+        let (_depth_buffer_texture, depth_buffer_texture_view) =
             Self::create_depth_texture(&device, &swap_chain_descriptor);
 
         Self {
@@ -158,7 +158,7 @@ impl<'a> Renderer<'a> {
             render_uniform_bind_group_layout,
             render_uniform_bind_group,
 
-            depth_buffer_texture,
+            _depth_buffer_texture,
             depth_buffer_texture_view,
 
             materials: Vec::new(),
@@ -177,7 +177,7 @@ impl<'a> Renderer<'a> {
 
         let (depth_buffer_texture, depth_buffer_texture_view) =
             Self::create_depth_texture(&self.device, &self.swap_chain_descriptor);
-        self.depth_buffer_texture = depth_buffer_texture;
+        self._depth_buffer_texture = depth_buffer_texture;
         self.depth_buffer_texture_view = depth_buffer_texture_view;
     }
 
