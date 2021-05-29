@@ -16,7 +16,7 @@ use legion::Query;
 use legion::internals::query::view::IntoView;
 use std::sync::RwLock;
 
-type LegionQueryOf<A: IntoView> = Query<A, <A::View as DefaultFilter>::Filter>;
+type LegionQueryOf<A> = Query<A, <<A as IntoView>::View as DefaultFilter>::Filter>;
 
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(C)]

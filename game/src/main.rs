@@ -8,60 +8,10 @@ use nalgebra::UnitQuaternion;
 use std::f32;
 use std::time::Instant;
 use legion::query::IntoQuery;
-use image::{EncodableLayout, RgbaImage};
 use portal_engine::resource_manager::{ResourceManager, Texture};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::convert::TryInto;
-
-fn create_flat_texture(renderer: &Renderer, color: [f32; 4]) -> (wgpu::Texture, wgpu::TextureView) {
-    let texture = renderer.device.create_texture_with_data(&renderer.queue, &wgpu::TextureDescriptor {
-        label: None,
-        size: wgpu::Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 1
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsage::COPY_DST | wgpu::TextureUsage::SAMPLED,
-    }, &color.iter().map(|c| (c * 255.).floor() as u8).collect::<Vec<_>>().as_slice());
-    let view = texture.create_view(&wgpu::TextureViewDescriptor {
-        label: None,
-        format: Some(wgpu::TextureFormat::Rgba8Unorm),
-        dimension: Some(wgpu::TextureViewDimension::D2),
-        aspect: wgpu::TextureAspect::All,
-        base_mip_level: 0,
-        mip_level_count: None,
-        base_array_layer: 0,
-        array_layer_count: None
-    });
-
-    (texture, view)
-}
-fn load_texture(renderer: &Renderer, path: &str) -> (wgpu::Texture, wgpu::TextureView) {
-    println!("Loading texture {}", path);
-    let image = image::io::Reader::open(path).unwrap().decode().unwrap().to_rgba8();
-
-    let texture = renderer.device.create_texture_with_data(&renderer.queue, &wgpu::TextureDescriptor {
-        label: Some(path),
-        size: wgpu::Extent3d {
-            width: image.dimensions().0,
-            height: image.dimensions().1,
-            depth_or_array_layers: 1
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsage::COPY_DST | wgpu::TextureUsage::SAMPLED,
-    }, image.as_bytes());
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-    (texture, view)
-}
 
 fn main() {
     let mut world = legion::World::new(legion::WorldOptions::default());
