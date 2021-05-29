@@ -17,7 +17,7 @@ pub use shader::*;
 use smallvec::SmallVec;
 use wgpu::util::DeviceExt;
 
-use crate::{camera::CameraComponent, transform::TransformComponent};
+use crate::{camera::CameraComponent, resource_manager::Texture, transform::TransformComponent};
 
 type LegionQueryOf<A> = Query<A, <<A as IntoView>::View as DefaultFilter>::Filter>;
 
@@ -37,8 +37,7 @@ pub struct Renderer<'a> {
     swap_chain_format: wgpu::TextureFormat,
     swap_chain: wgpu::SwapChain,
 
-    _depth_buffer_texture: wgpu::Texture,
-    depth_buffer_texture_view: wgpu::TextureView,
+    depth_buffer_texture: Texture,
 
     render_uniform_buffer: wgpu::Buffer,
     render_uniform_bind_group_layout: wgpu::BindGroupLayout,
@@ -52,9 +51,7 @@ pub struct Renderer<'a> {
 }
 
 impl<'a> Renderer<'a> {
-    fn create_depth_texture(
-        device: &wgpu::Device, sc_desc: &wgpu::SwapChainDescriptor,
-    ) -> (wgpu::Texture, wgpu::TextureView) {
+    fn create_depth_texture(device: &wgpu::Device, sc_desc: &wgpu::SwapChainDescriptor) -> Texture {
         let size = wgpu::Extent3d {
             width: sc_desc.width,
             height: sc_desc.height,
@@ -73,7 +70,11 @@ impl<'a> Renderer<'a> {
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        (texture, view)
+        Texture {
+            texture,
+            view,
+            sampler: None,
+        }
     }
 
     pub async fn new(window: &winit::window::Window, width: u32, height: u32) -> Renderer<'a> {
@@ -142,10 +143,9 @@ impl<'a> Renderer<'a> {
             }],
         });
 
-        let (_depth_buffer_texture, depth_buffer_texture_view) =
-            Self::create_depth_texture(&device, &swap_chain_descriptor);
-
         Self {
+            depth_buffer_texture: Self::create_depth_texture(&device, &swap_chain_descriptor),
+
             surface,
             device,
             queue,
@@ -157,9 +157,6 @@ impl<'a> Renderer<'a> {
             render_uniform_buffer,
             render_uniform_bind_group_layout,
             render_uniform_bind_group,
-
-            _depth_buffer_texture,
-            depth_buffer_texture_view,
 
             materials: Vec::new(),
             shaders: Vec::new(),
@@ -175,10 +172,8 @@ impl<'a> Renderer<'a> {
             .device
             .create_swap_chain(&self.surface, &self.swap_chain_descriptor);
 
-        let (depth_buffer_texture, depth_buffer_texture_view) =
+        self.depth_buffer_texture =
             Self::create_depth_texture(&self.device, &self.swap_chain_descriptor);
-        self._depth_buffer_texture = depth_buffer_texture;
-        self.depth_buffer_texture_view = depth_buffer_texture_view;
     }
 
     pub fn create_shader(
@@ -362,7 +357,7 @@ impl<'a> Renderer<'a> {
                     },
                 }],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_buffer_texture_view,
+                    view: &self.depth_buffer_texture.view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.),
                         store: true,
