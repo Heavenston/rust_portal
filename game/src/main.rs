@@ -61,8 +61,10 @@ fn main() {
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
         flags: Default::default(),
     };
-    let shader =
-        renderer.create_shader(&shader_m, &shader_m, &[&wgpu::BindGroupLayoutDescriptor {
+    let shader = renderer.create_shader(
+        &shader_m,
+        &shader_m,
+        &[&wgpu::BindGroupLayoutDescriptor {
             label: None,
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -95,7 +97,37 @@ fn main() {
                     count: None,
                 },
             ],
-        }]);
+        }],
+        &[
+            wgpu::VertexBufferLayout {
+                array_stride: 3 * std::mem::size_of::<f32>() as u64,
+                step_mode: wgpu::InputStepMode::Vertex,
+                attributes: &[wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 0,
+                    shader_location: 0,
+                }],
+            },
+            wgpu::VertexBufferLayout {
+                array_stride: 3 * std::mem::size_of::<f32>() as u64,
+                step_mode: wgpu::InputStepMode::Vertex,
+                attributes: &[wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 0,
+                    shader_location: 1,
+                }],
+            },
+            wgpu::VertexBufferLayout {
+                array_stride: 2 * std::mem::size_of::<f32>() as u64,
+                step_mode: wgpu::InputStepMode::Vertex,
+                attributes: &[wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x2,
+                    offset: 0,
+                    shader_location: 2,
+                }],
+            },
+        ],
+    );
 
     let (models, materials) = tobj::load_obj(
         "resources/crytek-sponza-huge-vray-obj/crytek-sponza-huge-vray.obj",
@@ -168,35 +200,6 @@ fn main() {
                         resource: wgpu::BindingResource::Sampler(texture.sampler.as_ref().unwrap()),
                     },
                 ]],
-                &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: 3 * std::mem::size_of::<f32>() as u64,
-                        step_mode: wgpu::InputStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x3,
-                            offset: 0,
-                            shader_location: 0,
-                        }],
-                    },
-                    wgpu::VertexBufferLayout {
-                        array_stride: 3 * std::mem::size_of::<f32>() as u64,
-                        step_mode: wgpu::InputStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x3,
-                            offset: 0,
-                            shader_location: 1,
-                        }],
-                    },
-                    wgpu::VertexBufferLayout {
-                        array_stride: 2 * std::mem::size_of::<f32>() as u64,
-                        step_mode: wgpu::InputStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 0,
-                            shader_location: 2,
-                        }],
-                    },
-                ],
                 Some(wgpu::Face::Front),
             )
         })

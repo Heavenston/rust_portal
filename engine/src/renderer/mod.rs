@@ -182,6 +182,7 @@ impl<'a> Renderer<'a> {
         &mut self, vertex_shader_module: &wgpu::ShaderModuleDescriptor,
         fragment_shader_module: &wgpu::ShaderModuleDescriptor,
         bind_group_layouts: &[&wgpu::BindGroupLayoutDescriptor],
+        vertex_buffer_layouts: &[wgpu::VertexBufferLayout<'static>],
     ) -> ShaderRef {
         let i = self.shaders.len();
         let bind_group_layouts: SmallVec<_> = bind_group_layouts
@@ -203,6 +204,7 @@ impl<'a> Renderer<'a> {
                 },
             ),
             bind_group_layouts,
+            vertex_group_layouts: vertex_buffer_layouts.into(),
 
             marker: Default::default(),
         });
@@ -211,7 +213,7 @@ impl<'a> Renderer<'a> {
     }
     pub fn create_material(
         &mut self, shader_ref: ShaderRef, bind_groups: &[&[wgpu::BindGroupEntry]],
-        vertex_buffer_layouts: &[wgpu::VertexBufferLayout], cull_mode: Option<wgpu::Face>,
+        cull_mode: Option<wgpu::Face>,
     ) -> MaterialRef {
         let i = self.materials.len();
         let shader = &self.shaders[shader_ref.0];
@@ -224,7 +226,7 @@ impl<'a> Renderer<'a> {
                     vertex: wgpu::VertexState {
                         module: &shader.vertex_shader_module,
                         entry_point: "vertex",
-                        buffers: &vertex_buffer_layouts,
+                        buffers: shader.vertex_group_layouts.as_ref(),
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &shader.fragment_shader_module,
