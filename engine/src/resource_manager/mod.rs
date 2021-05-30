@@ -1,10 +1,6 @@
-mod texture;
-
 use std::path::Path;
 
-pub use texture::*;
-
-use crate::renderer::Renderer;
+use crate::renderer::{Renderer, Texture};
 
 #[non_exhaustive]
 pub struct ResourceManager;

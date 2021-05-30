@@ -1,6 +1,7 @@
 mod material;
 mod mesh;
 mod shader;
+mod texture;
 
 use std::sync::RwLock;
 
@@ -15,9 +16,10 @@ use memoffset::offset_of;
 pub use mesh::*;
 pub use shader::*;
 use smallvec::SmallVec;
+pub use texture::*;
 use wgpu::util::DeviceExt;
 
-use crate::{camera::CameraComponent, resource_manager::Texture, transform::TransformComponent};
+use crate::{camera::CameraComponent, transform::TransformComponent};
 
 type LegionQueryOf<A> = Query<A, <<A as IntoView>::View as DefaultFilter>::Filter>;
 

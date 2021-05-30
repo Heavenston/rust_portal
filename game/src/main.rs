@@ -4,8 +4,8 @@ use legion::query::IntoQuery;
 use nalgebra::UnitQuaternion;
 use portal_engine::{
     camera::{CameraComponent, PerspectiveCameraMatrix},
-    renderer::{MeshComponent, Renderer},
-    resource_manager::{ResourceManager, Texture},
+    renderer::{MeshComponent, Renderer, Texture},
+    resource_manager::ResourceManager,
     transform::TransformComponent,
 };
 use wgpu::util::DeviceExt;
