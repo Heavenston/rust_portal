@@ -3,6 +3,8 @@ use std::f32;
 use approx::*;
 use nalgebra::{base::dimension::Dim, Matrix4, Translation3, UnitQuaternion, Vector3, Vector4};
 
+use crate::hecs_extension::*;
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct TransformComponent {
     pub scale: Vector3<f32>,
@@ -60,6 +62,31 @@ impl RelativeEq for TransformComponent {
                 .rotation
                 .relative_eq(&self.rotation, epsilon, max_relative)
     }
+}
+
+pub fn get_global_transform(
+    world: &hecs::World, entity: hecs::Entity,
+) -> anyhow::Result<TransformComponent> {
+    let mut global_transform = *world.get::<TransformComponent>(entity)?;
+    let mut current_entity = entity;
+    while let Some(parent) = {
+        world
+            .get::<ParentComponent>(current_entity)
+            .ok()
+            .map(|a| a.0)
+            .flatten()
+    } {
+        match world.get::<TransformComponent>(parent) {
+            Ok(t) => {
+                global_transform = TransformComponent::from_homogeneous(
+                    &(global_transform.to_homogeneous() * t.to_homogeneous()),
+                );
+                current_entity = parent;
+            }
+            _ => break,
+        }
+    }
+    Ok(global_transform)
 }
 
 #[cfg(test)]

@@ -1,9 +1,18 @@
-use std::{borrow::Cow, convert::TryInto, f32, path::PathBuf, str::FromStr, time::Instant};
+use std::{
+    borrow::Cow,
+    collections::VecDeque,
+    convert::TryInto,
+    f32,
+    path::PathBuf,
+    str::FromStr,
+    time::Instant,
+};
 
 use imgui::im_str;
 use nalgebra::UnitQuaternion;
 use portal_engine::{
     camera::{CameraComponent, PerspectiveCameraMatrix},
+    hecs_extension::{ChildrenComponent, ParentComponent},
     renderer::{MeshComponent, Renderer, Texture},
     resource_manager::ResourceManager,
     transform::TransformComponent,
@@ -218,7 +227,8 @@ fn main() {
         })
         .collect::<Vec<_>>();
 
-    let _ = world
+    let parent = world.reserve_entity();
+    let childs = world
         .spawn_batch(
             models
                 .par_iter()
@@ -233,14 +243,33 @@ fn main() {
                         ],
                     )
                 })
-                .map(|mesh| (MeshComponent(mesh), TransformComponent::default()))
+                .map(|mesh| {
+                    (
+                        MeshComponent(mesh),
+                        TransformComponent::default(),
+                        ParentComponent(Some(parent)),
+                    )
+                })
                 .collect::<Vec<_>>()
                 .into_iter(),
         )
         .collect::<Vec<_>>();
+    world.spawn_at(
+        parent,
+        (
+            {
+                let mut t = TransformComponent::default();
+                t.position.y = 20.;
+                t
+            },
+            ChildrenComponent(childs.into()),
+        ),
+    );
 
     let start = Instant::now();
     let mut last_frame = Instant::now();
+    let mut frames = VecDeque::new();
+    let mut last_frame_time = Instant::now();
     event_loop.run(move |event, _, control_flow| {
         use winit::{
             event::{Event, WindowEvent},
@@ -252,6 +281,13 @@ fn main() {
             Event::NewEvents(_) => {
                 imgui_ctx.io_mut().update_delta_time(last_frame.elapsed());
                 last_frame = Instant::now();
+                if last_frame_time.elapsed().as_secs_f32() > 0.25 {
+                    last_frame_time = Instant::now();
+                    frames.push_back(imgui_ctx.io().framerate);
+                    while frames.len() > 100 {
+                        frames.pop_front();
+                    }
+                }
             }
             Event::WindowEvent {
                 event: WindowEvent::Resized(size),
@@ -275,7 +311,6 @@ fn main() {
             Event::RedrawRequested(_) => {
                 let ui = imgui_ctx.frame();
 
-                let mut is_vsync_enabled = renderer.get_vsync();
                 imgui::Window::new(im_str!("Performances"))
                     .size([300.0, 110.0], imgui::Condition::FirstUseEver)
                     .build(&ui, || {
@@ -284,10 +319,17 @@ fn main() {
                             "Meshes: {}",
                             world.query_mut::<&MeshComponent>().into_iter().count()
                         ));
+                        imgui::PlotHistogram::new(
+                            &ui,
+                            im_str!("FpsGraph"),
+                            frames.make_contiguous(),
+                        )
+                        .build();
                         ui.separator();
+                        let mut is_vsync_enabled = renderer.get_vsync();
                         ui.checkbox(im_str!("Enable VSYNC"), &mut is_vsync_enabled);
+                        renderer.set_vsync(is_vsync_enabled);
                     });
-                renderer.set_vsync(is_vsync_enabled);
 
                 {
                     let mut t = world.get_mut::<TransformComponent>(camera_entity).unwrap();

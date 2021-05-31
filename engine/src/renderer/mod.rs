@@ -15,7 +15,10 @@ use smallvec::SmallVec;
 pub use texture::*;
 use wgpu::util::DeviceExt;
 
-use crate::{camera::CameraComponent, transform::TransformComponent};
+use crate::{
+    camera::CameraComponent,
+    transform::{get_global_transform, TransformComponent},
+};
 
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(C)]
@@ -394,10 +397,10 @@ impl Renderer {
 
             let mut last_material = None;
             world
-                .query::<(&TransformComponent, &MeshComponent)>()
+                .query::<&MeshComponent>()
+                .with::<TransformComponent>()
                 .into_iter()
-                .map(|(_, b)| b)
-                .for_each(|(transform, MeshComponent(mesh_ref))| {
+                .for_each(|(e, MeshComponent(mesh_ref))| {
                     let mesh = &meshes[mesh_ref.0];
                     if last_material != Some(mesh.material) {
                         last_material = Some(mesh.material);
@@ -409,6 +412,7 @@ impl Renderer {
                             .zip(1..)
                             .for_each(|(bg, i)| r_pass.set_bind_group(i, bg, &[]));
                     }
+                    let transform = get_global_transform(&world, e).unwrap();
 
                     self.queue.write_buffer(
                         &self.render_uniform_buffer,
