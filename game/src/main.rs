@@ -1,5 +1,6 @@
 use std::{borrow::Cow, convert::TryInto, f32, path::PathBuf, str::FromStr, time::Instant};
 
+use imgui::im_str;
 use nalgebra::UnitQuaternion;
 use portal_engine::{
     camera::{CameraComponent, PerspectiveCameraMatrix},
@@ -13,15 +14,27 @@ use winit::dpi::LogicalSize;
 
 fn main() {
     let mut world = hecs::World::new();
+    let mut imgui_ctx = imgui::Context::create();
+    let mut imgui_platform = imgui_winit_support::WinitPlatform::init(&mut imgui_ctx);
 
     let event_loop = winit::event_loop::EventLoop::new();
     let window = winit::window::Window::new(&event_loop).unwrap();
     window.set_title("Portal !");
     window.set_inner_size(LogicalSize::new(500, 500));
     window.set_min_inner_size(Some(LogicalSize::new(100, 100)));
+    imgui_platform.attach_window(
+        imgui_ctx.io_mut(),
+        &window,
+        imgui_winit_support::HiDpiMode::Default,
+    );
 
     println!("Creating renderer...");
-    let mut renderer = Box::new(pollster::block_on(Renderer::new(&window, 100, 100)));
+    let mut renderer = Box::new(pollster::block_on(Renderer::new(
+        &window,
+        100,
+        100,
+        &mut imgui_ctx,
+    )));
     println!("Created renderer");
 
     let resource_manager = ResourceManager::new();
@@ -227,6 +240,7 @@ fn main() {
         .collect::<Vec<_>>();
 
     let start = Instant::now();
+    let mut last_frame = Instant::now();
     event_loop.run(move |event, _, control_flow| {
         use winit::{
             event::{Event, WindowEvent},
@@ -235,10 +249,15 @@ fn main() {
 
         *control_flow = ControlFlow::Poll;
         match event {
+            Event::NewEvents(_) => {
+                imgui_ctx.io_mut().update_delta_time(last_frame.elapsed());
+                last_frame = Instant::now();
+            }
             Event::WindowEvent {
                 event: WindowEvent::Resized(size),
                 ..
             } => {
+                imgui_platform.handle_event(imgui_ctx.io_mut(), &window, &event);
                 renderer.resize(size.width, size.height);
 
                 let mut camera_component = world.get_mut::<CameraComponent>(camera_entity).unwrap();
@@ -246,15 +265,22 @@ fn main() {
                     unsafe { std::mem::transmute(&mut camera_component.matrix) };
                 matrix.0.set_aspect(size.width as f32 / size.height as f32);
             }
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => *control_flow = ControlFlow::Exit,
 
             Event::MainEventsCleared => {
+                imgui_platform
+                    .prepare_frame(imgui_ctx.io_mut(), &window)
+                    .expect("Failed to prepare frame");
                 window.request_redraw();
             }
             Event::RedrawRequested(_) => {
+                let ui = imgui_ctx.frame();
+
+                imgui::Window::new(im_str!("Performances"))
+                    .size([300.0, 110.0], imgui::Condition::FirstUseEver)
+                    .build(&ui, || {
+                        ui.text(format!("FPS: {}", ui.io().framerate));
+                    });
+
                 {
                     let mut t = world.get_mut::<TransformComponent>(camera_entity).unwrap();
                     t.rotation = UnitQuaternion::from_euler_angles(
@@ -264,10 +290,19 @@ fn main() {
                     );
                     t.position.x = (start.elapsed().as_secs_f32() / 5.).cos() * 1000.;
                 }
-                renderer.render(&world);
+
+                imgui_platform.prepare_render(&ui, &window);
+                renderer.render(ui.render(), &world);
             }
 
-            _ => {}
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => *control_flow = ControlFlow::Exit,
+
+            event => {
+                imgui_platform.handle_event(imgui_ctx.io_mut(), &window, &event);
+            }
         }
     });
 }

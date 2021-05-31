@@ -3,13 +3,13 @@ mod mesh;
 mod shader;
 mod texture;
 
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 
 use bytemuck::{Pod, Zeroable};
+use imgui_wgpu::Renderer as ImGuiRenderer;
 pub use material::*;
 use memoffset::offset_of;
 pub use mesh::*;
-use rayon::prelude::*;
 pub use shader::*;
 use smallvec::SmallVec;
 pub use texture::*;
@@ -42,7 +42,10 @@ pub struct Renderer {
     shaders: RwLock<Vec<Shader>>,
     materials: RwLock<Vec<Material>>,
     meshes: RwLock<Vec<Mesh>>,
+
+    imgui_renderer: Mutex<ImGuiRenderer>,
 }
+static_assertions::assert_impl_all!(Renderer: Send, Sync);
 
 impl Renderer {
     fn create_depth_texture(device: &wgpu::Device, sc_desc: &wgpu::SwapChainDescriptor) -> Texture {
@@ -71,7 +74,9 @@ impl Renderer {
         }
     }
 
-    pub async fn new(window: &winit::window::Window, width: u32, height: u32) -> Renderer {
+    pub async fn new(
+        window: &winit::window::Window, width: u32, height: u32, imgui_context: &mut imgui::Context,
+    ) -> Renderer {
         let instance = wgpu::Instance::new(wgpu::BackendBit::all());
         let surface = unsafe { instance.create_surface(window) };
         let adapter = instance
@@ -139,6 +144,16 @@ impl Renderer {
 
         Self {
             depth_buffer_texture: Self::create_depth_texture(&device, &swap_chain_descriptor),
+            imgui_renderer: Mutex::new(ImGuiRenderer::new(
+                imgui_context,
+                &device,
+                &queue,
+                imgui_wgpu::RendererConfig {
+                    texture_format: swap_chain_format,
+                    depth_format: Some(wgpu::TextureFormat::Depth32Float),
+                    ..imgui_wgpu::RendererConfig::new()
+                },
+            )),
 
             surface,
             device,
@@ -296,24 +311,7 @@ impl Renderer {
         MeshRef(i)
     }
 
-    /*pub fn get_shader(&self, reference: ShaderRef) -> Option<&Shader> {
-        self.shaders.get(reference.0)
-    }
-    pub fn get_shader_mut(&mut self, reference: ShaderRef) -> Option<&mut Shader> {
-        self.shaders.get_mut(reference.0)
-    }
-    pub fn get_material(&self, reference: MaterialRef) -> Option<&Material> {
-        self.materials.get(reference.0)
-    }
-    pub fn get_material_mut(&mut self, reference: MaterialRef) -> Option<&mut Material> {
-        self.materials.get_mut(reference.0)
-    }
-    pub fn get_mesh(&self, reference: MeshRef) -> Option<&Mesh> { self.meshes.get(reference.0) }
-    pub fn get_mesh_mut(&mut self, reference: MeshRef) -> Option<&mut Mesh> {
-        self.meshes.get_mut(reference.0)
-    }*/
-
-    pub fn render(&self, world: &hecs::World) {
+    pub fn render(&self, imgui_draw_data: &imgui::DrawData, world: &hecs::World) {
         let mut query = world.query::<(&CameraComponent, &TransformComponent)>();
         let current_camera = query
             .iter()
@@ -322,15 +320,17 @@ impl Renderer {
             .next();
 
         if let Some((current_camera, transform)) = current_camera {
-            self.render_camera(current_camera, &transform, world);
+            self.render_camera(current_camera, &transform, imgui_draw_data, world);
         }
     }
     pub fn render_camera(
-        &self, camera: &CameraComponent, camera_transform: &TransformComponent, world: &hecs::World,
+        &self, camera: &CameraComponent, camera_transform: &TransformComponent,
+        imgui_draw_data: &imgui::DrawData, world: &hecs::World,
     ) {
         let meshes = self.meshes.read().unwrap();
         let materials = self.materials.read().unwrap();
         let camera_matrix = &*camera.matrix;
+        let mut imgui_renderer = self.imgui_renderer.lock().unwrap();
 
         self.queue.write_buffer(
             &self.render_uniform_buffer,
@@ -402,6 +402,10 @@ impl Renderer {
 
                     r_pass.draw_indexed(0..mesh.indices_size as u32, 0, 0..1);
                 });
+
+            imgui_renderer
+                .render(imgui_draw_data, &self.queue, &self.device, &mut r_pass)
+                .unwrap();
         }
 
         self.queue.submit(Some(encoder.finish()));
