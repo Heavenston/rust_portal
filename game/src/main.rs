@@ -280,6 +280,11 @@ fn main() {
                     .size([300.0, 110.0], imgui::Condition::FirstUseEver)
                     .build(&ui, || {
                         ui.text(format!("FPS: {}", ui.io().framerate));
+                        ui.text(format!(
+                            "Meshes: {}",
+                            world.query_mut::<&MeshComponent>().into_iter().count()
+                        ));
+                        ui.separator();
                         ui.checkbox(im_str!("Enable VSYNC"), &mut is_vsync_enabled);
                     });
                 renderer.set_vsync(is_vsync_enabled);
