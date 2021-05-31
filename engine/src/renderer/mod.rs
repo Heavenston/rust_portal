@@ -48,6 +48,9 @@ pub struct Renderer {
 static_assertions::assert_impl_all!(Renderer: Send, Sync);
 
 impl Renderer {
+    const VSYNC_PRESENT_MODE: wgpu::PresentMode = wgpu::PresentMode::Fifo;
+    const DEPTH_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
     fn create_depth_texture(device: &wgpu::Device, sc_desc: &wgpu::SwapChainDescriptor) -> Texture {
         let size = wgpu::Extent3d {
             width: sc_desc.width,
@@ -60,7 +63,7 @@ impl Renderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
+            format: Self::DEPTH_TEXTURE_FORMAT,
             usage: wgpu::TextureUsage::RENDER_ATTACHMENT | wgpu::TextureUsage::COPY_DST,
         };
         let texture = device.create_texture(&desc);
@@ -81,8 +84,7 @@ impl Renderer {
         let surface = unsafe { instance.create_surface(window) };
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
-                // Request an adapter which can render to our surface
+                power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
             })
             .await
@@ -107,7 +109,7 @@ impl Renderer {
             format: swap_chain_format,
             width,
             height,
-            present_mode: wgpu::PresentMode::Mailbox,
+            present_mode: Self::VSYNC_PRESENT_MODE,
         };
         let swap_chain = device.create_swap_chain(&surface, &swap_chain_descriptor);
 
@@ -150,7 +152,7 @@ impl Renderer {
                 &queue,
                 imgui_wgpu::RendererConfig {
                     texture_format: swap_chain_format,
-                    depth_format: Some(wgpu::TextureFormat::Depth32Float),
+                    depth_format: Some(Self::DEPTH_TEXTURE_FORMAT),
                     ..imgui_wgpu::RendererConfig::new()
                 },
             )),
@@ -172,15 +174,34 @@ impl Renderer {
             meshes: RwLock::default(),
         }
     }
-    pub fn resize(&mut self, width: u32, height: u32) {
-        self.swap_chain_descriptor.width = width;
-        self.swap_chain_descriptor.height = height;
+    fn recreate_swap_chain(&mut self) {
         self.swap_chain = self
             .device
             .create_swap_chain(&self.surface, &self.swap_chain_descriptor);
 
         self.depth_buffer_texture =
             Self::create_depth_texture(&self.device, &self.swap_chain_descriptor);
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.swap_chain_descriptor.width = width;
+        self.swap_chain_descriptor.height = height;
+        self.recreate_swap_chain();
+    }
+    pub fn set_vsync(&mut self, enabled: bool) {
+        if self.get_vsync() == enabled {
+            return;
+        }
+        self.swap_chain_descriptor.present_mode = if enabled {
+            Self::VSYNC_PRESENT_MODE
+        }
+        else {
+            wgpu::PresentMode::Immediate
+        };
+        self.recreate_swap_chain();
+    }
+    pub fn get_vsync(&mut self) -> bool {
+        self.swap_chain_descriptor.present_mode == Self::VSYNC_PRESENT_MODE
     }
 
     pub fn create_shader(

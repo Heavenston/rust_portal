@@ -275,11 +275,14 @@ fn main() {
             Event::RedrawRequested(_) => {
                 let ui = imgui_ctx.frame();
 
+                let mut is_vsync_enabled = renderer.get_vsync();
                 imgui::Window::new(im_str!("Performances"))
                     .size([300.0, 110.0], imgui::Condition::FirstUseEver)
                     .build(&ui, || {
                         ui.text(format!("FPS: {}", ui.io().framerate));
+                        ui.checkbox(im_str!("Enable VSYNC"), &mut is_vsync_enabled);
                     });
+                renderer.set_vsync(is_vsync_enabled);
 
                 {
                     let mut t = world.get_mut::<TransformComponent>(camera_entity).unwrap();
