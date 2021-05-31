@@ -1,6 +1,5 @@
 use std::{borrow::Cow, convert::TryInto, f32, path::PathBuf, str::FromStr, time::Instant};
 
-use legion::query::IntoQuery;
 use nalgebra::UnitQuaternion;
 use portal_engine::{
     camera::{CameraComponent, PerspectiveCameraMatrix},
@@ -12,7 +11,7 @@ use wgpu::util::DeviceExt;
 use winit::dpi::LogicalSize;
 
 fn main() {
-    let mut world = legion::World::new(legion::WorldOptions::default());
+    let mut world = hecs::World::new();
 
     let event_loop = winit::event_loop::EventLoop::new();
     let window = winit::window::Window::new(&event_loop).unwrap();
@@ -26,7 +25,7 @@ fn main() {
 
     let resource_manager = ResourceManager::new();
 
-    let camera_entity = world.push((
+    let camera_entity = world.spawn((
         CameraComponent {
             clear_color: Some(wgpu::Color {
                 r: 88. / 255.,
@@ -205,20 +204,23 @@ fn main() {
         })
         .collect::<Vec<_>>();
 
-    let _ = models
-        .iter()
-        .map(|model| {
-            renderer.create_mesh(
-                material_refs[model.mesh.material_id.unwrap()],
-                &model.mesh.indices,
-                &[
-                    &model.mesh.positions,
-                    &model.mesh.normals,
-                    &model.mesh.texcoords,
-                ],
-            )
-        })
-        .map(|mesh| world.push((MeshComponent(mesh), TransformComponent::default())))
+    let _ = world
+        .spawn_batch(
+            models
+                .iter()
+                .map(|model| {
+                    renderer.create_mesh(
+                        material_refs[model.mesh.material_id.unwrap()],
+                        &model.mesh.indices,
+                        &[
+                            &model.mesh.positions,
+                            &model.mesh.normals,
+                            &model.mesh.texcoords,
+                        ],
+                    )
+                })
+                .map(|mesh| (MeshComponent(mesh), TransformComponent::default())),
+        )
         .collect::<Vec<_>>();
 
     let start = Instant::now();
@@ -236,9 +238,7 @@ fn main() {
             } => {
                 renderer.resize(size.width, size.height);
 
-                let camera_component = <&mut CameraComponent>::query()
-                    .get_mut(&mut world, camera_entity)
-                    .unwrap();
+                let mut camera_component = world.get_mut::<CameraComponent>(camera_entity).unwrap();
                 let matrix: &mut Box<PerspectiveCameraMatrix> =
                     unsafe { std::mem::transmute(&mut camera_component.matrix) };
                 matrix.0.set_aspect(size.width as f32 / size.height as f32);
@@ -253,9 +253,7 @@ fn main() {
             }
             Event::RedrawRequested(_) => {
                 {
-                    let t = <&mut TransformComponent>::query()
-                        .get_mut(&mut world, camera_entity)
-                        .unwrap();
+                    let mut t = world.get_mut::<TransformComponent>(camera_entity).unwrap();
                     t.rotation = UnitQuaternion::from_euler_angles(
                         0.,
                         start.elapsed().as_secs_f32() / 5.,

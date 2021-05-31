@@ -3,14 +3,7 @@ mod mesh;
 mod shader;
 mod texture;
 
-use std::sync::RwLock;
-
 use bytemuck::{Pod, Zeroable};
-use legion::{
-    internals::query::view::IntoView,
-    query::{DefaultFilter, IntoQuery},
-    Query,
-};
 pub use material::*;
 use memoffset::offset_of;
 pub use mesh::*;
@@ -21,8 +14,6 @@ use wgpu::util::DeviceExt;
 
 use crate::{camera::CameraComponent, transform::TransformComponent};
 
-type LegionQueryOf<A> = Query<A, <<A as IntoView>::View as DefaultFilter>::Filter>;
-
 #[derive(Copy, Clone, Zeroable, Pod)]
 #[repr(C)]
 pub struct RenderUniformBuffer {
@@ -30,7 +21,7 @@ pub struct RenderUniformBuffer {
     pub model_matrix: [f32; 16],
 }
 
-pub struct Renderer<'a> {
+pub struct Renderer {
     surface: wgpu::Surface,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -48,11 +39,9 @@ pub struct Renderer<'a> {
     shaders: Vec<Shader>,
     materials: Vec<Material>,
     meshes: Vec<Mesh>,
-
-    mesh_query: RwLock<LegionQueryOf<(&'a TransformComponent, &'a MeshComponent)>>,
 }
 
-impl<'a> Renderer<'a> {
+impl Renderer {
     fn create_depth_texture(device: &wgpu::Device, sc_desc: &wgpu::SwapChainDescriptor) -> Texture {
         let size = wgpu::Extent3d {
             width: sc_desc.width,
@@ -79,7 +68,7 @@ impl<'a> Renderer<'a> {
         }
     }
 
-    pub async fn new(window: &winit::window::Window, width: u32, height: u32) -> Renderer<'a> {
+    pub async fn new(window: &winit::window::Window, width: u32, height: u32) -> Renderer {
         let instance = wgpu::Instance::new(wgpu::BackendBit::all());
         let surface = unsafe { instance.create_surface(window) };
         let adapter = instance
@@ -163,8 +152,6 @@ impl<'a> Renderer<'a> {
             materials: Vec::new(),
             shaders: Vec::new(),
             meshes: Vec::new(),
-
-            mesh_query: RwLock::new(<(&TransformComponent, &MeshComponent)>::query()),
         }
     }
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -316,9 +303,11 @@ impl<'a> Renderer<'a> {
         self.meshes.get_mut(reference.0)
     }
 
-    pub fn render(&self, world: &legion::World) {
-        let current_camera = <(&CameraComponent, &TransformComponent)>::query()
-            .iter(world)
+    pub fn render(&self, world: &hecs::World) {
+        let mut query = world.query::<(&CameraComponent, &TransformComponent)>();
+        let current_camera = query
+            .iter()
+            .map(|(_, b)| b)
             .filter(|(c, _)| c.is_enabled)
             .next();
 
@@ -327,8 +316,7 @@ impl<'a> Renderer<'a> {
         }
     }
     pub fn render_camera(
-        &self, camera: &CameraComponent, camera_transform: &TransformComponent,
-        world: &legion::World,
+        &self, camera: &CameraComponent, camera_transform: &TransformComponent, world: &hecs::World,
     ) {
         let camera_matrix = &*camera.matrix;
 
@@ -372,9 +360,11 @@ impl<'a> Renderer<'a> {
             r_pass.set_bind_group(0, &self.render_uniform_bind_group, &[]);
 
             let mut last_material = None;
-            self.mesh_query.write().unwrap().for_each(
-                world,
-                |(transform, MeshComponent(mesh_ref))| {
+            world
+                .query::<(&TransformComponent, &MeshComponent)>()
+                .iter()
+                .map(|(_, b)| b)
+                .for_each(|(transform, MeshComponent(mesh_ref))| {
                     let mesh = &self.meshes[mesh_ref.0];
                     if last_material != Some(mesh.material) {
                         last_material = Some(mesh.material);
@@ -397,8 +387,7 @@ impl<'a> Renderer<'a> {
                     }
 
                     r_pass.draw_indexed(0..mesh.indices_size as u32, 0, 0..1);
-                },
-            );
+                });
         }
 
         self.queue.submit(Some(encoder.finish()));
