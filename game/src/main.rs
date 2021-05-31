@@ -7,6 +7,7 @@ use portal_engine::{
     resource_manager::ResourceManager,
     transform::TransformComponent,
 };
+use rayon::prelude::*;
 use wgpu::util::DeviceExt;
 use winit::dpi::LogicalSize;
 
@@ -146,7 +147,7 @@ fn main() {
     );
 
     let material_refs = materials
-        .iter()
+        .par_iter()
         .map(|material| {
             let mut texture = if material.diffuse_texture != "" {
                 resource_manager
@@ -207,7 +208,7 @@ fn main() {
     let _ = world
         .spawn_batch(
             models
-                .iter()
+                .par_iter()
                 .map(|model| {
                     renderer.create_mesh(
                         material_refs[model.mesh.material_id.unwrap()],
@@ -219,7 +220,9 @@ fn main() {
                         ],
                     )
                 })
-                .map(|mesh| (MeshComponent(mesh), TransformComponent::default())),
+                .map(|mesh| (MeshComponent(mesh), TransformComponent::default()))
+                .collect::<Vec<_>>()
+                .into_iter(),
         )
         .collect::<Vec<_>>();
 

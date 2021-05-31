@@ -3,10 +3,13 @@ mod mesh;
 mod shader;
 mod texture;
 
+use std::sync::RwLock;
+
 use bytemuck::{Pod, Zeroable};
 pub use material::*;
 use memoffset::offset_of;
 pub use mesh::*;
+use rayon::prelude::*;
 pub use shader::*;
 use smallvec::SmallVec;
 pub use texture::*;
@@ -36,9 +39,9 @@ pub struct Renderer {
     render_uniform_bind_group_layout: wgpu::BindGroupLayout,
     render_uniform_bind_group: wgpu::BindGroup,
 
-    shaders: Vec<Shader>,
-    materials: Vec<Material>,
-    meshes: Vec<Mesh>,
+    shaders: RwLock<Vec<Shader>>,
+    materials: RwLock<Vec<Material>>,
+    meshes: RwLock<Vec<Mesh>>,
 }
 
 impl Renderer {
@@ -149,9 +152,9 @@ impl Renderer {
             render_uniform_bind_group_layout,
             render_uniform_bind_group,
 
-            materials: Vec::new(),
-            shaders: Vec::new(),
-            meshes: Vec::new(),
+            materials: RwLock::default(),
+            shaders: RwLock::default(),
+            meshes: RwLock::default(),
         }
     }
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -166,18 +169,20 @@ impl Renderer {
     }
 
     pub fn create_shader(
-        &mut self, vertex_shader_module: &wgpu::ShaderModuleDescriptor,
+        &self, vertex_shader_module: &wgpu::ShaderModuleDescriptor,
         fragment_shader_module: &wgpu::ShaderModuleDescriptor,
         bind_group_layouts: &[&wgpu::BindGroupLayoutDescriptor],
         vertex_buffer_layouts: &[wgpu::VertexBufferLayout<'static>],
     ) -> ShaderRef {
-        let i = self.shaders.len();
+        let mut shaders = self.shaders.write().unwrap();
+
+        let i = shaders.len();
         let bind_group_layouts: SmallVec<_> = bind_group_layouts
             .iter()
             .map(|desc| self.device.create_bind_group_layout(desc))
             .collect();
 
-        self.shaders.push(Shader {
+        shaders.push(Shader {
             vertex_shader_module: self.device.create_shader_module(vertex_shader_module),
             fragment_shader_module: self.device.create_shader_module(fragment_shader_module),
             render_pipeline_layout: self.device.create_pipeline_layout(
@@ -199,12 +204,15 @@ impl Renderer {
         ShaderRef(i)
     }
     pub fn create_material(
-        &mut self, shader_ref: ShaderRef, bind_groups: &[&[wgpu::BindGroupEntry]],
+        &self, shader_ref: ShaderRef, bind_groups: &[&[wgpu::BindGroupEntry]],
         cull_mode: Option<wgpu::Face>,
     ) -> MaterialRef {
-        let i = self.materials.len();
-        let shader = &self.shaders[shader_ref.0];
-        self.materials.push(Material {
+        let shaders = self.shaders.read().unwrap();
+        let mut materials = self.materials.write().unwrap();
+
+        let i = materials.len();
+        let shader = &shaders[shader_ref.0];
+        materials.push(Material {
             render_pipeline: self
                 .device
                 .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -257,10 +265,12 @@ impl Renderer {
         MaterialRef(i)
     }
     pub fn create_mesh<T: Pod>(
-        &mut self, material: MaterialRef, indices: &[u32], vertex_buffers: &[&[T]],
+        &self, material: MaterialRef, indices: &[u32], vertex_buffers: &[&[T]],
     ) -> MeshRef {
-        let i = self.meshes.len();
-        self.meshes.push(Mesh {
+        let mut meshes = self.meshes.write().unwrap();
+
+        let i = meshes.len();
+        meshes.push(Mesh {
             material,
             vertex_buffers: vertex_buffers
                 .iter()
@@ -286,7 +296,7 @@ impl Renderer {
         MeshRef(i)
     }
 
-    pub fn get_shader(&self, reference: ShaderRef) -> Option<&Shader> {
+    /*pub fn get_shader(&self, reference: ShaderRef) -> Option<&Shader> {
         self.shaders.get(reference.0)
     }
     pub fn get_shader_mut(&mut self, reference: ShaderRef) -> Option<&mut Shader> {
@@ -301,7 +311,7 @@ impl Renderer {
     pub fn get_mesh(&self, reference: MeshRef) -> Option<&Mesh> { self.meshes.get(reference.0) }
     pub fn get_mesh_mut(&mut self, reference: MeshRef) -> Option<&mut Mesh> {
         self.meshes.get_mut(reference.0)
-    }
+    }*/
 
     pub fn render(&self, world: &hecs::World) {
         let mut query = world.query::<(&CameraComponent, &TransformComponent)>();
@@ -318,6 +328,8 @@ impl Renderer {
     pub fn render_camera(
         &self, camera: &CameraComponent, camera_transform: &TransformComponent, world: &hecs::World,
     ) {
+        let meshes = self.meshes.read().unwrap();
+        let materials = self.materials.read().unwrap();
         let camera_matrix = &*camera.matrix;
 
         self.queue.write_buffer(
@@ -362,17 +374,19 @@ impl Renderer {
             let mut last_material = None;
             world
                 .query::<(&TransformComponent, &MeshComponent)>()
-                .iter()
+                .into_iter()
                 .map(|(_, b)| b)
                 .for_each(|(transform, MeshComponent(mesh_ref))| {
-                    let mesh = &self.meshes[mesh_ref.0];
+                    let mesh = &meshes[mesh_ref.0];
                     if last_material != Some(mesh.material) {
                         last_material = Some(mesh.material);
-                        let material = &self.materials[mesh.material.0];
+                        let material = &materials[mesh.material.0];
                         r_pass.set_pipeline(&material.render_pipeline);
-                        for (bg, i) in material.bind_groups.iter().zip(1..) {
-                            r_pass.set_bind_group(i, bg, &[]);
-                        }
+                        material
+                            .bind_groups
+                            .iter()
+                            .zip(1..)
+                            .for_each(|(bg, i)| r_pass.set_bind_group(i, bg, &[]));
                     }
 
                     self.queue.write_buffer(
