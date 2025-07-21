@@ -4,3 +4,6 @@ version = "0.0.0"
 edition = "2024"
 
 [dependencies]
+pollster = "0.4.0"
+wgpu = "26.0.1"
+winit = { version = "0.30.11" }
