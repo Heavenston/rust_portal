@@ -1,3 +1,6 @@
+mod render_operation;
+pub use render_operation::*;
+
 use std::sync::Arc;
 
 pub struct Renderer {
@@ -78,38 +81,7 @@ impl Renderer {
         self.configure_surface();
     }
 
-    pub fn redraw(&mut self) {
-        let surface_texture = self
-            .surface
-            .get_current_texture()
-            .expect("failed to acquire next swapchain texture");
-        let texture_view = surface_texture
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor {
-                format: Some(self.surface_format.add_srgb_suffix()),
-                ..Default::default()
-            });
-
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-        let renderpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: None,
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &texture_view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-        drop(renderpass);
-
-        self.queue.submit([encoder.finish()]);
-        self.window.pre_present_notify();
-        surface_texture.present();
+    pub fn render(&'_ mut self) -> RenderOperation<'_> {
+        RenderOperation::new(self)
     }
 }

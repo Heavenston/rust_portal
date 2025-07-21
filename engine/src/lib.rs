@@ -1,7 +1,5 @@
 #![feature(generic_const_exprs)]
 
-// TEMP: To remove
-#![allow(unused_variables)]
 // for generic_const_exprs
 #![expect(incomplete_features)]
 

@@ -19,6 +19,25 @@ impl Engine {
             started: None,
         }
     }
+
+    fn render(&mut self) {
+        let started = self.started.as_mut().unwrap();
+
+        let mut render = started.renderer.render();
+        let present_texture_handle = render.using_present_texture();
+
+        {
+            let render_pass = render.render_pass()
+                    .color_attachment()
+                    .texture_view_handle(present_texture_handle)
+                    .color_clear(wgpu::Color::RED)
+                    .finish()
+                .build();
+            render_pass.finish();
+        }
+
+        render.finish();
+    }
 }
 
 impl winit::application::ApplicationHandler for Engine {
@@ -36,13 +55,14 @@ impl winit::application::ApplicationHandler for Engine {
         });
     }
 
-    fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+    fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
         let Some(started) = &mut self.started
         else { return };
 
         started.window.request_redraw();
     }
 
+    #[allow(unused_variables)]
     fn window_event(
         &mut self,
         event_loop: &winit::event_loop::ActiveEventLoop,
@@ -50,7 +70,10 @@ impl winit::application::ApplicationHandler for Engine {
         event: winit::event::WindowEvent,
     ) {
         let Some(started) = &mut self.started
-        else { unreachable!() };
+        else {
+            event_loop.exit();
+            return;
+        };
         debug_assert!(window_id == started.window.id());
 
         use winit::event::WindowEvent as We;
@@ -60,9 +83,11 @@ impl winit::application::ApplicationHandler for Engine {
             },
             We::CloseRequested => {
                 self.started = None;
+                event_loop.exit();
             },
             We::Destroyed => {
                 self.started = None;
+                event_loop.exit();
             },
             We::Focused(_) => {
                 
@@ -98,7 +123,7 @@ impl winit::application::ApplicationHandler for Engine {
                 
             },
             We::RedrawRequested => {
-                started.renderer.redraw();
+                self.render();
             },
 
             _ => (),

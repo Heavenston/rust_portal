@@ -1,6 +1,6 @@
-use super::concat_arrays;
+use crate::utils::concat_arrays;
 
-use std::{cell::{Cell, RefCell}, sync::atomic::{AtomicU32, Ordering}, time::{SystemTime, UNIX_EPOCH}};
+use std::{ cell::Cell, sync::atomic::{ AtomicU32, Ordering } };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 // Byte array to keep alignment of 1
