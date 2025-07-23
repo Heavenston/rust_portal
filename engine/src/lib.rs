@@ -11,5 +11,3 @@ pub use renderer::*;
 mod uid;
 pub use uid::*;
 pub mod handle_map;
-mod world;
-pub use world::*;

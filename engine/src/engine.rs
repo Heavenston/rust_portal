@@ -1,16 +1,17 @@
 mod application;
 pub use application::*;
-use glam::Mat4;
+mod state;
+pub use state::*;
 
 use crate::{ * };
 
 use std::{ sync::Arc, time::Instant };
+use glam::Mat4;
 
 struct StartedEngine {
     window: Arc<winit::window::Window>,
 
-    world: World,
-    renderer: Renderer,
+    state: EngineState,
     application: Box<dyn Application>,
 
     camera_uniform_buffer: BufferHandle,
@@ -22,47 +23,28 @@ struct StartedEngine {
 
 impl StartedEngine {
     fn render(&mut self) {
+        let state = &mut self.state;
+
         // 
         // Write into camera uniform buffer
         // 
-        let Some(camera) = self.world.camera
+        let Some(camera) = state.camera
         else { eprintln!("NO CAMERA"); return; };
         {
             let view = camera.transform.inverse();
             let proj = camera.projection;
             let view_proj = proj * view;
-            self.renderer.write_buffer(
+            state.renderer.write_buffer(
                 self.camera_uniform_buffer,
                 0,
                 bytemuck::bytes_of(&view_proj),
             );
         }
 
-        //
-        // Set object uniforms for missing ones
-        // 
-        for (_, StaticMeshData { mesh, cache }) in self.world.static_meshes.iter_mut() {
-            if cache.is_some() { continue }
-
-            let transform: Mat4 = mesh.transform.into();
-            let uniform_buffer = self.renderer.create_buffer()
-                .size(size_of::<Mat4>() as u64)
-                .data(bytemuck::bytes_of(&transform))
-                .create();
-
-            let object_bind_group = self.renderer.create_object_bind_group()
-                .uniform_buffer(uniform_buffer)
-                .create();
-
-            // TODO: FIXME: Leaks buffers when static meshes are removed
-            *cache = Some(StaticMeshGPUCache {
-                object_bind_group,
-            });
-        }
-
-        let mut render = self.renderer.render();
+        let mut render = state.renderer.render();
         let present_texture_handle = render.using_present_texture();
 
+        // Object rendering pass
         {
             let mut render_pass = render.render_pass()
                     .color_attachment()
@@ -71,12 +53,10 @@ impl StartedEngine {
                     .finish()
                 .build();
 
-            for (_, StaticMeshData { mesh, cache }) in self.world.static_meshes.iter() {
-                let cache = cache.as_ref().expect("Initialized before");
-
+            for (_, StaticMeshData { mesh, object_bind_group }) in state.static_meshes.iter() {
                 render_pass.draw_call()
                     .camera_bind_group(self.camera_bind_group)
-                    .object_bind_group(cache.object_bind_group)
+                    .object_bind_group(*object_bind_group)
                     .index_buffer(mesh.index_buffer)
                     .positions_buffer(mesh.positions_buffer)
                     .texcoords_buffer(mesh.texcoords_buffer)
@@ -95,7 +75,7 @@ impl StartedEngine {
             .unwrap_or(0.);
         self.last_update = Some(Instant::now());
 
-        self.application.update(&mut self.world, &mut self.renderer, dt);
+        self.application.update(&mut self.state, dt);
     }
 }
 
@@ -118,22 +98,20 @@ impl winit::application::ApplicationHandler for Engine {
         let window = event_loop.create_window(self.window_attributes.clone()).unwrap();
         let window = Arc::new(window);
 
-        let mut world = World::default();
-        let mut renderer = Renderer::new(Arc::clone(&window));
-        let application = self.application_factory.create_application(&mut world, &mut renderer);
+        let mut state = EngineState::new(Renderer::new(Arc::clone(&window)));
+        let application = self.application_factory.create_application(&mut state);
 
-        let camera_uniform_buffer = renderer.create_buffer()
+        let camera_uniform_buffer = state.renderer.create_buffer()
             .size(size_of::<Mat4>() as u64)
             .create();
-        let camera_bind_group = renderer.create_camera_bind_group()
+        let camera_bind_group = state.renderer.create_camera_bind_group()
             .uniform_buffer(camera_uniform_buffer)
             .create();
 
         self.started = Some(StartedEngine {
             window,
 
-            world,
-            renderer,
+            state,
             application,
 
             camera_uniform_buffer,
@@ -169,7 +147,7 @@ impl winit::application::ApplicationHandler for Engine {
         use winit::event::WindowEvent as We;
         match event {
             We::Resized(physical_size) => {
-                started.renderer.resize(physical_size);
+                started.state.renderer.resize(physical_size);
             },
             We::CloseRequested => {
                 self.started = None;

@@ -23,8 +23,7 @@ impl Camera {
 }
 
 struct GltfLoadingData<'a> {
-    world: &'a mut engine::World,
-    renderer: &'a mut engine::Renderer,
+    state: &'a mut engine::EngineState,
     gltf_buffers: Vec<gltf::buffer::Data>,
 }
 
@@ -33,21 +32,19 @@ pub struct Application {
 }
 
 impl Application {
-    pub fn new(world: &mut engine::World, renderer: &mut engine::Renderer) -> Self {
+    pub fn new(state: &mut engine::EngineState) -> Self {
         let mut this = Application {
             camera: None,
         };
-        this.init(world, renderer);
+        this.init(state);
         this
     }
 
-    fn init(&mut self, world: &mut engine::World, renderer: &mut engine::Renderer) {
-        println!("Loading scene...");
+    fn init(&mut self, state: &mut engine::EngineState) {
         let (document, gltf_buffers, _) = gltf::import_slice(SCENE_BYTES).expect("Could not load scene");
 
         let mut data = GltfLoadingData {
-            world,
-            renderer,
+            state,
             gltf_buffers,
         };
         for scene in document.scenes() {
@@ -63,6 +60,8 @@ impl Application {
         transform: Affine3A,
         mesh: gltf::Mesh,
     ) {
+        let state = &mut *data.state;
+
         for primitive in mesh.primitives() {
             let reader = primitive.reader(|buffer| data.gltf_buffers.get(buffer.index()).map(|p| &**p));
 
@@ -80,32 +79,20 @@ impl Application {
                 .collect_vec();
             let indices_bytes = bytemuck::cast_slice::<_, u8>(&indices);
 
-            if let Some(_) = reader.read_normals() {
-                println!("Has normals");
-            }
-            for i in 0..2048 {
-                if let Some(_) = reader.read_tex_coords(i) {
-                    println!("Has TexCoords{i}");
-                }
-                if let Some(colors) = reader.read_colors(i) {
-                    println!("Has Color{i} = {}", colors.into_rgb_f32().count());
-                }
-            }
-
-            let positions_buffer = data.renderer.create_buffer()
+            let positions_buffer = state.renderer.create_buffer()
                 .size(positions_bytes.len().try_into().expect("no overflow"))
                 .data(&positions_bytes)
                 .create();
-            let texcoords_buffer = data.renderer.create_buffer()
+            let texcoords_buffer = state.renderer.create_buffer()
                 .size(texcoords_bytes.len().try_into().expect("no overflow"))
                 .data(&texcoords_bytes)
                 .create();
-            let index_buffer = data.renderer.create_buffer()
+            let index_buffer = state.renderer.create_buffer()
                 .size(indices_bytes.len().try_into().expect("no overflow"))
                 .data(&indices_bytes)
                 .create();
 
-            data.world.instert_static_mesh(engine::StaticMesh {
+            state.insert_static_mesh(engine::StaticMesh {
                 transform,
                 positions_buffer,
                 texcoords_buffer,
@@ -128,16 +115,7 @@ impl Application {
         let global_affine = Affine3A::from_mat4(global_transform);
 
         if let Some(mesh) = node.mesh() {
-            println!("Mesh{} {:?}", mesh.index(), mesh.name());
             self.load_gltf_mesh(data, global_affine, mesh);
-        }
-
-        if let Some(light) = node.light() {
-            println!("Light{} {:?}", light.index(), light.name());
-        }
-            
-        if let Some(camera) = node.camera() {
-            println!("Camera{} {:?}", camera.index(), camera.name());
         }
 
         if self.camera.is_none() &&
@@ -159,11 +137,11 @@ impl Application {
 }
 
 impl engine::Application for Application {
-    fn update(&mut self, world: &mut engine::World, renderer: &mut engine::Renderer, _dt: f32) {
-        world.camera = self.camera.map(|camera| {
+    fn update(&mut self, state: &mut engine::EngineState, _dt: f32) {
+        state.camera = self.camera.map(|camera| {
             engine::Camera {
                 transform: camera.transform,
-                projection: camera.get_projection(renderer.aspect_ration()),
+                projection: camera.get_projection(state.renderer.aspect_ration()),
                 clear_color: wgpu::Color::BLACK,
             }
         });

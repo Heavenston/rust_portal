@@ -222,11 +222,23 @@ impl Renderer {
         create_buffer_builder(self)
     }
 
+    pub fn delete_buffer(&mut self, handle: BufferHandle) {
+        self.resources.buffers.remove(handle);
+    }
+
     pub fn create_object_bind_group(&'_ mut self) -> CreateObjectBindGroupBuilder<'_> {
         create_object_bind_group(self)
     }
 
+    pub fn delete_object_bind_group(&mut self, handle: ObjectBindGroupHandle) {
+        self.resources.object_bind_groups.remove(handle);
+    }
+
     pub fn create_camera_bind_group(&'_ mut self) -> CreateCameraBindGroupBuilder<'_> {
         create_camera_bind_group(self)
+    }
+
+    pub fn delete_camera_bind_group(&mut self, handle: CameraBindGroupHandle) {
+        self.resources.camera_bind_groups.remove(handle);
     }
 }
