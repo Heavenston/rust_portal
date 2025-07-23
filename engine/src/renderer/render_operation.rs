@@ -4,7 +4,7 @@ use crate::{uid::Uid, utils::default, BufferHandle, CameraBindGroupHandle, Objec
 
 use super::Renderer;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RenderPassResourceHandle(Uid);
 
 pub struct RenderPassOperation2<'a> {
@@ -78,9 +78,9 @@ struct RenderPassColorAttachmentInfo {
 }
 
 #[bon::builder(
-    builder_type(name = "AddRenderPassAttachment", vis = "pub"),
-    start_fn(name = "start_add_color_attachment", vis = ""),
-    finish_fn(name = "finish", vis = "pub")
+    builder_type(name = AddRenderPassColorAttachment, vis = "pub"),
+    start_fn(name = start_add_color_attachment, vis = ""),
+    finish_fn(name = finish, vis = "pub")
 )]
 fn add_color_attachment<'a, 'b, PS>(
     #[builder(start_fn)]
@@ -107,9 +107,9 @@ struct RenderPassDepthStencilAttachmentInfo {
 }
 
 #[bon::builder(
-    builder_type(name = "AddRenderPassDepthStencilAttachment", vis = "pub"),
-    start_fn(name = "start_add_depth_stencil_attachment", vis = ""),
-    finish_fn(name = "finish", vis = "pub")
+    builder_type(name = AddRenderPassDepthStencilAttachment, vis = "pub"),
+    start_fn(name = start_add_depth_stencil_attachment, vis = ""),
+    finish_fn(name = finish, vis = "pub")
 )]
 fn add_depth_stencil_attachment<'a, 'b, PS>(
     #[builder(start_fn)]
@@ -146,7 +146,7 @@ fn build_render_pass_operation<'a, 'b>(
     let color_attachments: Vec<Option<wgpu::RenderPassColorAttachment>> = color_attachments.iter()
         .map(|info| {
             wgpu::RenderPassColorAttachment {
-                view: resources.get_texture_view(info.texture_view_handle)
+                view: resources.get_texture_view(renderer, info.texture_view_handle)
                     .expect("Invalid color attachment texture view handle given"),
                 depth_slice: None,
                 resolve_target: None,
@@ -164,7 +164,7 @@ fn build_render_pass_operation<'a, 'b>(
         color_attachments: &color_attachments,
         depth_stencil_attachment: depth_stencil_attachment
             .map(|info| wgpu::RenderPassDepthStencilAttachment {
-                view: resources.get_texture_view(info.texture_view_handle)
+                view: resources.get_texture_view(renderer, info.texture_view_handle)
                     .expect("Invalid color attachment texture view handle given"),
                 depth_ops: info.depth_ops,
                 stencil_ops: info.stencil_ops,
@@ -186,8 +186,12 @@ fn build_render_pass_operation<'a, 'b>(
 impl<'a, 'b, S> RenderPassOperationBuilder<'a, 'b, S>
     where S: render_pass_operation_builder::State,
 {
-    pub fn color_attachment(self) -> AddRenderPassAttachment<'a, 'b, S> {
+    pub fn color_attachment(self) -> AddRenderPassColorAttachment<'a, 'b, S> {
         start_add_color_attachment(self)
+    }
+
+    pub fn depth_stencil_attachment(self) -> AddRenderPassDepthStencilAttachment<'a, 'b, S> {
+        start_add_depth_stencil_attachment(self)
     }
 }
 
@@ -200,13 +204,21 @@ struct PresentSurfaceResource {
 #[derive(Default)]
 struct RenderPassResources {
     present_surface: Option<PresentSurfaceResource>,
+    depth_buffer_resource_handle: RenderPassResourceHandle,
 }
 
 impl RenderPassResources {
     /// Works with a texture or texture view handle
-    pub fn get_texture_view(&self, handle: RenderPassResourceHandle) -> Option<&wgpu::TextureView> {
+    pub fn get_texture_view<'a>(&'a self, renderer: &'a Renderer, handle: RenderPassResourceHandle) -> Option<&'a wgpu::TextureView> {
         if let Some(present_surface) = &self.present_surface && present_surface.handle == handle {
             return Some(&present_surface.texture_view);
+        }
+
+        if handle == self.depth_buffer_resource_handle {
+            return Some(&renderer.resources.textures
+                .get(renderer.depth_buffer_handle)
+                .expect("Depth buffer is present")
+                .view);
         }
 
         None
@@ -283,6 +295,10 @@ impl<'a> RenderOperation<'a> {
 
     pub fn using_present_texture(&mut self) -> RenderPassResourceHandle {
         self.create_present_surface().handle
+    }
+
+    pub fn using_depth_buffer(&mut self) -> RenderPassResourceHandle {
+        self.data.as_mut().expect("Already submitted??").resources.depth_buffer_resource_handle
     }
 }
 

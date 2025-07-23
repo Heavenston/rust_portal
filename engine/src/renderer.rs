@@ -2,6 +2,8 @@ mod render_operation;
 pub use render_operation::*;
 mod buffers;
 pub use buffers::*;
+mod textures;
+pub use textures::*;
 mod object_bind_group;
 pub use object_bind_group::*;
 mod camera_bind_group;
@@ -12,10 +14,12 @@ use std::sync::Arc;
 use crate::{ handle_map::HandleMap, utils::* };
 
 static DEFAULT_3D_MATERIAL_SHADER: &str = include_str!("default_3d_material.wgsl");
+static DEPTH_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 
 #[derive(Debug, Default)]
 pub struct RendererResources {
     buffers: HandleMap<BufferData>,
+    textures: HandleMap<TextureData>,
     object_bind_groups: HandleMap<ObjectBindGroupData>,
     camera_bind_groups: HandleMap<CameraBindGroupData>,
 }
@@ -37,6 +41,9 @@ pub struct Renderer {
     camera_bind_group_layout: wgpu::BindGroupLayout,
     object_bind_group_layout: wgpu::BindGroupLayout,
     default_3d_render_pipeline: wgpu::RenderPipeline,
+
+    depth_buffer_handle: TextureHandle,
+    depth_buffer: wgpu::Texture,
 
     resources: RendererResources,
 }
@@ -149,11 +156,23 @@ impl Renderer {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 ..default()
             },
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_TEXTURE_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: default(),
+                bias: default(),
+            }),
             multisample: default(),
             multiview: None,
             cache: None,
         });
+
+        let size = window.inner_size();
+        let depth_buffer = Self::create_depth_texture(&device, size);
+
+        let mut resources = RendererResources::default();
+        let depth_buffer_handle = resources.textures.insert(TextureData::from_wgpu(depth_buffer.clone()));
 
         let this = Self {
             instance,
@@ -162,7 +181,7 @@ impl Renderer {
             device,
             queue,
 
-            size: window.inner_size(),
+            size,
             window,
             surface_format,
 
@@ -170,7 +189,10 @@ impl Renderer {
             camera_bind_group_layout,
             default_3d_render_pipeline,
 
-            resources: default(),
+            depth_buffer_handle,
+            depth_buffer,
+
+            resources,
         };
         this.configure_surface();
         this
@@ -178,6 +200,25 @@ impl Renderer {
 
     pub fn new(window: Arc<winit::window::Window>) -> Self {
         pollster::block_on(Self::new_async(window))
+    }
+
+    fn create_depth_texture(device: &wgpu::Device, size: winit::dpi::PhysicalSize<u32>) -> wgpu::Texture {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: size.width.max(1),
+                height: size.height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_TEXTURE_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+            ,
+            view_formats: &[],
+        })
     }
 
     fn configure_surface(&self) {
@@ -206,6 +247,10 @@ impl Renderer {
     pub fn resize(&mut self, size: winit::dpi::PhysicalSize<u32>) {
         self.size = size;
         self.configure_surface();
+
+        let new_depth_buffer = Self::create_depth_texture(&self.device, size);
+        self.depth_buffer = new_depth_buffer.clone();
+        self.resources.textures.replace(self.depth_buffer_handle, TextureData::from_wgpu(new_depth_buffer));
     }
 
     pub fn render(&'_ mut self) -> RenderOperation<'_> {
@@ -224,6 +269,40 @@ impl Renderer {
 
     pub fn delete_buffer(&mut self, handle: BufferHandle) {
         self.resources.buffers.remove(handle);
+    }
+
+    pub fn write_texture(&self, texture_handle: TextureHandle, data: &[u8]) {
+        let texture = &self.resources.textures.get(texture_handle)
+            .expect("Invalid texture handle given").texture;
+
+        let size = texture.size();
+        let format = texture.format();
+
+        let Some(pixel_byte_size) = format.target_pixel_byte_cost()
+        else { panic!("Writing to a texture of format {format:?} isn't supported") };
+
+        self.queue.write_texture(wgpu::TexelCopyTextureInfoBase {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        }, data, wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(pixel_byte_size * size.width),
+            rows_per_image: Some(size.height),
+        }, wgpu::Extent3d {
+            width: size.width,
+            height: size.height,
+            depth_or_array_layers: size.depth_or_array_layers,
+        });
+    }
+
+    pub fn create_texture<'a>(&'a mut self) -> CreateTextureBuilderBuilder<'a> {
+        create_texture_builder(self)
+    }
+
+    pub fn delete_texture(&mut self, handle: TextureHandle) {
+        self.resources.textures.remove(handle);
     }
 
     pub fn create_object_bind_group(&'_ mut self) -> CreateObjectBindGroupBuilder<'_> {

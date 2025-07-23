@@ -43,13 +43,21 @@ impl StartedEngine {
 
         let mut render = state.renderer.render();
         let present_texture_handle = render.using_present_texture();
+        let depth_buffer_handle = render.using_depth_buffer();
 
         // Object rendering pass
         {
             let mut render_pass = render.render_pass()
-                    .color_attachment()
+                .color_attachment()
                     .texture_view_handle(present_texture_handle)
                     .color_clear(wgpu::Color::RED)
+                    .finish()
+                .depth_stencil_attachment()
+                    .texture_view_handle(depth_buffer_handle)
+                    .depth_ops(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.),
+                        store: wgpu::StoreOp::Discard,
+                    })
                     .finish()
                 .build();
 
