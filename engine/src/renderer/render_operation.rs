@@ -37,6 +37,8 @@ impl<'a> RenderPassOperation2<'a> {
         object_bind_group_handle: ObjectBindGroupHandle,
         #[builder(name = positions_buffer)]
         positions_buffer_handle: BufferHandle,
+        #[builder(name = texcoords_buffer)]
+        texcoords_buffer_handle: BufferHandle,
         #[builder(name = index_buffer)]
         index_buffer_handle: BufferHandle,
     ) {
@@ -46,8 +48,11 @@ impl<'a> RenderPassOperation2<'a> {
         let object_bind_group: &wgpu::BindGroup =
             &self.renderer.resources.object_bind_groups.get(object_bind_group_handle)
             .expect("Invalid object_bind_group_handle given").bind_group;
-        let vertex_buffer: &wgpu::Buffer =
+        let positions_buffer: &wgpu::Buffer =
             &self.renderer.resources.buffers.get(positions_buffer_handle)
+            .expect("Invalid vertex buffer handle given").buffer;
+        let texcoords_buffer: &wgpu::Buffer =
+            &self.renderer.resources.buffers.get(texcoords_buffer_handle)
             .expect("Invalid vertex buffer handle given").buffer;
         let index_buffer: &wgpu::Buffer =
             &self.renderer.resources.buffers.get(index_buffer_handle)
@@ -59,7 +64,8 @@ impl<'a> RenderPassOperation2<'a> {
             self.last_camera_bind_group = Some(camera_bind_group_handle);
         }
         self.renderpass.set_bind_group(1, object_bind_group, &[]);
-        self.renderpass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        self.renderpass.set_vertex_buffer(0, positions_buffer.slice(..));
+        self.renderpass.set_vertex_buffer(1, texcoords_buffer.slice(..));
         self.renderpass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         self.renderpass.draw_indexed(indices, base_vertex, 0..1);
     }

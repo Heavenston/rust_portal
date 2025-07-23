@@ -15,10 +15,12 @@ var<uniform> object_uniforms: ObjectUniforms;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
+    @location(1) texcoords: vec2<f32>,
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
+    @location(0) texcoords: vec2<f32>,
 }
 
 @vertex
@@ -27,6 +29,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
     var out: VertexOutput;
     out.clip_position = mvp * vec4<f32>(input.position, 1.);
+    out.texcoords = input.texcoords;
     return out;
 }
 
@@ -35,8 +38,10 @@ struct FragmentOutput {
 }
 
 @fragment
-fn fs_main() -> FragmentOutput {
+fn fs_main(in: VertexOutput) -> FragmentOutput {
+    var uv = ((in.texcoords % 1.) + vec2<f32>(1.)) % 1.;
+
     var out: FragmentOutput;
-    out.color = vec4<f32>(0.3, 0.2, 0.1, 1.0);
+    out.color = vec4<f32>(uv, 0., 1.0);
     return out;
 }

@@ -14,6 +14,8 @@ pub struct StaticMesh {
     pub transform: Affine3A,
     /// list of vec3
     pub positions_buffer: BufferHandle,
+    /// list of vec2
+    pub texcoords_buffer: BufferHandle,
     /// list of u32
     pub index_buffer: BufferHandle,
     /// At most the size of the indices buffer
@@ -22,7 +24,6 @@ pub struct StaticMesh {
 
 #[derive(Default, Debug, Clone)]
 pub(crate) struct StaticMeshGPUCache {
-    pub uniform_buffer: BufferHandle,
     pub object_bind_group: ObjectBindGroupHandle,
 }
 

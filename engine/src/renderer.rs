@@ -119,12 +119,18 @@ impl Renderer {
                 entry_point: None,
                 compilation_options: default(),
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: size_of::<f32>() as u64 * 3,
+                    array_stride: size_of::<glam::Vec3>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[wgpu::VertexAttribute {
                         format: wgpu::VertexFormat::Float32x3,
-                        offset: 0,
-                        shader_location: 0,
+                        offset: 0, shader_location: 0,
+                    }],
+                }, wgpu::VertexBufferLayout {
+                    array_stride: size_of::<glam::Vec2>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x2,
+                        offset: 0, shader_location: 1,
                     }],
                 }],
             },
@@ -148,22 +154,6 @@ impl Renderer {
             multiview: None,
             cache: None,
         });
-
-        // let world_uniforms_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        //     label: Some("world_uniforms_buffer"),
-        //     size: size_of::<f32>() as u64 * 4 * 4,
-        //     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        //     mapped_at_creation: false,
-        // });
-
-        // let world_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        //     label: Some("world_bind_group"),
-        //     layout: &world_bind_group_layout,
-        //     entries: &[wgpu::BindGroupEntry {
-        //         binding: 0,
-        //         resource: world_uniforms_buffer.as_entire_binding(),
-        //     }],
-        // });
 
         let this = Self {
             instance,

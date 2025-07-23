@@ -56,7 +56,6 @@ impl StartedEngine {
 
             // TODO: FIXME: Leaks buffers when static meshes are removed
             *cache = Some(StaticMeshGPUCache {
-                uniform_buffer,
                 object_bind_group,
             });
         }
@@ -80,6 +79,7 @@ impl StartedEngine {
                     .object_bind_group(cache.object_bind_group)
                     .index_buffer(mesh.index_buffer)
                     .positions_buffer(mesh.positions_buffer)
+                    .texcoords_buffer(mesh.texcoords_buffer)
                     .draw(0..mesh.vertex_count);
             }
 

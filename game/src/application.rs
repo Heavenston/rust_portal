@@ -1,7 +1,5 @@
-use std::mem::size_of;
-
 use engine::utils::*;
-use glam::{Affine3A, Mat4, Vec3};
+use glam::{Affine3A, Mat4, Vec2, Vec3};
 use itertools::Itertools;
 
 static SCENE_BYTES: &[u8] = include_bytes!("../../resources/simple_scene.glb");
@@ -72,14 +70,35 @@ impl Application {
                 .map(Vec3::from_array)
                 .collect_vec();
             let positions_bytes = bytemuck::cast_slice::<_, u8>(&positions);
+            let texcoords = reader.read_tex_coords(0).expect("Mesh without texcoords?")
+                .into_f32()
+                .map(Vec2::from_array)
+                .collect_vec();
+            let texcoords_bytes = bytemuck::cast_slice::<_, u8>(&texcoords);
             let indices = reader.read_indices().expect("Mesh without indices is not supported")
                 .into_u32()
                 .collect_vec();
             let indices_bytes = bytemuck::cast_slice::<_, u8>(&indices);
 
+            if let Some(_) = reader.read_normals() {
+                println!("Has normals");
+            }
+            for i in 0..2048 {
+                if let Some(_) = reader.read_tex_coords(i) {
+                    println!("Has TexCoords{i}");
+                }
+                if let Some(colors) = reader.read_colors(i) {
+                    println!("Has Color{i} = {}", colors.into_rgb_f32().count());
+                }
+            }
+
             let positions_buffer = data.renderer.create_buffer()
                 .size(positions_bytes.len().try_into().expect("no overflow"))
                 .data(&positions_bytes)
+                .create();
+            let texcoords_buffer = data.renderer.create_buffer()
+                .size(texcoords_bytes.len().try_into().expect("no overflow"))
+                .data(&texcoords_bytes)
                 .create();
             let index_buffer = data.renderer.create_buffer()
                 .size(indices_bytes.len().try_into().expect("no overflow"))
@@ -89,6 +108,7 @@ impl Application {
             data.world.instert_static_mesh(engine::StaticMesh {
                 transform,
                 positions_buffer,
+                texcoords_buffer,
                 index_buffer,
                 vertex_count: indices.len().try_into().expect("No overflow"),
             }.into());
