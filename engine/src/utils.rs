@@ -15,3 +15,15 @@ where
     }
     ary
 }
+
+pub fn flatten_array<T, const A: usize, const B: usize>(
+    array: [[T; A]; B]
+) -> [T; A*B]
+where T: Default,
+{
+    let mut ary: [T; A*B] = std::array::from_fn(|_| Default::default());
+    for (idx, val) in array.into_iter().flatten().enumerate() {
+        ary[idx] = val;
+    }
+    ary
+}

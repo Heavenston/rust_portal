@@ -1,4 +1,6 @@
-use crate::{uid::Uid, utils::default};
+use std::ops::Range;
+
+use crate::{uid::Uid, utils::default, BufferHandle, CameraBindGroupHandle, ObjectBindGroupHandle};
 
 use super::Renderer;
 
@@ -6,18 +8,60 @@ use super::Renderer;
 pub struct RenderPassResourceHandle(Uid);
 
 pub struct RenderPassOperation2<'a> {
+    renderer: &'a Renderer,
     renderpass: wgpu::RenderPass<'a>,
+
+    last_camera_bind_group: Option<CameraBindGroupHandle>,
 }
 
+#[bon::bon]
 impl<'a> RenderPassOperation2<'a> {
-    fn new(renderpass: wgpu::RenderPass<'a>) -> Self {
-        Self { renderpass }
-    }
-
     /// Just drop self
     pub fn finish(self) {
         // To be clear, this function just drops self
         drop(self);
+    }
+
+    #[builder(
+        finish_fn = draw
+    )]
+    pub fn draw_call(
+        &mut self,
+        #[builder(finish_fn)]
+        indices: Range<u32>,
+        #[builder(default = 0)]
+        base_vertex: i32,
+        #[builder(name = camera_bind_group)]
+        camera_bind_group_handle: CameraBindGroupHandle,
+        #[builder(name = object_bind_group)]
+        object_bind_group_handle: ObjectBindGroupHandle,
+        #[builder(name = positions_buffer)]
+        positions_buffer_handle: BufferHandle,
+        #[builder(name = index_buffer)]
+        index_buffer_handle: BufferHandle,
+    ) {
+        let camera_bind_group: &wgpu::BindGroup =
+            &self.renderer.resources.camera_bind_groups.get(camera_bind_group_handle)
+            .expect("Invalid camera_bind_group_handle given").bind_group;
+        let object_bind_group: &wgpu::BindGroup =
+            &self.renderer.resources.object_bind_groups.get(object_bind_group_handle)
+            .expect("Invalid object_bind_group_handle given").bind_group;
+        let vertex_buffer: &wgpu::Buffer =
+            &self.renderer.resources.buffers.get(positions_buffer_handle)
+            .expect("Invalid vertex buffer handle given").buffer;
+        let index_buffer: &wgpu::Buffer =
+            &self.renderer.resources.buffers.get(index_buffer_handle)
+            .expect("Invalid index buffer handle given").buffer;
+
+        // pipeline is set on this object creation
+        if self.last_camera_bind_group != Some(camera_bind_group_handle) {
+            self.renderpass.set_bind_group(0, camera_bind_group, &[]);
+            self.last_camera_bind_group = Some(camera_bind_group_handle);
+        }
+        self.renderpass.set_bind_group(1, object_bind_group, &[]);
+        self.renderpass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        self.renderpass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        self.renderpass.draw_indexed(indices, base_vertex, 0..1);
     }
 }
 
@@ -91,7 +135,7 @@ fn build_render_pass_operation<'a, 'b>(
     #[builder(field)]
     depth_stencil_attachment: Option<RenderPassDepthStencilAttachmentInfo>,
 ) -> RenderPassOperation2<'a> {
-    let RenderPassOperationData { encoder, resources, .. } = data;
+    let RenderPassOperationData { renderer, encoder, resources } = data;
 
     let color_attachments: Vec<Option<wgpu::RenderPassColorAttachment>> = color_attachments.iter()
         .map(|info| {
@@ -101,21 +145,15 @@ fn build_render_pass_operation<'a, 'b>(
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: info.color_clear
-                        .map(wgpu::LoadOp::Clear)
-                        .unwrap_or(wgpu::LoadOp::Load),
-                    store: if info.discard {
-                        wgpu::StoreOp::Discard
-                    } else {
-                        wgpu::StoreOp::Store
-                    },
+                    load: info.color_clear.map(wgpu::LoadOp::Clear).unwrap_or(wgpu::LoadOp::Load),
+                    store: if info.discard { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store },
                 },
             }
         })
         .map(Some)
         .collect();
     
-    let renderpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+    let mut renderpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: None,
         color_attachments: &color_attachments,
         depth_stencil_attachment: depth_stencil_attachment
@@ -129,7 +167,14 @@ fn build_render_pass_operation<'a, 'b>(
         occlusion_query_set: None,
     });
 
-    RenderPassOperation2::new(renderpass)
+    renderpass.set_pipeline(&renderer.default_3d_render_pipeline);
+
+    RenderPassOperation2 {
+        renderer,
+        renderpass,
+
+        last_camera_bind_group: None,
+    }
 }
 
 impl<'a, 'b, S> RenderPassOperationBuilder<'a, 'b, S>
@@ -152,14 +197,6 @@ struct RenderPassResources {
 }
 
 impl RenderPassResources {
-    pub fn get_texture(&self, handle: RenderPassResourceHandle) -> Option<&wgpu::Texture> {
-        if let Some(present_surface) = &self.present_surface && present_surface.handle == handle {
-            return Some(&present_surface.texture.texture);
-        }
-
-        None
-    }
-
     /// Works with a texture or texture view handle
     pub fn get_texture_view(&self, handle: RenderPassResourceHandle) -> Option<&wgpu::TextureView> {
         if let Some(present_surface) = &self.present_surface && present_surface.handle == handle {

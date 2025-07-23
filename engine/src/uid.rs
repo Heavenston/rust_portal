@@ -28,7 +28,7 @@ impl Uid {
 
         THREAD_LOCAL_DATA.with(|data| {
             let thread_id = data.thread_id;
-            let counter = data.counter.replace(data.counter.get() + 1);
+            let counter = data.counter.replace(data.counter.get().checked_add(1).expect("No overflow"));
 
             Self(concat_arrays(thread_id.to_ne_bytes(), counter.to_ne_bytes()))
         })
