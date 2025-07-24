@@ -76,6 +76,8 @@ impl<'a, S> CreateBindGroupBuilder<'a, S>
             address_mode_w: wgpu::AddressMode::Repeat,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            anisotropy_clamp: 3,
             ..default()
         });
         self.entries.push((binding, BindGroupResourceHandle::Sampler(sampler)));
