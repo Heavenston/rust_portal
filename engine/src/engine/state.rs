@@ -21,6 +21,8 @@ pub struct StaticMesh {
     pub index_buffer: BufferHandle,
     /// At most the size of the indices buffer
     pub vertex_count: u32,
+
+    pub material: MaterialHandle,
 }
 
 impl StaticMesh {
@@ -46,15 +48,21 @@ pub struct EngineState {
     pub camera: Option<Camera>,
     /// immutable other than for the public mut methods
     pub(super) static_meshes: handle_map::HandleMap<StaticMeshData>,
+
+    pub materials: MaterialsStore,
 }
 
 impl EngineState {
-    pub fn new(renderer: Renderer) -> Self {
+    pub fn new(mut renderer: Renderer) -> Self {
+        let mut materials: MaterialsStore = default();
+        materials.register(super::pbr_material_factory(&mut renderer));
         Self {
             renderer,
 
             camera: default(),
             static_meshes: default(),
+
+            materials,
         }
     }
 

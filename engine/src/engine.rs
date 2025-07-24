@@ -2,6 +2,10 @@ mod application;
 pub use application::*;
 mod state;
 pub use state::*;
+mod materials;
+pub use materials::*;
+mod pbr_material;
+pub use pbr_material::*;
 
 use crate::{ * };
 

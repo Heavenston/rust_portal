@@ -1,3 +1,4 @@
+use std::hash::{ DefaultHasher, Hasher, Hash };
 
 pub fn default<T: Default>() -> T {
     T::default()
@@ -26,4 +27,10 @@ where T: Default,
         ary[idx] = val;
     }
     ary
+}
+
+pub fn hash_value<T: Hash>(val: &T) -> u64 {
+    let mut state = DefaultHasher::new();
+    val.hash(&mut state);
+    state.finish()
 }

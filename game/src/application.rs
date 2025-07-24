@@ -98,6 +98,7 @@ impl Application {
                 texcoords_buffer,
                 index_buffer,
                 vertex_count: indices.len().try_into().expect("No overflow"),
+                material: todo!(),
             }.into());
         }
     }

@@ -13,8 +13,8 @@ use std::sync::Arc;
 
 use crate::{ handle_map::HandleMap, utils::* };
 
-static DEFAULT_3D_MATERIAL_SHADER: &str = include_str!("default_3d_material.wgsl");
-static DEPTH_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
+static PBR_SHADER_SOURCE: &str = include_str!("pbr_shader.wgsl");
+pub(crate) static DEPTH_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 
 #[derive(Debug, Default)]
 pub struct RendererResources {
@@ -31,12 +31,12 @@ pub struct Renderer {
     surface: wgpu::Surface<'static>,
     #[expect(dead_code)]
     adapter: wgpu::Adapter,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    pub(crate) device: wgpu::Device,
+    pub(crate) queue: wgpu::Queue,
 
     window: Arc<winit::window::Window>,
     size: winit::dpi::PhysicalSize<u32>,
-    surface_format: wgpu::TextureFormat,
+    pub(crate) surface_format: wgpu::TextureFormat,
 
     camera_bind_group_layout: wgpu::BindGroupLayout,
     object_bind_group_layout: wgpu::BindGroupLayout,
@@ -78,8 +78,8 @@ impl Renderer {
         let surface_format = cap.formats[0];
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(DEFAULT_3D_MATERIAL_SHADER),
-            source: wgpu::ShaderSource::Wgsl(DEFAULT_3D_MATERIAL_SHADER.into()),
+            label: Some("pbr shader source"),
+            source: wgpu::ShaderSource::Wgsl(PBR_SHADER_SOURCE.into()),
         });
 
         let camera_bind_group_layout =
@@ -124,7 +124,10 @@ impl Renderer {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: None,
-                compilation_options: default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &[],
+                    ..default()
+                },
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: size_of::<glam::Vec3>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,

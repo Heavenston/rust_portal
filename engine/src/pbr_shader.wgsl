@@ -1,3 +1,4 @@
+override ENABLE_DIFFUSE_TEXTURE: bool = false;
 
 struct WorldUniforms {
     view_projection: mat4x4<f32>,
@@ -12,6 +13,17 @@ struct ObjectUniforms {
 
 @group(1) @binding(0)
 var<uniform> object_uniforms: ObjectUniforms;
+
+struct MaterialUniforms {
+    base_color: vec4<f32>,
+}
+
+@group(2) @binding(0)
+var<uniform> material_uniforms: MaterialUniforms;
+@group(2) @binding(1)
+var<uniform> t_diffuse: texture_2d<f32>;
+@group(2) @binding(2)
+var<uniform> s_diffuse: sampler;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -39,9 +51,12 @@ struct FragmentOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOutput {
-    var uv = ((in.texcoords % 1.) + vec2<f32>(1.)) % 1.;
-
     var out: FragmentOutput;
-    out.color = vec4<f32>(uv, 0., 1.0);
+    if ENABLE_DIFFUSE_TEXTURE {
+        out.color = textureSample(t_diffuse, s_diffuse, in.texcoords);
+    }
+    else {
+        out.color = material_uniforms.base_color;
+    }
     return out;
 }
