@@ -4,7 +4,7 @@ use std::{ any::{ Any, TypeId }, collections::HashMap, fmt::Debug, hash::Hash, m
 
 #[derive(Debug)]
 pub struct MaterialData {
-    pub pipeline: wgpu::RenderPipeline,
+    pub pipeline: PipelineHandle,
 }
 
 pub trait MaterialParameters: Debug + PartialEq + Eq + Hash + Clone + 'static { }
@@ -47,6 +47,12 @@ impl<P, F> From<F> for FactoryWrapper<P, F>
 pub struct MaterialHandle {
     parameters_type_id: TypeId,
     parameters_hash: u64,
+}
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct MaterialInstance {
+    pub material: MaterialHandle,
+    pub bind_group: BindGroupHandle,
 }
 
 #[derive_where::derive_where(Debug)]

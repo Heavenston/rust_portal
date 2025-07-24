@@ -4,24 +4,26 @@ mod buffers;
 pub use buffers::*;
 mod textures;
 pub use textures::*;
-mod object_bind_group;
-pub use object_bind_group::*;
-mod camera_bind_group;
-pub use camera_bind_group::*;
+mod bind_group_layout;
+pub use bind_group_layout::*;
+mod bind_group;
+pub use bind_group::*;
+mod pipeline;
+pub use pipeline::*;
 
 use std::sync::Arc;
 
 use crate::{ handle_map::HandleMap, utils::* };
 
-static PBR_SHADER_SOURCE: &str = include_str!("pbr_shader.wgsl");
 pub(crate) static DEPTH_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 
 #[derive(Debug, Default)]
 pub struct RendererResources {
     buffers: HandleMap<BufferData>,
     textures: HandleMap<TextureData>,
-    object_bind_groups: HandleMap<ObjectBindGroupData>,
-    camera_bind_groups: HandleMap<CameraBindGroupData>,
+    bind_group_layouts: HandleMap<BindGroupLayoutData>,
+    bind_groups: HandleMap<BindGroupData>,
+    pipelines: HandleMap<PipelineData>,
 }
 
 #[derive(Debug)]
@@ -37,10 +39,6 @@ pub struct Renderer {
     window: Arc<winit::window::Window>,
     size: winit::dpi::PhysicalSize<u32>,
     pub(crate) surface_format: wgpu::TextureFormat,
-
-    camera_bind_group_layout: wgpu::BindGroupLayout,
-    object_bind_group_layout: wgpu::BindGroupLayout,
-    default_3d_render_pipeline: wgpu::RenderPipeline,
 
     depth_buffer_handle: TextureHandle,
     depth_buffer: wgpu::Texture,
@@ -77,100 +75,6 @@ impl Renderer {
         let cap = surface.get_capabilities(&adapter);
         let surface_format = cap.formats[0];
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("pbr shader source"),
-            source: wgpu::ShaderSource::Wgsl(PBR_SHADER_SOURCE.into()),
-        });
-
-        let camera_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("camera_bind_group_layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(64),
-                    },
-                    count: None,
-                }],
-            });
-
-        let object_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("object_bind_group_layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(64),
-                    },
-                    count: None,
-                }],
-            });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("pipeline_layout"),
-            bind_group_layouts: &[&camera_bind_group_layout, &object_bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-        let default_3d_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("render_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: None,
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &[],
-                    ..default()
-                },
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: size_of::<glam::Vec3>() as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x3,
-                        offset: 0, shader_location: 0,
-                    }],
-                }, wgpu::VertexBufferLayout {
-                    array_stride: size_of::<glam::Vec2>() as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x2,
-                        offset: 0, shader_location: 1,
-                    }],
-                }],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: None,
-                compilation_options: default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                cull_mode: Some(wgpu::Face::Back),
-                polygon_mode: wgpu::PolygonMode::Fill,
-                ..default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_TEXTURE_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: default(),
-                bias: default(),
-            }),
-            multisample: default(),
-            multiview: None,
-            cache: None,
-        });
-
         let size = window.inner_size();
         let depth_buffer = Self::create_depth_texture(&device, size);
 
@@ -187,10 +91,6 @@ impl Renderer {
             size,
             window,
             surface_format,
-
-            object_bind_group_layout,
-            camera_bind_group_layout,
-            default_3d_render_pipeline,
 
             depth_buffer_handle,
             depth_buffer,
@@ -308,19 +208,33 @@ impl Renderer {
         self.resources.textures.remove(handle);
     }
 
-    pub fn create_object_bind_group(&'_ mut self) -> CreateObjectBindGroupBuilder<'_> {
-        create_object_bind_group(self)
+    pub fn create_bind_group_layout(&'_ mut self) -> CreateBindGroupLayoutBuilder<'_> {
+        create_bind_group_layout(self)
     }
 
-    pub fn delete_object_bind_group(&mut self, handle: ObjectBindGroupHandle) {
-        self.resources.object_bind_groups.remove(handle);
+    pub fn delete_bind_group_layout(&mut self, handle: BindGroupLayoutHandle) {
+        self.resources.bind_group_layouts.remove(handle);
     }
 
-    pub fn create_camera_bind_group(&'_ mut self) -> CreateCameraBindGroupBuilder<'_> {
-        create_camera_bind_group(self)
+    pub fn create_bind_group(&'_ mut self) -> CreateBindGroupBuilder<'_> {
+        create_bind_group(self)
     }
 
-    pub fn delete_camera_bind_group(&mut self, handle: CameraBindGroupHandle) {
-        self.resources.camera_bind_groups.remove(handle);
+    pub fn delete_bind_group(&mut self, handle: BindGroupHandle) {
+        self.resources.bind_groups.remove(handle);
+    }
+
+    pub fn create_pipeline<'a, 'f2, 'f3, 'f4, 'f5, 'f6>(&'a mut self) -> CreatePipelineBuilderBuilder<'a, 'f2, 'f3, 'f4, 'f5, 'f6> {
+        create_pipeline_builder(self)
+    }
+
+    pub fn get_pipeline_bind_group_layouts(&self, handle: PipelineHandle) -> &[BindGroupLayoutHandle] {
+        &self.resources.pipelines.get(handle)
+            .expect("Invalind pipeline handle given")
+            .bind_group_layouts
+    }
+
+    pub fn delete_pipeline(&mut self, handle: PipelineHandle) {
+        self.resources.pipelines.remove(handle);
     }
 }

@@ -1,5 +1,5 @@
 use engine::utils::*;
-use glam::{Affine3A, Mat4, Vec2, Vec3};
+use glam::{Affine3A, Mat4, Vec2, Vec3, Vec4};
 use itertools::Itertools;
 
 static SCENE_BYTES: &[u8] = include_bytes!("../../resources/simple_scene.glb");
@@ -92,13 +92,32 @@ impl Application {
                 .data(&indices_bytes)
                 .create();
 
+            let material = state.materials.get_handle(&mut state.renderer, &engine::PbrMaterialParameters {
+                enable_diffuse_texture: false,
+            });
+            let material_uniform_buffer = state.renderer.create_buffer()
+                .size(size_of::<engine::PbrMaterialUniforms>() as u64)
+                .data(bytemuck::bytes_of(&engine::PbrMaterialUniforms {
+                    base_color: Vec4::new(1., 0., 0., 1.),
+                }))
+                .create();
+            let layout = state.renderer.get_pipeline_bind_group_layouts(state.materials.get(material).pipeline)[2];
+            let bind_group = state.renderer.create_bind_group()
+                .layout(layout)
+                .entry(0, material_uniform_buffer)
+                .create();
+            let material_instance = engine::MaterialInstance {
+                material,
+                bind_group,
+            };
+
             state.insert_static_mesh(engine::StaticMesh {
                 transform,
                 positions_buffer,
                 texcoords_buffer,
                 index_buffer,
                 vertex_count: indices.len().try_into().expect("No overflow"),
-                material: todo!(),
+                material_instance,
             }.into());
         }
     }

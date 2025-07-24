@@ -19,7 +19,7 @@ struct StartedEngine {
     application: Box<dyn Application>,
 
     camera_uniform_buffer: BufferHandle,
-    camera_bind_group: CameraBindGroupHandle,
+    camera_bind_group: BindGroupHandle,
 
     // FIXME: Probably not the best way to do this
     last_update: Option<Instant>,
@@ -66,12 +66,14 @@ impl StartedEngine {
                 .build();
 
             for (_, StaticMeshData { mesh, object_bind_group }) in state.static_meshes.iter() {
+                render_pass.set_pipeline(
+                    state.materials.get(mesh.material_instance.material).pipeline
+                );
+                render_pass.set_index_buffer(mesh.index_buffer);
+                render_pass.set_bind_group(0, self.camera_bind_group);
+                render_pass.set_bind_group(1, *object_bind_group);
+                render_pass.set_bind_group(2, mesh.material_instance.bind_group);
                 render_pass.draw_call()
-                    .camera_bind_group(self.camera_bind_group)
-                    .object_bind_group(*object_bind_group)
-                    .index_buffer(mesh.index_buffer)
-                    .positions_buffer(mesh.positions_buffer)
-                    .texcoords_buffer(mesh.texcoords_buffer)
                     .draw(0..mesh.vertex_count);
             }
 
@@ -116,8 +118,9 @@ impl winit::application::ApplicationHandler for Engine {
         let camera_uniform_buffer = state.renderer.create_buffer()
             .size(size_of::<Mat4>() as u64)
             .create();
-        let camera_bind_group = state.renderer.create_camera_bind_group()
-            .uniform_buffer(camera_uniform_buffer)
+        let camera_bind_group = state.renderer.create_bind_group()
+            .layout(state.camera_bind_group_layout)
+            .entry(0, camera_uniform_buffer)
             .create();
 
         self.started = Some(StartedEngine {

@@ -22,7 +22,7 @@ pub struct StaticMesh {
     /// At most the size of the indices buffer
     pub vertex_count: u32,
 
-    pub material: MaterialHandle,
+    pub material_instance: MaterialInstance,
 }
 
 impl StaticMesh {
@@ -36,7 +36,7 @@ impl StaticMesh {
 #[derive(Debug)]
 pub struct StaticMeshData {
     pub mesh: StaticMesh,
-    pub(super) object_bind_group: ObjectBindGroupHandle,
+    pub(super) object_bind_group: BindGroupHandle,
 }
 
 pub type StaticMeshHandle = handle_map::Handle<StaticMeshData>;
@@ -49,21 +49,37 @@ pub struct EngineState {
     /// immutable other than for the public mut methods
     pub(super) static_meshes: handle_map::HandleMap<StaticMeshData>,
 
+    pub(super) camera_bind_group_layout: BindGroupLayoutHandle,
+    pub(super) object_bind_group_layout: BindGroupLayoutHandle,
+
     pub materials: MaterialsStore,
 }
 
 impl EngineState {
     pub fn new(mut renderer: Renderer) -> Self {
-        let mut materials: MaterialsStore = default();
-        materials.register(super::pbr_material_factory(&mut renderer));
-        Self {
+        let camera_bind_group_layout = renderer.create_bind_group_layout()
+            .entry().binding(0).uniform_buffer().add()
+            .create();
+        let object_bind_group_layout = renderer.create_bind_group_layout()
+            .entry().binding(0).uniform_buffer().add()
+            .create();
+
+        let mut this = Self {
             renderer,
 
             camera: default(),
             static_meshes: default(),
 
-            materials,
-        }
+            camera_bind_group_layout,
+            object_bind_group_layout,
+
+            materials: default(),
+        };
+
+        let factory = super::create_pbr_material_factory(&mut this);
+        this.materials.register(factory);
+
+        this
     }
 
     pub fn insert_static_mesh(&mut self, mesh: StaticMesh) -> StaticMeshHandle {
@@ -75,8 +91,9 @@ impl EngineState {
             .data(bytemuck::bytes_of(&transform))
             .create();
 
-        let object_bind_group = renderer.create_object_bind_group()
-            .uniform_buffer(uniform_buffer)
+        let object_bind_group = renderer.create_bind_group()
+            .layout(self.object_bind_group_layout)
+            .entry(0, uniform_buffer)
             .create();
 
         self.static_meshes.insert(StaticMeshData {
@@ -86,8 +103,9 @@ impl EngineState {
     }
 
     pub fn remove_static_mesh(&mut self, handle: StaticMeshHandle) -> Option<StaticMesh> {
-        let StaticMeshData { mesh, object_bind_group } = self.static_meshes.remove(handle)?;
-        self.renderer.delete_object_bind_group(object_bind_group);
-        Some(mesh)
+        let _ = handle;
+        // This leads to leaks (the uniform buffer) which without reference counted handles i dont
+        // know how to fix (other than just included the uniform buffer in StaticMeshData)
+        unimplemented!()
     }
 }

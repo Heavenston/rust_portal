@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::{uid::Uid, utils::default, BufferHandle, CameraBindGroupHandle, ObjectBindGroupHandle};
+use crate::{ *, utils::* };
 
 use super::Renderer;
 
@@ -10,8 +10,6 @@ pub struct RenderPassResourceHandle(Uid);
 pub struct RenderPassOperation2<'a> {
     renderer: &'a Renderer,
     renderpass: wgpu::RenderPass<'a>,
-
-    last_camera_bind_group: Option<CameraBindGroupHandle>,
 }
 
 #[bon::bon]
@@ -20,6 +18,44 @@ impl<'a> RenderPassOperation2<'a> {
     pub fn finish(self) {
         // To be clear, this function just drops self
         drop(self);
+    }
+
+    pub fn set_pipeline(
+        &mut self,
+        pipeline: PipelineHandle,
+    ) {
+        let pipeline = &self.renderer.resources.pipelines.get(pipeline)
+            .expect("Invalid pipeline handle given").pipeline;
+        self.renderpass.set_pipeline(pipeline);
+    }
+
+    pub fn set_bind_group(
+        &mut self,
+        index: u32,
+        bind_group: BindGroupHandle,
+    ) {
+        let bind_group = &self.renderer.resources.bind_groups.get(bind_group)
+            .expect("Invalid pipeline handle given").bind_group;
+        self.renderpass.set_bind_group(index, bind_group, &[]);
+    }
+
+    pub fn set_vertex_buffer(
+        &mut self,
+        index: u32,
+        buffer: BufferHandle,
+    ) {
+        let buffer = &self.renderer.resources.buffers.get(buffer)
+            .expect("Invalid pipeline handle given").buffer;
+        self.renderpass.set_vertex_buffer(index, buffer.slice(..));
+    }
+
+    pub fn set_index_buffer(
+        &mut self,
+        buffer: BufferHandle,
+    ) {
+        let buffer = &self.renderer.resources.buffers.get(buffer)
+            .expect("Invalid pipeline handle given").buffer;
+        self.renderpass.set_index_buffer(buffer.slice(..), wgpu::IndexFormat::Uint32);
     }
 
     #[builder(
@@ -31,42 +67,7 @@ impl<'a> RenderPassOperation2<'a> {
         indices: Range<u32>,
         #[builder(default = 0)]
         base_vertex: i32,
-        #[builder(name = camera_bind_group)]
-        camera_bind_group_handle: CameraBindGroupHandle,
-        #[builder(name = object_bind_group)]
-        object_bind_group_handle: ObjectBindGroupHandle,
-        #[builder(name = positions_buffer)]
-        positions_buffer_handle: BufferHandle,
-        #[builder(name = texcoords_buffer)]
-        texcoords_buffer_handle: BufferHandle,
-        #[builder(name = index_buffer)]
-        index_buffer_handle: BufferHandle,
     ) {
-        let camera_bind_group: &wgpu::BindGroup =
-            &self.renderer.resources.camera_bind_groups.get(camera_bind_group_handle)
-            .expect("Invalid camera_bind_group_handle given").bind_group;
-        let object_bind_group: &wgpu::BindGroup =
-            &self.renderer.resources.object_bind_groups.get(object_bind_group_handle)
-            .expect("Invalid object_bind_group_handle given").bind_group;
-        let positions_buffer: &wgpu::Buffer =
-            &self.renderer.resources.buffers.get(positions_buffer_handle)
-            .expect("Invalid vertex buffer handle given").buffer;
-        let texcoords_buffer: &wgpu::Buffer =
-            &self.renderer.resources.buffers.get(texcoords_buffer_handle)
-            .expect("Invalid vertex buffer handle given").buffer;
-        let index_buffer: &wgpu::Buffer =
-            &self.renderer.resources.buffers.get(index_buffer_handle)
-            .expect("Invalid index buffer handle given").buffer;
-
-        // pipeline is set on this object creation
-        if self.last_camera_bind_group != Some(camera_bind_group_handle) {
-            self.renderpass.set_bind_group(0, camera_bind_group, &[]);
-            self.last_camera_bind_group = Some(camera_bind_group_handle);
-        }
-        self.renderpass.set_bind_group(1, object_bind_group, &[]);
-        self.renderpass.set_vertex_buffer(0, positions_buffer.slice(..));
-        self.renderpass.set_vertex_buffer(1, texcoords_buffer.slice(..));
-        self.renderpass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         self.renderpass.draw_indexed(indices, base_vertex, 0..1);
     }
 }
@@ -159,7 +160,7 @@ fn build_render_pass_operation<'a, 'b>(
         .map(Some)
         .collect();
     
-    let mut renderpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+    let renderpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: None,
         color_attachments: &color_attachments,
         depth_stencil_attachment: depth_stencil_attachment
@@ -173,13 +174,9 @@ fn build_render_pass_operation<'a, 'b>(
         occlusion_query_set: None,
     });
 
-    renderpass.set_pipeline(&renderer.default_3d_render_pipeline);
-
     RenderPassOperation2 {
         renderer,
         renderpass,
-
-        last_camera_bind_group: None,
     }
 }
 
