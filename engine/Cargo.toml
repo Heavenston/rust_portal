@@ -9,6 +9,8 @@ derive-where = { version = "1.5.0", features = ["nightly"] }
 bytemuck = "1.23.1"
 glam = { version = "0.30.4", features = ["bytemuck"] }
 pollster = "0.4.0"
-wgpu = "26.0.1"
+wgpu = { version = "26.0.1", features = ["naga-ir"] }
 winit = { version = "0.30.11" }
 derive_more = { version = "2.0.1", features = ["from"] }
+naga = "26.0.0"
+naga_oil = { git = "https://github.com/bevyengine/naga_oil.git", rev = "c448e5f", version = "0.18.0" }

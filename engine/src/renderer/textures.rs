@@ -7,9 +7,28 @@ pub enum TextureFormat {
 }
 
 impl TextureFormat {
-    pub fn to_wgpu(self) -> wgpu::TextureFormat {
+    pub fn pixel_byte_size(self) -> u32 {
         match self {
-            TextureFormat::Rgba8Unorm => wgpu::TextureFormat::Rgba8Unorm,
+            TextureFormat::Rgba8Unorm => 4,
+        }
+    }
+}
+
+impl From<TextureFormat> for wgpu::TextureFormat {
+    fn from(value: TextureFormat) -> Self {
+        match value {
+            TextureFormat::Rgba8Unorm => Self::Rgba8Unorm,
+        }
+    }
+}
+
+impl TryFrom<wgpu::TextureFormat> for TextureFormat {
+    type Error = ();
+
+    fn try_from(value: wgpu::TextureFormat) -> Result<Self, Self::Error> {
+        match value {
+            wgpu::TextureFormat::Rgba8Unorm => Ok(Self::Rgba8Unorm),
+            _ => Err(()),
         }
     }
 }
@@ -18,12 +37,14 @@ impl TextureFormat {
 pub struct TextureData {
     pub(super) texture: wgpu::Texture,
     pub(super) view: wgpu::TextureView,
+    pub(super) format: Option<TextureFormat>,
 }
 
 impl TextureData {
     pub(super) fn from_wgpu(texture: wgpu::Texture) -> Self {
         Self {
             view: texture.create_view(&default()),
+            format: texture.format().try_into().ok(),
             texture,
         }
     }
@@ -51,7 +72,7 @@ pub fn create_texture_builder(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: format.to_wgpu(),
+        format: format.into(),
         usage: wgpu::TextureUsages::COPY_DST |
             wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],

@@ -54,7 +54,7 @@ impl StartedEngine {
             let mut render_pass = render.render_pass()
                 .color_attachment()
                     .texture_view_handle(present_texture_handle)
-                    .color_clear(wgpu::Color::RED)
+                    .color_clear(camera.clear_color)
                     .finish()
                 .depth_stencil_attachment()
                     .texture_view_handle(depth_buffer_handle)
@@ -70,6 +70,8 @@ impl StartedEngine {
                     state.materials.get(mesh.material_instance.material).pipeline
                 );
                 render_pass.set_index_buffer(mesh.index_buffer);
+                render_pass.set_vertex_buffer(0, mesh.positions_buffer);
+                render_pass.set_vertex_buffer(1, mesh.texcoords_buffer);
                 render_pass.set_bind_group(0, self.camera_bind_group);
                 render_pass.set_bind_group(1, *object_bind_group);
                 render_pass.set_bind_group(2, mesh.material_instance.bind_group);

@@ -9,15 +9,16 @@ pub struct BindGroupData {
 }
 pub type BindGroupHandle = handle_map::Handle<BindGroupData>;
 
-#[derive(Debug, Clone, Copy, From)]
+#[derive(Debug, Clone, From)]
 pub enum BindGroupResourceHandle {
     Buffer(BufferHandle),
     Texture(TextureHandle),
+    Sampler(wgpu::Sampler),
 }
 
 impl BindGroupResourceHandle {
-    pub(super) fn to_wgpu<'a>(self, resources: &'a RendererResources) -> Option<wgpu::BindingResource<'a>> {
-        Some(match self {
+    pub(super) fn to_wgpu<'a>(&'a self, resources: &'a RendererResources) -> Option<wgpu::BindingResource<'a>> {
+        Some(match *self {
             Self::Buffer(handle) => {
                 let buffer = &resources.buffers.get(handle)?.buffer;
                 buffer.as_entire_binding()
@@ -26,6 +27,9 @@ impl BindGroupResourceHandle {
                 let texture_view = &resources.textures.get(handle)?.view;
                 wgpu::BindingResource::TextureView(&texture_view)
             },
+            Self::Sampler(ref sampler) => {
+                wgpu::BindingResource::Sampler(sampler)
+            }
         })
     }
 }
@@ -45,7 +49,7 @@ pub fn create_bind_group(
     let bind_group = renderer.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("object_bind_group"),
         layout,
-        entries: &entries.iter().map(|&(binding, handle)| wgpu::BindGroupEntry {
+        entries: &entries.iter().map(|&(binding, ref handle)| wgpu::BindGroupEntry {
             binding,
             resource: handle.to_wgpu(&renderer.resources)
                 .expect("Invalid bind group handle given"),
@@ -60,6 +64,21 @@ impl<'a, S> CreateBindGroupBuilder<'a, S>
 {
     pub fn entry(mut self, binding: u32, handle: impl Into<BindGroupResourceHandle>) -> Self {
         self.entries.push((binding, handle.into()));
+        self
+    }
+
+    /// I was to lazy to make anything other than hard coded default sampler descriptor
+    pub fn sampler(mut self, binding: u32) -> Self {
+        let sampler = self.renderer.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: None,
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..default()
+        });
+        self.entries.push((binding, BindGroupResourceHandle::Sampler(sampler)));
         self
     }
 }

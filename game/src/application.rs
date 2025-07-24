@@ -25,6 +25,7 @@ impl Camera {
 struct GltfLoadingData<'a> {
     state: &'a mut engine::EngineState,
     gltf_buffers: Vec<gltf::buffer::Data>,
+    gltf_textures: Vec<gltf::image::Data>,
 }
 
 pub struct Application {
@@ -41,17 +42,48 @@ impl Application {
     }
 
     fn init(&mut self, state: &mut engine::EngineState) {
-        let (document, gltf_buffers, _) = gltf::import_slice(SCENE_BYTES).expect("Could not load scene");
+        let (document, gltf_buffers, gltf_textures) = gltf::import_slice(SCENE_BYTES).expect("Could not load scene");
 
         let mut data = GltfLoadingData {
             state,
             gltf_buffers,
+            gltf_textures,
         };
         for scene in document.scenes() {
             for node in scene.nodes() {
                 self.load_gltf_node(&mut data, Mat4::default(), node);
             }
         }
+    }
+
+    fn upload_texture(
+        &mut self,
+        renderer: &mut engine::Renderer,
+        image_data: &gltf::image::Data,
+    ) -> engine::TextureHandle {
+        let texture_handle = renderer.create_texture()
+            .width(image_data.width).height(image_data.height)
+            .format(engine::TextureFormat::Rgba8Unorm)
+            .create();
+
+        let data = match image_data.format {
+            gltf::image::Format::R8G8B8 => {
+                image_data.pixels.iter().copied()
+                    .array_chunks::<3>()
+                    .map(|[r, g, b]| [r, g, b, 255])
+                    .flatten()
+                    .collect_vec()
+            },
+            gltf::image::Format::R8G8B8A8 => {
+                image_data.pixels.clone()
+            },
+
+            _ => panic!("Unsupported image gltf format '{:?}'", image_data.format),
+        };
+
+        renderer.write_texture(texture_handle, &data);
+
+        texture_handle
     }
 
     fn load_gltf_mesh(
@@ -92,23 +124,30 @@ impl Application {
                 .data(&indices_bytes)
                 .create();
 
-            let material = state.materials.get_handle(&mut state.renderer, &engine::PbrMaterialParameters {
-                enable_diffuse_texture: false,
-            });
-            let material_uniform_buffer = state.renderer.create_buffer()
-                .size(size_of::<engine::PbrMaterialUniforms>() as u64)
-                .data(bytemuck::bytes_of(&engine::PbrMaterialUniforms {
-                    base_color: Vec4::new(1., 0., 0., 1.),
-                }))
-                .create();
-            let layout = state.renderer.get_pipeline_bind_group_layouts(state.materials.get(material).pipeline)[2];
-            let bind_group = state.renderer.create_bind_group()
-                .layout(layout)
-                .entry(0, material_uniform_buffer)
-                .create();
-            let material_instance = engine::MaterialInstance {
-                material,
-                bind_group,
+            let bmr = primitive.material().pbr_metallic_roughness();
+
+            let diffuse_texture = bmr.base_color_texture()
+                .map(|diffuse_texture| self.upload_texture(&mut state.renderer, &data.gltf_textures[diffuse_texture.texture().index()]));
+            
+            let material_instance = {
+                let material = state.materials.get_handle(&mut state.renderer, &engine::PbrMaterialParameters {
+                    enable_diffuse_texture: bmr.base_color_texture().is_some(),
+                });
+                let material_uniform_buffer = state.renderer.create_buffer()
+                    .size(size_of::<engine::PbrMaterialUniforms>() as u64)
+                    .data(bytemuck::bytes_of(&engine::PbrMaterialUniforms {
+                        base_color: Vec4::from_array(bmr.base_color_factor()),
+                    }))
+                    .create();
+                let layout = state.renderer.get_pipeline_bind_group_layouts(state.materials.get(material).pipeline)[2];
+                let mut bind_group = state.renderer.create_bind_group()
+                    .layout(layout)
+                    .entry(0, material_uniform_buffer);
+                if let Some(diffuse_texture) = diffuse_texture {
+                    bind_group = bind_group.entry(1, diffuse_texture).sampler(2);
+                }
+                let bind_group = bind_group.create();
+                engine::MaterialInstance { material, bind_group }
             };
 
             state.insert_static_mesh(engine::StaticMesh {

@@ -1,3 +1,5 @@
+use std::{borrow::Cow, collections::HashMap};
+
 use super::*;
 use crate::handle_map;
 
@@ -14,13 +16,13 @@ struct VertexBufferBindingData {
 }
 
 #[bon::builder(finish_fn = add)]
-pub fn add_vertex_buffer<'f1, 'f2, 'f3, 'f4, 'f5, 'f6, PS>(
+pub fn add_vertex_buffer<'f1, 'f2, PS>(
     #[builder(start_fn)]
-    mut parent: CreatePipelineBuilderBuilder<'f1, 'f2, 'f3, 'f4, 'f5, 'f6, PS>,
+    mut parent: CreatePipelineBuilderBuilder<'f1, 'f2, PS>,
     shader_location: u32,
     #[builder(setters(vis = "", name = "priv_format"))]
     format: (u64, wgpu::VertexFormat),
-) -> CreatePipelineBuilderBuilder<'f1, 'f2, 'f3, 'f4, 'f5, 'f6, PS>
+) -> CreatePipelineBuilderBuilder<'f1, 'f2, PS>
 where PS: create_pipeline_builder_builder::State,
 {
     let (stride, format) = format;
@@ -34,19 +36,19 @@ where PS: create_pipeline_builder_builder::State,
     parent
 }
 
-impl<'f1, 'f2, 'f3, 'f4, 'f5, 'f6, PS, S> AddVertexBufferBuilder<'f1, 'f2, 'f3, 'f4, 'f5, 'f6, PS, S>
+impl<'f1, 'f2, PS, S> AddVertexBufferBuilder<'f1, 'f2, PS, S>
     where PS: create_pipeline_builder_builder::State,
           S: add_vertex_buffer_builder::State,
           S::Format: add_vertex_buffer_builder::IsUnset,
 {
-    pub fn vec2(self) -> AddVertexBufferBuilder<'f1, 'f2, 'f3, 'f4, 'f5, 'f6, PS, add_vertex_buffer_builder::SetFormat<S>> {
+    pub fn vec2(self) -> AddVertexBufferBuilder<'f1, 'f2, PS, add_vertex_buffer_builder::SetFormat<S>> {
         self.priv_format((
             size_of::<glam::Vec2>() as u64,
             wgpu::VertexFormat::Float32x2,
         ))
     }
 
-    pub fn vec3(self) -> AddVertexBufferBuilder<'f1, 'f2, 'f3, 'f4, 'f5, 'f6, PS, add_vertex_buffer_builder::SetFormat<S>> {
+    pub fn vec3(self) -> AddVertexBufferBuilder<'f1, 'f2, PS, add_vertex_buffer_builder::SetFormat<S>> {
         self.priv_format((
             size_of::<glam::Vec3>() as u64,
             wgpu::VertexFormat::Float32x3,
@@ -63,16 +65,19 @@ pub fn create_pipeline_builder(
     #[builder(into)]
     bind_group_layouts: Vec<BindGroupLayoutHandle>,
     shader_source: &str,
-    #[builder(default = &[])]
-    vertex_shader_constants: &[(&str, f64)],
-    #[builder(default = &[])]
-    fragment_shader_constants: &[(&str, f64)],
+    #[builder(into, default)]
+    shader_defs: HashMap<String, naga_oil::compose::ShaderDefValue>,
 ) -> PipelineHandle {
     let device = &renderer.device;
 
+    let compiled_shader = crate::compile_shader::compile_shader(
+        shader_source,
+        shader_defs,
+    ).expect("Could not compile shader");
+
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
-        source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+        source: wgpu::ShaderSource::Naga(Cow::Owned(compiled_shader.into())),
     });
 
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -102,19 +107,13 @@ pub fn create_pipeline_builder(
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: None,
-            compilation_options: wgpu::PipelineCompilationOptions {
-                constants: vertex_shader_constants,
-                ..default()
-            },
+            compilation_options: default(),
             buffers: &vertex_buffers,
         },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: None,
-            compilation_options: wgpu::PipelineCompilationOptions {
-                constants: fragment_shader_constants,
-                ..default()
-            },
+            compilation_options: default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: renderer.surface_format,
                 blend: Some(wgpu::BlendState::REPLACE),
@@ -141,10 +140,10 @@ pub fn create_pipeline_builder(
     renderer.resources.pipelines.insert(PipelineData { pipeline, bind_group_layouts })
 }
 
-impl<'f1, 'f2, 'f3, 'f4, 'f5, 'f6, S> CreatePipelineBuilderBuilder<'f1, 'f2, 'f3, 'f4, 'f5, 'f6, S>
+impl<'f1, 'f2, S> CreatePipelineBuilderBuilder<'f1, 'f2, S>
     where S: create_pipeline_builder_builder::State,
 {
-    pub fn vertex_buffer(self) -> AddVertexBufferBuilder<'f1, 'f2, 'f3, 'f4, 'f5, 'f6, S> {
+    pub fn vertex_buffer(self) -> AddVertexBufferBuilder<'f1, 'f2, S> {
         add_vertex_buffer(self)
     }
 }

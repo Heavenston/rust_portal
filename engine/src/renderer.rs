@@ -175,14 +175,13 @@ impl Renderer {
     }
 
     pub fn write_texture(&self, texture_handle: TextureHandle, data: &[u8]) {
-        let texture = &self.resources.textures.get(texture_handle)
-            .expect("Invalid texture handle given").texture;
-
+        let texture_data = &self.resources.textures.get(texture_handle)
+            .expect("Invalid texture handle given");
+        let texture = &texture_data.texture;
         let size = texture.size();
-        let format = texture.format();
+        let format = texture_data.format.expect("Writing to this texture is not supported");
 
-        let Some(pixel_byte_size) = format.target_pixel_byte_cost()
-        else { panic!("Writing to a texture of format {format:?} isn't supported") };
+        let pixel_byte_size = format.pixel_byte_size();
 
         self.queue.write_texture(wgpu::TexelCopyTextureInfoBase {
             texture,
@@ -224,7 +223,7 @@ impl Renderer {
         self.resources.bind_groups.remove(handle);
     }
 
-    pub fn create_pipeline<'a, 'f2, 'f3, 'f4, 'f5, 'f6>(&'a mut self) -> CreatePipelineBuilderBuilder<'a, 'f2, 'f3, 'f4, 'f5, 'f6> {
+    pub fn create_pipeline<'a, 'f2>(&'a mut self) -> CreatePipelineBuilderBuilder<'a, 'f2> {
         create_pipeline_builder(self)
     }
 

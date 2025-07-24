@@ -23,7 +23,7 @@ pub(super) fn create_pbr_material_factory(
     let camera_bind_group_layout = engine_state.camera_bind_group_layout;
     let object_bind_group_layout = engine_state.object_bind_group_layout;
 
-    move |renderer: &mut Renderer, parameters| {
+    move |renderer: &mut Renderer, parameters: &PbrMaterialParameters| {
         let mut material_bind_group_layout = renderer.create_bind_group_layout()
             .entry().binding(0).uniform_buffer().add()
         ;
@@ -36,10 +36,6 @@ pub(super) fn create_pbr_material_factory(
         }
 
         let material_bind_group_layout = material_bind_group_layout.create();
-
-        let shader_constants = [
-            ("ENABLE_DIFFUSE_TEXTURE", if parameters.enable_diffuse_texture { 1. } else { 0. })
-        ];
         
         let pipeline = renderer.create_pipeline()
             .shader_source(PBR_SHADER_SOURCE)
@@ -48,14 +44,14 @@ pub(super) fn create_pbr_material_factory(
                 object_bind_group_layout,
                 material_bind_group_layout,
             ])
+            .shader_defs([
+                ("ENABLE_DIFFUSE_TEXTURE".to_string(), naga_oil::compose::ShaderDefValue::Bool(parameters.enable_diffuse_texture)),
+            ])
 
-            .vertex_shader_constants(&shader_constants)
             // Positions
             .vertex_buffer().shader_location(0).vec3().add()
             // Tex coords
             .vertex_buffer().shader_location(1).vec2().add()
-
-            .fragment_shader_constants(&shader_constants)
         .create();
 
         MaterialData {
