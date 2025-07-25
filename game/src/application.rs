@@ -204,7 +204,6 @@ impl Application {
             intensity: light.intensity() / 683.,
             color: Vec3::from_array(light.color()),
         };
-        println!("{directional_light:#?}");
         data.state.insert_directional_light(directional_light);
     }
 

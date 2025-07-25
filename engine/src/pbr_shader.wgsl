@@ -38,14 +38,13 @@ fn calculatePBRDirectLighting(
     world_position: vec3<f32>,
     normal_direction: vec3<f32>,
     view_direction: vec3<f32>,
-    light_position: vec3<f32>,
+    light_direction: vec3<f32>,
     light_color: vec4<f32>,
     albedo_color: vec3<f32>,
     metallic_value: f32,
     roughness_value: f32
 ) -> vec3<f32> {
     // 1. Calculate per-light vectors.
-    let light_direction = normalize(light_position - world_position);
     let halfway_direction = normalize(view_direction + light_direction);
 
     // 2. Calculate base reflectivity (F0).
@@ -136,11 +135,16 @@ struct VertexOutput {
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     let world_pos = object_uniforms.model * vec4<f32>(input.position, 1.);
+    let normal_matrix = mat3x3<f32>(
+        object_uniforms.model[0].xyz,
+        object_uniforms.model[1].xyz,
+        object_uniforms.model[2].xyz
+    );
 
     var out: VertexOutput;
     out.clip_position = world_uniforms.view_projection * world_pos;
     out.texcoords = input.texcoords;
-    out.world_normal = (object_uniforms.model * vec4<f32>(input.normal, 1.)).xyz;
+    out.world_normal = normalize(normal_matrix * input.normal);
     out.world_pos = world_pos.xyz;
     return out;
 }
@@ -151,7 +155,7 @@ struct FragmentOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOutput {
-    let normal = in.world_normal;
+    let normal = normalize(in.world_normal);
     #if ENABLE_DIFFUSE_TEXTURE == true
         ;
         let albedo = textureSample(t_diffuse, s_diffuse, in.texcoords);
@@ -167,9 +171,9 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
     for (var light_i: u32 = 0; light_i < world_uniforms.light_count; light_i++) {
         total_radiance += calculatePBRDirectLighting(
             in.world_pos,
-            in.world_normal,
+            normal,
             view_dir,
-            lights[light_i].position,
+            -lights[light_i].direction,
             vec4<f32>(lights[light_i].color, lights[light_i].intensity),
             albedo.xyz,
             metallic,
