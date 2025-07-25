@@ -71,6 +71,8 @@ impl StartedEngine {
         let present_texture_handle = render.using_present_texture();
         let depth_buffer_handle = render.using_depth_buffer();
 
+        let mut draw_all_number = 0;
+
         // Object rendering pass
         {
             let mut render_pass = render.render_pass()
@@ -100,10 +102,14 @@ impl StartedEngine {
                 render_pass.set_bind_group(2, mesh.material_instance.bind_group);
                 render_pass.draw_call()
                     .draw(0..mesh.vertex_count);
+
+                draw_all_number += 1;
             }
 
             render_pass.finish();
         }
+
+        println!("{draw_all_number} draw calls");
 
         render.finish();
     }

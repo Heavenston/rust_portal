@@ -1,10 +1,13 @@
+use std::collections::HashMap;
+
 use engine::utils::*;
 use glam::{Affine3A, Mat4, Vec2, Vec3, Vec4};
 use itertools::Itertools;
 use crevice::std140::AsStd140 as _;
 
-static SCENE_BYTES: &[u8] = include_bytes!("../../resources/simple_scene.glb");
+// static SCENE_BYTES: &[u8] = include_bytes!("../../resources/simple_scene.glb");
 // static SCENE_BYTES: &[u8] = include_bytes!("../../resources/just-sun.glb");
+static SCENE_BYTES: &[u8] = include_bytes!("../../resources/outdoor_scene.glb");
 
 #[derive(Debug, Clone, Copy)]
 struct Camera {
@@ -24,10 +27,20 @@ impl Camera {
     }
 }
 
+#[derive(Default)]
+struct BatchingStaticMesh {
+    positions: Vec<Vec3>,
+    texcoords: Vec<Vec2>,
+    normals: Vec<Vec3>,
+    indices: Vec<u32>,
+}
+
 struct GltfLoadingData<'a> {
     state: &'a mut engine::EngineState,
     gltf_buffers: Vec<gltf::buffer::Data>,
     gltf_textures: Vec<gltf::image::Data>,
+    created_materials: HashMap<Option<usize>, engine::MaterialInstance>,
+    batched_static_meshes: HashMap<Option<usize>, BatchingStaticMesh>,
 }
 
 pub struct Application {
@@ -44,18 +57,33 @@ impl Application {
     }
 
     fn init(&mut self, state: &mut engine::EngineState) {
+        println!("Loading scene...");
         let (document, gltf_buffers, gltf_textures) = gltf::import_slice(SCENE_BYTES).expect("Could not load scene");
 
         let mut data = GltfLoadingData {
             state,
             gltf_buffers,
             gltf_textures,
+
+            created_materials: default(),
+            batched_static_meshes: default(),
         };
+        println!("Creating materials...");
+        for material in document.materials() {
+            self.load_gltf_material(&mut data, material);
+        }
+        println!("Creating meshes...");
         for scene in document.scenes() {
             for node in scene.nodes() {
                 self.load_gltf_node(&mut data, Mat4::default(), node);
             }
         }
+        for (material_index, batching_mesh) in &data.batched_static_meshes {
+            let material_instance = *data.created_materials.get(material_index)
+                .expect("Was created");
+            self.commit_batching_mesh(data.state, material_instance, batching_mesh);
+        }
+        println!("Done");
 
         if self.camera.is_none() {
             panic!("No camera was added");
@@ -92,89 +120,90 @@ impl Application {
         texture_handle
     }
 
+    fn load_gltf_material(
+        &mut self,
+        data: &mut GltfLoadingData,
+        material: gltf::Material,
+    ) -> engine::MaterialInstance {
+        let state = &mut data.state;
+
+        let material_index = material.index();
+        let bmr = material.pbr_metallic_roughness();
+
+        if let Some(&instance) = data.created_materials.get(&material_index) {
+            return instance;
+        }
+
+        let diffuse_texture = bmr.base_color_texture()
+            .map(|diffuse_texture| self.upload_texture(&mut state.renderer, &data.gltf_textures[diffuse_texture.texture().index()]));
+
+        let material = state.materials.get_handle(&mut state.renderer, &engine::pbr_material::Parameters {
+            enable_diffuse_texture: bmr.base_color_texture().is_some(),
+        });
+        let material_uniform_buffer = state.renderer.create_buffer()
+            .size(engine::pbr_material::MaterialUniforms::std140_size_static() as u64)
+            .data(engine::pbr_material::MaterialUniforms {
+                base_color: Vec4::from_array(bmr.base_color_factor()),
+                metallic: bmr.metallic_factor(),
+                roughness: bmr.roughness_factor(),
+            }.as_std140().as_bytes())
+            .create();
+        let layout = state.renderer.get_pipeline_bind_group_layouts(state.materials.get(material).pipeline)[2];
+        let mut bind_group = state.renderer.create_bind_group()
+            .layout(layout)
+            .entry(0, material_uniform_buffer);
+        if let Some(diffuse_texture) = diffuse_texture {
+            bind_group = bind_group.entry(1, diffuse_texture).sampler(2);
+        }
+        let bind_group = bind_group.create();
+        let instance = engine::MaterialInstance { material, bind_group };
+        data.created_materials.insert(material_index, instance);
+        instance
+    }
+
+    fn load_gltf_primitive(
+        &mut self,
+        data: &mut GltfLoadingData,
+        transform: Affine3A,
+        primitive: gltf::Primitive,
+    ) {
+        let reader = primitive.reader(|buffer| data.gltf_buffers.get(buffer.index()).map(|p| &**p));
+        let batched_static_mesh = data.batched_static_meshes.entry(primitive.material().index()).or_default();
+
+        debug_assert_eq!(batched_static_mesh.positions.len(), batched_static_mesh.texcoords.len());
+        debug_assert_eq!(batched_static_mesh.texcoords.len(), batched_static_mesh.normals.len());
+        let indices_offset = batched_static_mesh.positions.len() as u32;
+
+        batched_static_mesh.positions.extend(
+            reader.read_positions().expect("Mesh without positions?")
+            .map(Vec3::from_array)
+            .map(|point| transform.transform_point3(point))
+        );
+        batched_static_mesh.texcoords.extend(
+            reader.read_tex_coords(0).expect("Mesh without texcoords?")
+            .into_f32()
+            .map(Vec2::from_array)
+        );
+        batched_static_mesh.normals.extend(
+            reader.read_normals().expect("Mesh without normals?")
+            .map(Vec3::from_array)
+            .map(|point| transform.transform_vector3(point))
+        );
+        batched_static_mesh.indices.extend(
+            reader.read_indices().expect("Mesh without indices?")
+            .into_u32()
+            .map(|idx| idx + indices_offset)
+        );
+    }
+
     fn load_gltf_mesh(
         &mut self,
         data: &mut GltfLoadingData,
         transform: Affine3A,
         mesh: gltf::Mesh,
     ) {
-        let state = &mut *data.state;
-
         for primitive in mesh.primitives() {
-            let reader = primitive.reader(|buffer| data.gltf_buffers.get(buffer.index()).map(|p| &**p));
-
-            let positions = reader.read_positions().expect("Mesh without positions?")
-                .map(Vec3::from_array)
-                .collect_vec();
-            let positions_bytes = bytemuck::cast_slice::<_, u8>(&positions);
-            let texcoords = reader.read_tex_coords(0).expect("Mesh without texcoords?")
-                .into_f32()
-                .map(Vec2::from_array)
-                .collect_vec();
-            let texcoords_bytes = bytemuck::cast_slice::<_, u8>(&texcoords);
-            let normals = reader.read_normals().expect("Mesh without normals?")
-                .map(Vec3::from_array)
-                .collect_vec();
-            let normals_bytes = bytemuck::cast_slice::<_, u8>(&normals);
-            let indices = reader.read_indices().expect("Mesh without indices is not supported")
-                .into_u32()
-                .collect_vec();
-            let indices_bytes = bytemuck::cast_slice::<_, u8>(&indices);
-
-            let positions_buffer = state.renderer.create_buffer()
-                .size(positions_bytes.len().try_into().expect("no overflow"))
-                .data(&positions_bytes)
-                .create();
-            let texcoords_buffer = state.renderer.create_buffer()
-                .size(texcoords_bytes.len().try_into().expect("no overflow"))
-                .data(&texcoords_bytes)
-                .create();
-            let normals_buffer = state.renderer.create_buffer()
-                .size(normals_bytes.len().try_into().expect("no overflow"))
-                .data(&normals_bytes)
-                .create();
-            let index_buffer = state.renderer.create_buffer()
-                .size(indices_bytes.len().try_into().expect("no overflow"))
-                .data(&indices_bytes)
-                .create();
-
-            let bmr = primitive.material().pbr_metallic_roughness();
-
-            let diffuse_texture = bmr.base_color_texture()
-                .map(|diffuse_texture| self.upload_texture(&mut state.renderer, &data.gltf_textures[diffuse_texture.texture().index()]));
-            
-            let material_instance = {
-                let material = state.materials.get_handle(&mut state.renderer, &engine::pbr_material::Parameters {
-                    enable_diffuse_texture: bmr.base_color_texture().is_some(),
-                });
-                let material_uniform_buffer = state.renderer.create_buffer()
-                    .size(engine::pbr_material::MaterialUniforms::std140_size_static() as u64)
-                    .data(engine::pbr_material::MaterialUniforms {
-                        base_color: Vec4::from_array(bmr.base_color_factor()),
-                        metallic: bmr.metallic_factor(),
-                        roughness: bmr.roughness_factor(),
-                    }.as_std140().as_bytes())
-                    .create();
-                let layout = state.renderer.get_pipeline_bind_group_layouts(state.materials.get(material).pipeline)[2];
-                let mut bind_group = state.renderer.create_bind_group()
-                    .layout(layout)
-                    .entry(0, material_uniform_buffer);
-                if let Some(diffuse_texture) = diffuse_texture {
-                    bind_group = bind_group.entry(1, diffuse_texture).sampler(2);
-                }
-                let bind_group = bind_group.create();
-                engine::MaterialInstance { material, bind_group }
-            };
-
-            state.insert_static_mesh(engine::StaticMesh {
-                transform,
-                positions_buffer,
-                texcoords_buffer,
-                normals_buffer,
-                index_buffer,
-                vertex_count: indices.len().try_into().expect("No overflow"),
-                material_instance,
-            }.into());
+            self.load_gltf_primitive(data, transform, primitive);
         }
     }
 
@@ -205,6 +234,45 @@ impl Application {
             color: Vec3::from_array(light.color()),
         };
         data.state.insert_directional_light(directional_light);
+    }
+
+    fn commit_batching_mesh(
+        &mut self,
+        state: &mut engine::EngineState,
+        material_instance: engine::MaterialInstance,
+        batching_mesh: &BatchingStaticMesh,
+    ) {
+        let positions_bytes = bytemuck::cast_slice::<_, u8>(batching_mesh.positions.as_slice());
+        let texcoords_bytes = bytemuck::cast_slice::<_, u8>(batching_mesh.texcoords.as_slice());
+        let normals_bytes = bytemuck::cast_slice::<_, u8>(batching_mesh.normals.as_slice());
+        let indices_bytes = bytemuck::cast_slice::<_, u8>(batching_mesh.indices.as_slice());
+
+        let positions_buffer = state.renderer.create_buffer()
+            .size(positions_bytes.len().try_into().expect("no overflow"))
+            .data(&positions_bytes)
+            .create();
+        let texcoords_buffer = state.renderer.create_buffer()
+            .size(texcoords_bytes.len().try_into().expect("no overflow"))
+            .data(&texcoords_bytes)
+            .create();
+        let normals_buffer = state.renderer.create_buffer()
+            .size(normals_bytes.len().try_into().expect("no overflow"))
+            .data(&normals_bytes)
+            .create();
+        let index_buffer = state.renderer.create_buffer()
+            .size(indices_bytes.len().try_into().expect("no overflow"))
+            .data(&indices_bytes)
+            .create();
+
+        state.insert_static_mesh(engine::StaticMesh {
+            transform: default(),
+            positions_buffer,
+            texcoords_buffer,
+            normals_buffer,
+            index_buffer,
+            vertex_count: batching_mesh.indices.len().try_into().expect("No overflow"),
+            material_instance,
+        }.into());
     }
 
     fn load_gltf_node(
@@ -247,9 +315,11 @@ impl Application {
 
 impl engine::Application for Application {
     fn pre_frame(&mut self, state: &mut engine::EngineState, dt: f32) {
+        println!("Frame {dt}s (~{}fps)!", 1. / dt);
+
         if let Some(camera) = &mut self.camera {
-            let rotation = Affine3A::from_rotation_y(dt);
-            camera.transform = rotation * camera.transform;
+            // let rotation = Affine3A::from_rotation_y(dt);
+            // camera.transform = rotation * camera.transform;
 
             state.camera = Some(engine::Camera {
                 transform: camera.transform,
