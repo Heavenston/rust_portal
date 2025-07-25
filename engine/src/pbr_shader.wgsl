@@ -1,4 +1,6 @@
 // based on https://learnopengl.com/PBR/Theory
+// useful list of equations: https://graphicrants.blogspot.com/2013/08/specular-brdf-reference.html
+
 const PI: f32 = 3.14159265359;
 const AMBIENT_LIGHT: f32 = 0.1;
 
@@ -184,12 +186,16 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
             light_color = vec4<f32>(light.color, light.intensity);
         }
         if (light.kind == LIGHT_KIND_SPOT) {
-            light_direction = normalize(light.position - in.world_pos);
+            let diff = light.position - in.world_pos;
+            let dist2 = dot(diff, diff);
+            light_direction = normalize(diff);
             let angle = acos(dot(light.direction, -light_direction));
-            let prop = 1. - clamp(
+
+            let conning = 1. - clamp(
                 (angle - light.inner_cone_angle) / (light.outer_cone_angle - light.inner_cone_angle),
                 0., 1.,
             );
+            let prop = conning / (1. + dist2);
 
             light_color = vec4<f32>(light.color, light.intensity * prop);
         }
