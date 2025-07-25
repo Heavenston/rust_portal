@@ -1,6 +1,7 @@
 use crate::{ utils::*, * };
 
-use glam::{ Affine3A, Mat4 };
+use glam::{ Affine3A, Mat4, Vec3 };
+use derive_more::{ From, Into };
 
 #[derive(Debug, Clone, Copy)]
 pub struct Camera {
@@ -17,6 +18,8 @@ pub struct StaticMesh {
     pub positions_buffer: BufferHandle,
     /// list of vec2
     pub texcoords_buffer: BufferHandle,
+    /// list of vec2
+    pub normals_buffer: BufferHandle,
     /// list of u32
     pub index_buffer: BufferHandle,
     /// At most the size of the indices buffer
@@ -34,12 +37,27 @@ impl StaticMesh {
 }
 
 #[derive(Debug)]
-pub struct StaticMeshData {
+pub(super) struct StaticMeshData {
     pub mesh: StaticMesh,
-    pub(super) object_bind_group: BindGroupHandle,
+    pub object_bind_group: BindGroupHandle,
+}
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Into, From)]
+pub struct StaticMeshHandle(handle_map::Handle<StaticMeshData>);
+
+#[derive(Debug, Clone, Copy)]
+pub struct DirectionalLight {
+    pub position: Vec3,
+    pub direction: Vec3,
+    pub intensity: f32,
+    pub color: Vec3,
 }
 
-pub type StaticMeshHandle = handle_map::Handle<StaticMeshData>;
+#[derive(Debug)]
+pub(super) struct DirectionalLightData {
+    pub directional_light: DirectionalLight,
+}
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Into, From)]
+pub struct DirectionalLightHandle(handle_map::Handle<DirectionalLightData>);
 
 #[derive(Debug)]
 pub struct EngineState {
@@ -48,8 +66,9 @@ pub struct EngineState {
     pub camera: Option<Camera>,
     /// immutable other than for the public mut methods
     pub(super) static_meshes: handle_map::HandleMap<StaticMeshData>,
+    pub(super) directional_lights: handle_map::HandleMap<DirectionalLightData>,
 
-    pub(super) camera_bind_group_layout: BindGroupLayoutHandle,
+    pub(super) world_bind_group_layout: BindGroupLayoutHandle,
     pub(super) object_bind_group_layout: BindGroupLayoutHandle,
 
     pub materials: MaterialsStore,
@@ -57,8 +76,11 @@ pub struct EngineState {
 
 impl EngineState {
     pub fn new(mut renderer: Renderer) -> Self {
-        let camera_bind_group_layout = renderer.create_bind_group_layout()
+        let world_bind_group_layout = renderer.create_bind_group_layout()
+            // world uniforms
             .entry().binding(0).uniform_buffer().add()
+            // light array
+            .entry().binding(1).uniform_buffer().add()
             .create();
         let object_bind_group_layout = renderer.create_bind_group_layout()
             .entry().binding(0).uniform_buffer().add()
@@ -69,14 +91,15 @@ impl EngineState {
 
             camera: default(),
             static_meshes: default(),
+            directional_lights: default(),
 
-            camera_bind_group_layout,
+            world_bind_group_layout,
             object_bind_group_layout,
 
             materials: default(),
         };
 
-        let factory = super::create_pbr_material_factory(&mut this);
+        let factory = pbr_material::create_factory(&mut this);
         this.materials.register(factory);
 
         this
@@ -99,7 +122,7 @@ impl EngineState {
         self.static_meshes.insert(StaticMeshData {
             mesh,
             object_bind_group,
-        })
+        }).into()
     }
 
     pub fn remove_static_mesh(&mut self, handle: StaticMeshHandle) -> Option<StaticMesh> {
@@ -107,5 +130,19 @@ impl EngineState {
         // This leads to leaks (the uniform buffer) which without reference counted handles i dont
         // know how to fix (other than just included the uniform buffer in StaticMeshData)
         unimplemented!()
+    }
+
+    pub fn insert_directional_light(
+        &mut self, directional_light: DirectionalLight
+    ) -> DirectionalLightHandle {
+        self.directional_lights.insert(DirectionalLightData {
+            directional_light,
+        }).into()
+    }
+
+    pub fn remove_directional_light(
+        &mut self, handle: DirectionalLightHandle,
+    ) -> Option<DirectionalLight> {
+        self.directional_lights.remove(handle.into()).map(|data| data.directional_light)
     }
 }

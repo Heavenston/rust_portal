@@ -14,7 +14,7 @@ impl<F, A> ApplicationFactory for F
 }
 
 pub trait Application {
-    fn update(&mut self, engine_state: &mut EngineState, dt: f32) {
+    fn pre_frame(&mut self, engine_state: &mut EngineState, dt: f32) {
         let _ = engine_state;
         let _ = dt;
     }

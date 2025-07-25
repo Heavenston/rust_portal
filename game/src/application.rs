@@ -1,8 +1,10 @@
 use engine::utils::*;
 use glam::{Affine3A, Mat4, Vec2, Vec3, Vec4};
 use itertools::Itertools;
+use crevice::std140::AsStd140 as _;
 
 static SCENE_BYTES: &[u8] = include_bytes!("../../resources/simple_scene.glb");
+// static SCENE_BYTES: &[u8] = include_bytes!("../../resources/just-sun.glb");
 
 #[derive(Debug, Clone, Copy)]
 struct Camera {
@@ -53,6 +55,10 @@ impl Application {
             for node in scene.nodes() {
                 self.load_gltf_node(&mut data, Mat4::default(), node);
             }
+        }
+
+        if self.camera.is_none() {
+            panic!("No camera was added");
         }
     }
 
@@ -106,6 +112,10 @@ impl Application {
                 .map(Vec2::from_array)
                 .collect_vec();
             let texcoords_bytes = bytemuck::cast_slice::<_, u8>(&texcoords);
+            let normals = reader.read_normals().expect("Mesh without normals?")
+                .map(Vec3::from_array)
+                .collect_vec();
+            let normals_bytes = bytemuck::cast_slice::<_, u8>(&normals);
             let indices = reader.read_indices().expect("Mesh without indices is not supported")
                 .into_u32()
                 .collect_vec();
@@ -119,6 +129,10 @@ impl Application {
                 .size(texcoords_bytes.len().try_into().expect("no overflow"))
                 .data(&texcoords_bytes)
                 .create();
+            let normals_buffer = state.renderer.create_buffer()
+                .size(normals_bytes.len().try_into().expect("no overflow"))
+                .data(&normals_bytes)
+                .create();
             let index_buffer = state.renderer.create_buffer()
                 .size(indices_bytes.len().try_into().expect("no overflow"))
                 .data(&indices_bytes)
@@ -130,14 +144,16 @@ impl Application {
                 .map(|diffuse_texture| self.upload_texture(&mut state.renderer, &data.gltf_textures[diffuse_texture.texture().index()]));
             
             let material_instance = {
-                let material = state.materials.get_handle(&mut state.renderer, &engine::PbrMaterialParameters {
+                let material = state.materials.get_handle(&mut state.renderer, &engine::pbr_material::Parameters {
                     enable_diffuse_texture: bmr.base_color_texture().is_some(),
                 });
                 let material_uniform_buffer = state.renderer.create_buffer()
-                    .size(size_of::<engine::PbrMaterialUniforms>() as u64)
-                    .data(bytemuck::bytes_of(&engine::PbrMaterialUniforms {
+                    .size(engine::pbr_material::MaterialUniforms::std140_size_static() as u64)
+                    .data(engine::pbr_material::MaterialUniforms {
                         base_color: Vec4::from_array(bmr.base_color_factor()),
-                    }))
+                        metallic: bmr.metallic_factor(),
+                        roughness: bmr.roughness_factor(),
+                    }.as_std140().as_bytes())
                     .create();
                 let layout = state.renderer.get_pipeline_bind_group_layouts(state.materials.get(material).pipeline)[2];
                 let mut bind_group = state.renderer.create_bind_group()
@@ -154,11 +170,42 @@ impl Application {
                 transform,
                 positions_buffer,
                 texcoords_buffer,
+                normals_buffer,
                 index_buffer,
                 vertex_count: indices.len().try_into().expect("No overflow"),
                 material_instance,
             }.into());
         }
+    }
+
+    fn load_gltf_light(
+        &mut self,
+        data: &mut GltfLoadingData,
+        transform: Affine3A,
+        light: gltf::khr_lights_punctual::Light,
+    ) {
+        use gltf::khr_lights_punctual::Kind;
+        match light.kind() {
+            Kind::Directional => (),
+            Kind::Point => {
+                panic!("Unsupported point light!");
+            },
+            Kind::Spot { .. } => {
+                panic!("Unsupported spot light!");
+            },
+        }
+
+        let position = transform.translation.into();
+        let direction = transform.transform_vector3(Vec3::NEG_Z);
+
+        let directional_light = engine::DirectionalLight {
+            position,
+            direction,
+            intensity: light.intensity() / 683.,
+            color: Vec3::from_array(light.color()),
+        };
+        println!("{directional_light:#?}");
+        data.state.insert_directional_light(directional_light);
     }
 
     fn load_gltf_node(
@@ -172,6 +219,10 @@ impl Application {
         );
         let global_transform = parent_transform * local_transform;
         let global_affine = Affine3A::from_mat4(global_transform);
+
+        if let Some(light) = node.light() {
+            self.load_gltf_light(data, global_affine, light);
+        }
 
         if let Some(mesh) = node.mesh() {
             self.load_gltf_mesh(data, global_affine, mesh);
@@ -196,14 +247,18 @@ impl Application {
 }
 
 impl engine::Application for Application {
-    fn update(&mut self, state: &mut engine::EngineState, _dt: f32) {
-        state.camera = self.camera.map(|camera| {
-            engine::Camera {
+    fn pre_frame(&mut self, state: &mut engine::EngineState, dt: f32) {
+        if let Some(camera) = &mut self.camera {
+            let rotation = Affine3A::from_rotation_y(dt);
+            camera.transform = rotation * camera.transform;
+
+            state.camera = Some(engine::Camera {
                 transform: camera.transform,
                 projection: camera.get_projection(state.renderer.aspect_ration()),
                 clear_color: wgpu::Color::BLACK,
-            }
-        });
+            });
+        }
+
     }
 }
 

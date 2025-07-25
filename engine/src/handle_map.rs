@@ -22,9 +22,6 @@ pub struct Handle<T> {
     _phantom: PhantomData<*const T>,
 }
 
-impl<T> Handle<T> {
-}
-
 #[derive(Debug, Clone)]
 #[derive_where(Default)]
 pub struct HandleMap<T> {

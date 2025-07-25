@@ -4,13 +4,12 @@ mod state;
 pub use state::*;
 mod materials;
 pub use materials::*;
-mod pbr_material;
-pub use pbr_material::*;
+pub mod pbr_material;
 
 use crate::{ * };
 
 use std::{ sync::Arc, time::Instant };
-use glam::Mat4;
+use crevice::std140::AsStd140;
 
 struct StartedEngine {
     window: Arc<winit::window::Window>,
@@ -18,8 +17,9 @@ struct StartedEngine {
     state: EngineState,
     application: Box<dyn Application>,
 
-    camera_uniform_buffer: BufferHandle,
-    camera_bind_group: BindGroupHandle,
+    world_uniform_buffer: BufferHandle,
+    lights_uniform_buffer: BufferHandle,
+    world_bind_group: BindGroupHandle,
 
     // FIXME: Probably not the best way to do this
     last_update: Option<Instant>,
@@ -30,18 +30,40 @@ impl StartedEngine {
         let state = &mut self.state;
 
         // 
-        // Write into camera uniform buffer
+        // Write into world uniform buffer
         // 
         let Some(camera) = state.camera
         else { eprintln!("NO CAMERA"); return; };
+
         {
+            let mut lights: Vec<pbr_material::Std140Light> = state.directional_lights
+                .iter().map(|(_, b)| b.directional_light).map(|dl| {
+                    pbr_material::Light {
+                        position: dl.position,
+                        direction: dl.direction,
+                        color: dl.color,
+                        intensity: dl.intensity,
+                    }
+                })
+                .map(|light| light.as_std140())
+                .collect();
+            lights.truncate(pbr_material::MAX_LIGHTS.try_into().unwrap());
+            
             let view = camera.transform.inverse();
             let proj = camera.projection;
             let view_proj = proj * view;
+            let uniforms = pbr_material::WorldUniforms {
+                view_projection: view_proj,
+                camera_world_pos: camera.transform.translation.into(),
+                light_count: lights.len().try_into().unwrap(),
+            };
             state.renderer.write_buffer(
-                self.camera_uniform_buffer,
-                0,
-                bytemuck::bytes_of(&view_proj),
+                self.world_uniform_buffer, 0,
+                bytemuck::bytes_of(&uniforms.as_std140()),
+            );
+            state.renderer.write_buffer(
+                self.lights_uniform_buffer, 0,
+                bytemuck::cast_slice(&lights),
             );
         }
 
@@ -72,7 +94,8 @@ impl StartedEngine {
                 render_pass.set_index_buffer(mesh.index_buffer);
                 render_pass.set_vertex_buffer(0, mesh.positions_buffer);
                 render_pass.set_vertex_buffer(1, mesh.texcoords_buffer);
-                render_pass.set_bind_group(0, self.camera_bind_group);
+                render_pass.set_vertex_buffer(2, mesh.normals_buffer);
+                render_pass.set_bind_group(0, self.world_bind_group);
                 render_pass.set_bind_group(1, *object_bind_group);
                 render_pass.set_bind_group(2, mesh.material_instance.bind_group);
                 render_pass.draw_call()
@@ -85,13 +108,13 @@ impl StartedEngine {
         render.finish();
     }
 
-    fn update(&mut self) {
+    fn pre_frame(&mut self) {
         let dt = self.last_update
             .map(|instant| instant.elapsed().as_secs_f32())
             .unwrap_or(0.);
         self.last_update = Some(Instant::now());
 
-        self.application.update(&mut self.state, dt);
+        self.application.pre_frame(&mut self.state, dt);
     }
 }
 
@@ -117,12 +140,16 @@ impl winit::application::ApplicationHandler for Engine {
         let mut state = EngineState::new(Renderer::new(Arc::clone(&window)));
         let application = self.application_factory.create_application(&mut state);
 
-        let camera_uniform_buffer = state.renderer.create_buffer()
-            .size(size_of::<Mat4>() as u64)
+        let world_uniform_buffer = state.renderer.create_buffer()
+            .size(pbr_material::WorldUniforms::std140_size_static().try_into().unwrap())
             .create();
-        let camera_bind_group = state.renderer.create_bind_group()
-            .layout(state.camera_bind_group_layout)
-            .entry(0, camera_uniform_buffer)
+        let lights_uniform_buffer = state.renderer.create_buffer()
+            .size(u64::try_from(pbr_material::Light::std140_size_static()).unwrap() * u64::from(pbr_material::MAX_LIGHTS))
+            .create();
+        let world_bind_group = state.renderer.create_bind_group()
+            .layout(state.world_bind_group_layout)
+            .entry(0, world_uniform_buffer)
+            .entry(1, lights_uniform_buffer)
             .create();
 
         self.started = Some(StartedEngine {
@@ -131,8 +158,9 @@ impl winit::application::ApplicationHandler for Engine {
             state,
             application,
 
-            camera_uniform_buffer,
-            camera_bind_group,
+            world_uniform_buffer,
+            lights_uniform_buffer,
+            world_bind_group,
 
             last_update: None,
         });
@@ -142,8 +170,7 @@ impl winit::application::ApplicationHandler for Engine {
         let Some(started) = &mut self.started
         else { return };
 
-        // TODO: FIXME: Separate thread?
-        started.update();
+        started.pre_frame();
         started.window.request_redraw();
     }
 

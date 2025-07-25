@@ -1,7 +1,8 @@
-use std::{borrow::Cow, collections::HashMap};
-
 use super::*;
 use crate::handle_map;
+
+use std::{borrow::Cow, collections::HashMap};
+use derive_more::From;
 
 #[derive(Debug)]
 pub struct PipelineData {
@@ -9,6 +10,24 @@ pub struct PipelineData {
     pub(super) bind_group_layouts: Vec<BindGroupLayoutHandle>,
 }
 pub type PipelineHandle = handle_map::Handle<PipelineData>;
+
+#[derive(Debug, Clone, Copy, From)]
+pub enum ShaderValueDef {
+    Bool(bool),
+    Uint(u32),
+    Int(i32),
+}
+
+impl ShaderValueDef {
+    pub fn to_naga_oil(self) -> naga_oil::compose::ShaderDefValue {
+        use naga_oil::compose::ShaderDefValue as SDF;
+        match self {
+            ShaderValueDef::Bool(b) => SDF::Bool(b),
+            ShaderValueDef::Uint(val) => SDF::UInt(val),
+            ShaderValueDef::Int(val) => SDF::Int(val),
+        }
+    }
+}
 
 struct VertexBufferBindingData {
     stride: u64,
@@ -66,14 +85,25 @@ pub fn create_pipeline_builder(
     bind_group_layouts: Vec<BindGroupLayoutHandle>,
     shader_source: &str,
     #[builder(into, default)]
-    shader_defs: HashMap<String, naga_oil::compose::ShaderDefValue>,
+    shader_defs: HashMap<String, ShaderValueDef>,
+    #[builder(into, default)]
+    vertex_pipleline_overrides: HashMap<String, f64>,
+    #[builder(into, default)]
+    fragment_pipleline_overrides: HashMap<String, f64>,
 ) -> PipelineHandle {
     let device = &renderer.device;
 
     let compiled_shader = crate::compile_shader::compile_shader(
         shader_source,
-        shader_defs,
-    ).expect("Could not compile shader");
+        shader_defs.into_iter()
+            .map(|(k, v)| (k, v.to_naga_oil()))
+            .collect(),
+    );
+
+    let compiled_shader = match compiled_shader {
+        Ok(c) => c,
+        Err(e) => panic!("Could not compile shader: {e:#?}"),
+    };
 
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
@@ -101,19 +131,32 @@ pub fn create_pipeline_builder(
         })
         .collect::<Vec<_>>();
 
+    let vertex_overrides = vertex_pipleline_overrides.iter()
+        .map(|(a, b)| (a.as_str(), *b))
+        .collect::<Vec::<_>>();
+    let fragment_overrides = fragment_pipleline_overrides.iter()
+        .map(|(a, b)| (a.as_str(), *b))
+        .collect::<Vec::<_>>();
+
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: None,
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: None,
-            compilation_options: default(),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &vertex_overrides,
+                ..default()
+            },
             buffers: &vertex_buffers,
         },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: None,
-            compilation_options: default(),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &fragment_overrides,
+                ..default()
+            },
             targets: &[Some(wgpu::ColorTargetState {
                 format: renderer.surface_format,
                 blend: Some(wgpu::BlendState::REPLACE),
@@ -145,5 +188,17 @@ impl<'f1, 'f2, S> CreatePipelineBuilderBuilder<'f1, 'f2, S>
 {
     pub fn vertex_buffer(self) -> AddVertexBufferBuilder<'f1, 'f2, S> {
         add_vertex_buffer(self)
+    }
+}
+
+impl<'f1, 'f2, S> CreatePipelineBuilderBuilder<'f1, 'f2, S>
+    where S: create_pipeline_builder_builder::State,
+          S::FragmentPiplelineOverrides: create_pipeline_builder_builder::IsUnset,
+          S::VertexPiplelineOverrides: create_pipeline_builder_builder::IsUnset,
+{
+    pub fn pipeline_overrides(self, vals: impl Into<HashMap<String, f64>>) -> CreatePipelineBuilderBuilder<'f1, 'f2, create_pipeline_builder_builder::SetVertexPiplelineOverrides<create_pipeline_builder_builder::SetFragmentPiplelineOverrides<S>>> {
+        let vals = vals.into();
+        self.fragment_pipleline_overrides(vals.clone())
+            .vertex_pipleline_overrides(vals.clone())
     }
 }
