@@ -79,11 +79,17 @@ fn calculatePBRDirectLighting(
     return outgoing_radiance;
 }
 
+const LIGHT_KIND_DIRECTIONAL: u32 = 0;
+const LIGHT_KIND_SPOT: u32 = 1;
+
 struct Light {
+    kind: u32,
     position: vec3<f32>,
     direction: vec3<f32>,
     color: vec3<f32>,
     intensity: f32,
+    inner_cone_angle: f32,
+    outer_cone_angle: f32,
 }
 
 struct WorldUniforms {
@@ -169,12 +175,31 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 
     var total_radiance = vec3<f32>(0.);
     for (var light_i: u32 = 0; light_i < world_uniforms.light_count; light_i++) {
+        let light = lights[light_i];
+
+        var light_direction: vec3<f32>;
+        var light_color: vec4<f32>;
+        if (light.kind == LIGHT_KIND_DIRECTIONAL) {
+            light_direction = -light.direction;
+            light_color = vec4<f32>(light.color, light.intensity);
+        }
+        if (light.kind == LIGHT_KIND_SPOT) {
+            light_direction = normalize(light.position - in.world_pos);
+            let angle = acos(dot(light.direction, -light_direction));
+            let prop = 1. - clamp(
+                (angle - light.inner_cone_angle) / (light.outer_cone_angle - light.inner_cone_angle),
+                0., 1.,
+            );
+
+            light_color = vec4<f32>(light.color, light.intensity * prop);
+        }
+
         total_radiance += calculatePBRDirectLighting(
             in.world_pos,
             normal,
             view_dir,
-            -lights[light_i].direction,
-            vec4<f32>(lights[light_i].color, lights[light_i].intensity),
+            light_direction,
+            light_color,
             albedo.xyz,
             metallic,
             roughness,

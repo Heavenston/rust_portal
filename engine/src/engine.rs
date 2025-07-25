@@ -6,9 +6,9 @@ mod materials;
 pub use materials::*;
 pub mod pbr_material;
 
-use crate::{ * };
+use crate::{ utils::default, * };
 
-use std::{ sync::Arc, time::Instant };
+use std::{ iter::empty, sync::Arc, time::Instant };
 use crevice::std140::AsStd140;
 
 struct StartedEngine {
@@ -36,16 +36,34 @@ impl StartedEngine {
         else { eprintln!("NO CAMERA"); return; };
 
         {
-            let mut lights: Vec<pbr_material::Std140Light> = state.directional_lights
-                .iter().map(|(_, b)| b.directional_light).map(|dl| {
-                    pbr_material::Light {
-                        position: dl.position,
+            let mut lights: Vec<pbr_material::Std140Light> = empty()
+                .chain(
+                    state.directional_lights.iter().map(|(_, b)| b.directional_light)
+                    .map(|dl| pbr_material::Light {
+                        kind: pbr_material::LightKind::Directional,
                         direction: dl.direction,
                         color: dl.color,
                         intensity: dl.intensity,
-                    }
-                })
-                .map(|light| light.as_std140())
+                        
+                        position: default(),
+                        inner_cone_angle: default(),
+                        outer_cone_angle: default(),
+                    })
+                    .map(|light| light.as_std140())
+                )
+                .chain(
+                    state.spot_lights.iter().map(|(_, b)| b.spot_light)
+                    .map(|spot_light| pbr_material::Light {
+                        kind: pbr_material::LightKind::Spot,
+                        position: spot_light.position,
+                        direction: spot_light.direction,
+                        color: spot_light.color,
+                        intensity: spot_light.intensity,
+                        inner_cone_angle: spot_light.inner_cone_angle,
+                        outer_cone_angle: spot_light.outer_cone_angle,
+                    })
+                    .map(|light| light.as_std140())
+                )
                 .collect();
             lights.truncate(pbr_material::MAX_LIGHTS.try_into().unwrap());
             

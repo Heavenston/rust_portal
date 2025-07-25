@@ -12,12 +12,38 @@ pub struct Parameters {
 }
 impl MaterialParameters for Parameters { }
 
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum LightKind {
+    Directional = 0,
+    Spot = 1,
+}
+
+impl AsStd140 for LightKind {
+    type Output = u32;
+
+    fn as_std140(&self) -> Self::Output {
+        *self as u8 as u32
+    }
+
+    fn from_std140(val: Self::Output) -> Self {
+        match val {
+            0 => Self::Directional,
+            1 => Self::Spot,
+            _ => panic!("Invalid light kind value"),
+        }
+    }
+}
+
 #[derive(AsStd140, Debug, Clone, Copy)]
 pub struct Light {
+    pub kind: LightKind,
     pub position: Vec3,
     pub direction: Vec3,
     pub color: Vec3,
     pub intensity: f32,
+    pub inner_cone_angle: f32,
+    pub outer_cone_angle: f32,
 }
 
 #[derive(AsStd140, Debug, Clone, Copy)]

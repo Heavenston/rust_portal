@@ -5,9 +5,9 @@ use glam::{Affine3A, Mat4, Vec2, Vec3, Vec4};
 use itertools::Itertools;
 use crevice::std140::AsStd140 as _;
 
-// static SCENE_BYTES: &[u8] = include_bytes!("../../resources/simple_scene.glb");
+static SCENE_BYTES: &[u8] = include_bytes!("../../resources/simple_scene.glb");
 // static SCENE_BYTES: &[u8] = include_bytes!("../../resources/just-sun.glb");
-static SCENE_BYTES: &[u8] = include_bytes!("../../resources/outdoor_scene.glb");
+// static SCENE_BYTES: &[u8] = include_bytes!("../../resources/outdoor_scene.glb");
 
 #[derive(Debug, Clone, Copy)]
 struct Camera {
@@ -213,27 +213,37 @@ impl Application {
         transform: Affine3A,
         light: gltf::khr_lights_punctual::Light,
     ) {
+        let position: Vec3 = transform.translation.into();
+        let direction = transform.transform_vector3(Vec3::NEG_Z);
+        // let intensity = light.intensity() / 683.;
+        // FIXME: Should not be hard coded ?
+        let intensity = 1.;
+        let color = Vec3::from_array(light.color());
+
         use gltf::khr_lights_punctual::Kind;
         match light.kind() {
-            Kind::Directional => (),
+            Kind::Directional => {
+                data.state.insert_directional_light(engine::DirectionalLight {
+                    direction,
+                    intensity,
+                    color,
+                });
+            },
             Kind::Point => {
                 panic!("Unsupported point light!");
             },
-            Kind::Spot { .. } => {
-                panic!("Unsupported spot light!");
+            Kind::Spot { inner_cone_angle, outer_cone_angle } => {
+                data.state.insert_spot_light(engine::SpotLight {
+                    position,
+                    direction,
+                    intensity,
+                    color,
+                    inner_cone_angle,
+                    outer_cone_angle,
+                });
             },
         }
 
-        let position = transform.translation.into();
-        let direction = transform.transform_vector3(Vec3::NEG_Z);
-
-        let directional_light = engine::DirectionalLight {
-            position,
-            direction,
-            intensity: light.intensity() / 683.,
-            color: Vec3::from_array(light.color()),
-        };
-        data.state.insert_directional_light(directional_light);
     }
 
     fn commit_batching_mesh(

@@ -46,7 +46,6 @@ pub struct StaticMeshHandle(handle_map::Handle<StaticMeshData>);
 
 #[derive(Debug, Clone, Copy)]
 pub struct DirectionalLight {
-    pub position: Vec3,
     pub direction: Vec3,
     pub intensity: f32,
     pub color: Vec3,
@@ -59,6 +58,23 @@ pub(super) struct DirectionalLightData {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Into, From)]
 pub struct DirectionalLightHandle(handle_map::Handle<DirectionalLightData>);
 
+#[derive(Debug, Clone, Copy)]
+pub struct SpotLight {
+    pub position: Vec3,
+    pub direction: Vec3,
+    pub intensity: f32,
+    pub color: Vec3,
+    pub inner_cone_angle: f32,
+    pub outer_cone_angle: f32,
+}
+
+#[derive(Debug)]
+pub(super) struct SpotLightData {
+    pub spot_light: SpotLight,
+}
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Into, From)]
+pub struct SpotLightHandle(handle_map::Handle<SpotLightData>);
+
 #[derive(Debug)]
 pub struct EngineState {
     pub renderer: Renderer,
@@ -67,6 +83,7 @@ pub struct EngineState {
     /// immutable other than for the public mut methods
     pub(super) static_meshes: handle_map::HandleMap<StaticMeshData>,
     pub(super) directional_lights: handle_map::HandleMap<DirectionalLightData>,
+    pub(super) spot_lights: handle_map::HandleMap<SpotLightData>,
 
     pub(super) world_bind_group_layout: BindGroupLayoutHandle,
     pub(super) object_bind_group_layout: BindGroupLayoutHandle,
@@ -92,6 +109,7 @@ impl EngineState {
             camera: default(),
             static_meshes: default(),
             directional_lights: default(),
+            spot_lights: default(),
 
             world_bind_group_layout,
             object_bind_group_layout,
@@ -144,5 +162,19 @@ impl EngineState {
         &mut self, handle: DirectionalLightHandle,
     ) -> Option<DirectionalLight> {
         self.directional_lights.remove(handle.into()).map(|data| data.directional_light)
+    }
+
+    pub fn insert_spot_light(
+        &mut self, spot_light: SpotLight
+    ) -> SpotLightHandle {
+        self.spot_lights.insert(SpotLightData {
+            spot_light,
+        }).into()
+    }
+
+    pub fn remove_spot_light(
+        &mut self, handle: SpotLightHandle,
+    ) -> Option<SpotLight> {
+        self.spot_lights.remove(handle.into()).map(|data| data.spot_light)
     }
 }
