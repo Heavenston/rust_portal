@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, iter::repeat_n};
 
 use engine::utils::*;
 use glam::{Affine3A, Mat4, Vec2, Vec3, Vec4};
@@ -79,8 +79,11 @@ impl Application {
             }
         }
         for (material_index, batching_mesh) in &data.batched_static_meshes {
-            let material_instance = *data.created_materials.get(material_index)
-                .expect("Was created");
+            let Some(&material_instance) = data.created_materials.get(material_index)
+            else {
+                println!("Skipped a mesh with not material\n");
+                continue;
+            };
             self.commit_batching_mesh(data.state, material_instance, batching_mesh);
         }
         println!("Done");
@@ -174,16 +177,23 @@ impl Application {
         debug_assert_eq!(batched_static_mesh.texcoords.len(), batched_static_mesh.normals.len());
         let indices_offset = batched_static_mesh.positions.len() as u32;
 
+        let vertex_count = reader.read_positions().unwrap().count();
+
         batched_static_mesh.positions.extend(
             reader.read_positions().expect("Mesh without positions?")
             .map(Vec3::from_array)
             .map(|point| transform.transform_point3(point))
         );
-        batched_static_mesh.texcoords.extend(
-            reader.read_tex_coords(0).expect("Mesh without texcoords?")
-            .into_f32()
-            .map(Vec2::from_array)
-        );
+        if let Some(tex_coords) = reader.read_tex_coords(0) {
+            batched_static_mesh.texcoords.extend(
+                tex_coords.into_f32().map(Vec2::from_array)
+            );
+        }
+        else {
+            batched_static_mesh.texcoords.extend(
+                repeat_n(Vec2::ZERO, vertex_count)
+            );
+        }
         batched_static_mesh.normals.extend(
             reader.read_normals().expect("Mesh without normals?")
             .map(Vec3::from_array)
