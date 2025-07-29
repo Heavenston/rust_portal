@@ -65,6 +65,7 @@ impl StartedEngine {
                     .map(|light| light.as_std140())
                 )
                 .collect();
+            println!("Light count: {}/{}", lights.len(), pbr_material::MAX_LIGHTS);
             lights.truncate(pbr_material::MAX_LIGHTS.try_into().unwrap());
             
             let view = camera.transform.inverse();

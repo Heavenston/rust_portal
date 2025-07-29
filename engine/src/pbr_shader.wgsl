@@ -194,7 +194,8 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
                 (angle - light.inner_cone_angle) / (light.outer_cone_angle - light.inner_cone_angle),
                 0., 1.,
             );
-            let prop = conning / (1. + dist2);
+            // let prop = conning / (1. + dist2);
+            let prop = conning;
 
             light_color = vec4<f32>(light.color, light.intensity * prop);
         }

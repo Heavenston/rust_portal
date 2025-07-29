@@ -91,7 +91,7 @@ impl<T> HandleMap<T> {
         self.values.get_mut(&handle.id)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (Handle<T>, &T)> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = (Handle<T>, &T)> + ExactSizeIterator + '_ {
         self.values.iter()
             .map(|(id, val)| (self.handle(*id), val))
     }

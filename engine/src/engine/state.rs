@@ -123,6 +123,18 @@ impl EngineState {
         this
     }
 
+    pub fn static_meshes(&self) -> impl Iterator<Item = (StaticMeshHandle, &StaticMesh)> + ExactSizeIterator {
+        self.static_meshes.iter().map(|(handle, data)| (handle.into(), &data.mesh))
+    }
+
+    pub fn directional_lights(&self) -> impl Iterator<Item = (DirectionalLightHandle, &DirectionalLight)> + ExactSizeIterator {
+        self.directional_lights.iter().map(|(handle, data)| (handle.into(), &data.directional_light))
+    }
+
+    pub fn spot_lights(&self) -> impl Iterator<Item = (SpotLightHandle, &SpotLight)> + ExactSizeIterator {
+        self.spot_lights.iter().map(|(handle, data)| (handle.into(), &data.spot_light))
+    }
+
     pub fn insert_static_mesh(&mut self, mesh: StaticMesh) -> StaticMeshHandle {
         let renderer = &mut self.renderer;
 

@@ -86,7 +86,11 @@ impl Application {
             };
             self.commit_batching_mesh(data.state, material_instance, batching_mesh);
         }
-        println!("Done");
+        println!("Done loading");
+
+        println!("Loaded: {} static meshes", state.static_meshes().len());
+        println!("Loaded: {} directional lights", state.directional_lights().len());
+        println!("Loaded: {} spot lights", state.spot_lights().len());
 
         if self.camera.is_none() {
             panic!("No camera was added");
