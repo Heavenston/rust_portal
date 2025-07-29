@@ -229,9 +229,9 @@ impl Application {
     ) {
         let position: Vec3 = transform.translation.into();
         let direction = transform.transform_vector3(Vec3::NEG_Z);
-        // let intensity = light.intensity() / 683.;
         // FIXME: Should not be hard coded ?
-        let intensity = 1.;
+        // let intensity = 1.;
+        let intensity = light.intensity() * 0.001;
         let color = Vec3::from_array(light.color());
 
         use gltf::khr_lights_punctual::Kind;

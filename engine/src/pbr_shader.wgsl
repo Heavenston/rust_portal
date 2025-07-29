@@ -2,7 +2,7 @@
 // useful list of equations: https://graphicrants.blogspot.com/2013/08/specular-brdf-reference.html
 
 override PI: f32 = 3.14159265359;
-override AMBIENT_LIGHT: f32 = 0.1;
+override AMBIENT_LIGHT: f32 = 0.001;
 
 fn distributionGGX(normal_direction: vec3<f32>, halfway_direction: vec3<f32>, roughness_value: f32) -> f32 {
     let alpha = roughness_value * roughness_value;
@@ -165,10 +165,11 @@ struct FragmentOutput {
 fn fs_main(in: VertexOutput) -> FragmentOutput {
     let normal = normalize(in.world_normal);
     //! if ENABLE_DIFFUSE_TEXTURE
-        let albedo = textureSample(t_diffuse, s_diffuse, in.texcoords);
+        let uncorrected_albedo = textureSample(t_diffuse, s_diffuse, in.texcoords);
     //! else
-        let albedo = material_uniforms.base_color;
+        let uncorrected_albedo = material_uniforms.base_color;
     //! endif
+    let albedo = pow(uncorrected_albedo, vec4(2.2));
     let metallic = material_uniforms.metallic;
     let roughness = material_uniforms.roughness;
 
@@ -188,16 +189,14 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
             let diff = light.position - in.world_pos;
             let dist2 = dot(diff, diff);
             light_direction = normalize(diff);
-            let angle = acos(dot(light.direction, -light_direction));
 
-            let conning = 1. - clamp(
-                (angle - light.inner_cone_angle) / (light.outer_cone_angle - light.inner_cone_angle),
-                0., 1.,
-            );
-            // let prop = conning / (1. + dist2);
-            let prop = conning;
-
-            light_color = vec4<f32>(light.color, light.intensity * prop);
+            let cosInner = cos(light.inner_cone_angle);
+            let cosOuter = cos(light.outer_cone_angle);
+            let cosTheta = dot(light.direction, -light_direction);
+            let conning = smoothstep(cosOuter, cosInner, cosTheta);
+            
+            let prop = (light.intensity * conning) / (0.001 + dist2);
+            light_color = vec4<f32>(light.color, prop);
         }
 
         total_radiance += calculatePBRDirectLighting(
@@ -214,7 +213,12 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 
     total_radiance += albedo.xyz * AMBIENT_LIGHT;
 
+    // HDR tone map using the Reinhard operator
+    var color = total_radiance;
+    color = color / (color + vec3(1.0));
+    color = pow(color, vec3(1.0/2.2)); 
+
     var out: FragmentOutput;
-    out.color = vec4<f32>(total_radiance, 1.);
+    out.color = vec4<f32>(color, 1.);
     return out;
 }
