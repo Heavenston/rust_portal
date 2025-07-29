@@ -1,8 +1,8 @@
 // based on https://learnopengl.com/PBR/Theory
 // useful list of equations: https://graphicrants.blogspot.com/2013/08/specular-brdf-reference.html
 
-const PI: f32 = 3.14159265359;
-const AMBIENT_LIGHT: f32 = 0.1;
+override PI: f32 = 3.14159265359;
+override AMBIENT_LIGHT: f32 = 0.1;
 
 fn distributionGGX(normal_direction: vec3<f32>, halfway_direction: vec3<f32>, roughness_value: f32) -> f32 {
     let alpha = roughness_value * roughness_value;
@@ -81,8 +81,8 @@ fn calculatePBRDirectLighting(
     return outgoing_radiance;
 }
 
-const LIGHT_KIND_DIRECTIONAL: u32 = 0;
-const LIGHT_KIND_SPOT: u32 = 1;
+override LIGHT_KIND_DIRECTIONAL: u32 = 0;
+override LIGHT_KIND_SPOT: u32 = 1;
 
 struct Light {
     kind: u32,
@@ -120,12 +120,12 @@ struct MaterialUniforms {
 
 @group(2) @binding(0)
 var<uniform> material_uniforms: MaterialUniforms;
-#if ENABLE_DIFFUSE_TEXTURE == true
+//! if ENABLE_DIFFUSE_TEXTURE
     @group(2) @binding(1)
     var t_diffuse: texture_2d<f32>;
     @group(2) @binding(2)
     var s_diffuse: sampler;
-#endif
+//! endif
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -164,12 +164,11 @@ struct FragmentOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOutput {
     let normal = normalize(in.world_normal);
-    #if ENABLE_DIFFUSE_TEXTURE == true
-        ;
+    //! if ENABLE_DIFFUSE_TEXTURE
         let albedo = textureSample(t_diffuse, s_diffuse, in.texcoords);
-    #else
+    //! else
         let albedo = material_uniforms.base_color;
-    #endif
+    //! endif
     let metallic = material_uniforms.metallic;
     let roughness = material_uniforms.roughness;
 

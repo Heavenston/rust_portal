@@ -14,18 +14,28 @@ pub type PipelineHandle = handle_map::Handle<PipelineData>;
 #[derive(Debug, Clone, Copy, From)]
 pub enum ShaderValueDef {
     Bool(bool),
-    Uint(u32),
-    Int(i32),
+    Int(i64),
 }
 
 impl ShaderValueDef {
-    pub fn to_naga_oil(self) -> naga_oil::compose::ShaderDefValue {
-        use naga_oil::compose::ShaderDefValue as SDF;
+    pub fn to_preprocessor_value(self) -> shader_preprocessor::Value {
+        use shader_preprocessor::Value as PrepValue;
         match self {
-            ShaderValueDef::Bool(b) => SDF::Bool(b),
-            ShaderValueDef::Uint(val) => SDF::UInt(val),
-            ShaderValueDef::Int(val) => SDF::Int(val),
+            ShaderValueDef::Bool(b) => PrepValue::Bool(b),
+            ShaderValueDef::Int(val) => PrepValue::Int(val),
         }
+    }
+}
+
+impl From<i32> for ShaderValueDef {
+    fn from(value: i32) -> Self {
+        Self::from(i64::from(value))
+    }
+}
+
+impl From<u32> for ShaderValueDef {
+    fn from(value: u32) -> Self {
+        Self::from(i64::from(value))
     }
 }
 
@@ -96,18 +106,18 @@ pub fn create_pipeline_builder(
     let compiled_shader = crate::compile_shader::compile_shader(
         shader_source,
         shader_defs.into_iter()
-            .map(|(k, v)| (k, v.to_naga_oil()))
+            .map(|(k, v)| (k, v.to_preprocessor_value()))
             .collect(),
     );
 
     let compiled_shader = match compiled_shader {
         Ok(c) => c,
-        Err(e) => panic!("Could not compile shader: {e:#?}"),
+        Err(e) => panic!("Could not compile shader: {e}"),
     };
 
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
-        source: wgpu::ShaderSource::Naga(Cow::Owned(compiled_shader.into())),
+        source: wgpu::ShaderSource::Wgsl(Cow::Owned(compiled_shader)),
     });
 
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
