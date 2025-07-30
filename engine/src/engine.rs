@@ -29,6 +29,9 @@ impl StartedEngine {
     fn render(&mut self) {
         let state = &mut self.state;
 
+        #[cfg(debug_assertions)]
+        state.materials.recreate_outdated(&mut state.renderer);
+
         // 
         // Write into world uniform buffer
         // 

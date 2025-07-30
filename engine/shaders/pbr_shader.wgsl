@@ -6,7 +6,7 @@
 //! define ENABLE_OUTPUT_LINEAR_CONVERSION false
 
 override PI: f32 = 3.14159265359;
-override AMBIENT_LIGHT: f32 = 0.001;
+override AMBIENT_LIGHT: f32 = 0.0125;
 
 fn distributionGGX(normal_direction: vec3<f32>, halfway_direction: vec3<f32>, roughness_value: f32) -> f32 {
     let alpha = roughness_value * roughness_value;
@@ -221,8 +221,9 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 
     // HDR tone map using the Reinhard operator
     var color = total_radiance;
-    //! if ENABLE_OUTPUT_LINEAR_CONVERSION
     color = color / (color + vec3(1.0));
+
+    //! if ENABLE_OUTPUT_LINEAR_CONVERSION
     color = pow(color, vec3(1.0/2.2)); 
     //! endif
 

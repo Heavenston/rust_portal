@@ -14,3 +14,4 @@ winit = { version = "0.30.11" }
 derive_more = { version = "2.0.1", features = ["from", "into"] }
 crevice = { version = "0.18.0", features = ["glam"] }
 shader-preprocessor = { version = "0.1.0", path = "../shader-preprocessor" }
+rust-embed = "8.7.2"

@@ -14,3 +14,4 @@ pub use uid::*;
 pub mod handle_map;
 mod compile_shader;
 pub mod color;
+pub mod builtin_shaders;
