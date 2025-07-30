@@ -1,10 +1,8 @@
 mod map_id {
-    use crate::uid::*;
-
     #[derive(Default, Debug, Clone, Copy, Hash, PartialEq, Eq)]
     pub struct MapId {
         #[cfg(debug_assertions)]
-        map_id: Uid,
+        map_id: crate::uid::Uid,
         _private_field: (),
     }
 }
