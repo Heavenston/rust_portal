@@ -1,7 +1,7 @@
 use std::{collections::HashMap, iter::repeat_n};
 
-use engine::utils::*;
-use glam::{Affine3A, Mat4, Vec2, Vec3, Vec4};
+use engine::{ color::{ LinearRgb, LinearRgba, Srgb, Srgba }, utils::* };
+use glam::{ Affine3A, Mat4, Vec2, Vec3 };
 use itertools::Itertools;
 use crevice::std140::AsStd140 as _;
 
@@ -104,7 +104,7 @@ impl Application {
     ) -> engine::TextureHandle {
         let texture_handle = renderer.create_texture()
             .width(image_data.width).height(image_data.height)
-            .format(engine::TextureFormat::Rgba8Unorm)
+            .format(engine::TextureFormat::Rgba8UnormSrgb)
             .create();
 
         let data = match image_data.format {
@@ -150,7 +150,7 @@ impl Application {
         let material_uniform_buffer = state.renderer.create_buffer()
             .size(engine::pbr_material::MaterialUniforms::std140_size_static() as u64)
             .data(engine::pbr_material::MaterialUniforms {
-                base_color: Vec4::from_array(bmr.base_color_factor()),
+                base_color: LinearRgba::from_array(bmr.base_color_factor()),
                 metallic: bmr.metallic_factor(),
                 roughness: bmr.roughness_factor(),
             }.as_std140().as_bytes())
@@ -232,7 +232,7 @@ impl Application {
         // FIXME: Should not be hard coded ?
         // let intensity = 1.;
         let intensity = light.intensity() * 0.001;
-        let color = Vec3::from_array(light.color());
+        let color: Srgb = LinearRgb::from_array(light.color()).into();
 
         use gltf::khr_lights_punctual::Kind;
         match light.kind() {
@@ -348,7 +348,7 @@ impl engine::Application for Application {
             state.camera = Some(engine::Camera {
                 transform: camera.transform,
                 projection: camera.get_projection(state.renderer.aspect_ration()),
-                clear_color: wgpu::Color::BLACK,
+                clear_color: Srgba::BLACK,
             });
         }
 

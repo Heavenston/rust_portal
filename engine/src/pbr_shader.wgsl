@@ -1,5 +1,9 @@
 // based on https://learnopengl.com/PBR/Theory
+// 
 // useful list of equations: https://graphicrants.blogspot.com/2013/08/specular-brdf-reference.html
+
+//! define ENABLE_INPUT_LINEAR_CONVERSION false
+//! define ENABLE_OUTPUT_LINEAR_CONVERSION false
 
 override PI: f32 = 3.14159265359;
 override AMBIENT_LIGHT: f32 = 0.001;
@@ -165,11 +169,13 @@ struct FragmentOutput {
 fn fs_main(in: VertexOutput) -> FragmentOutput {
     let normal = normalize(in.world_normal);
     //! if ENABLE_DIFFUSE_TEXTURE
-        let uncorrected_albedo = textureSample(t_diffuse, s_diffuse, in.texcoords);
+        var albedo = textureSample(t_diffuse, s_diffuse, in.texcoords);
     //! else
-        let uncorrected_albedo = material_uniforms.base_color;
+        var albedo = material_uniforms.base_color;
     //! endif
-    let albedo = pow(uncorrected_albedo, vec4(2.2));
+    //! if ENABLE_INPUT_LINEAR_CONVERSION
+    albedo = pow(albedo, vec4(2.2));
+    //! endif
     let metallic = material_uniforms.metallic;
     let roughness = material_uniforms.roughness;
 
@@ -215,8 +221,10 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 
     // HDR tone map using the Reinhard operator
     var color = total_radiance;
+    //! if ENABLE_OUTPUT_LINEAR_CONVERSION
     color = color / (color + vec3(1.0));
     color = pow(color, vec3(1.0/2.2)); 
+    //! endif
 
     var out: FragmentOutput;
     out.color = vec4<f32>(color, 1.);

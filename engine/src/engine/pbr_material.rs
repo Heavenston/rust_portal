@@ -1,7 +1,7 @@
-use crate::{ MaterialParameters, MaterialFactory, Renderer, EngineState, MaterialData };
+use crate::{ color::{ LinearRgb, LinearRgba }, EngineState, MaterialData, MaterialFactory, MaterialParameters, Renderer };
 
 use crevice::std140::AsStd140;
-use glam::{Mat4, Vec3, Vec4};
+use glam::{ Mat4, Vec3 };
 
 static PBR_SHADER_SOURCE: &str = include_str!("../pbr_shader.wgsl");
 pub static MAX_LIGHTS: u32 = 8;
@@ -40,7 +40,7 @@ pub struct Light {
     pub kind: LightKind,
     pub position: Vec3,
     pub direction: Vec3,
-    pub color: Vec3,
+    pub color: LinearRgb,
     pub intensity: f32,
     pub inner_cone_angle: f32,
     pub outer_cone_angle: f32,
@@ -55,7 +55,7 @@ pub struct WorldUniforms {
 
 #[derive(AsStd140, Debug, Clone, Copy)]
 pub struct MaterialUniforms {
-    pub base_color: Vec4,
+    pub base_color: LinearRgba,
     pub metallic: f32,
     pub roughness: f32,
 }

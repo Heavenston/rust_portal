@@ -4,12 +4,14 @@ use crate::handle_map;
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum TextureFormat {
     Rgba8Unorm,
+    Rgba8UnormSrgb,
 }
 
 impl TextureFormat {
     pub fn pixel_byte_size(self) -> u32 {
         match self {
             TextureFormat::Rgba8Unorm => 4,
+            TextureFormat::Rgba8UnormSrgb => 4,
         }
     }
 }
@@ -17,7 +19,8 @@ impl TextureFormat {
 impl From<TextureFormat> for wgpu::TextureFormat {
     fn from(value: TextureFormat) -> Self {
         match value {
-            TextureFormat::Rgba8Unorm => Self::Rgba8Unorm,
+            TextureFormat::Rgba8Unorm     => wgpu::TextureFormat::Rgba8Unorm,
+            TextureFormat::Rgba8UnormSrgb => wgpu::TextureFormat::Rgba8UnormSrgb,
         }
     }
 }
@@ -28,6 +31,7 @@ impl TryFrom<wgpu::TextureFormat> for TextureFormat {
     fn try_from(value: wgpu::TextureFormat) -> Result<Self, Self::Error> {
         match value {
             wgpu::TextureFormat::Rgba8Unorm => Ok(Self::Rgba8Unorm),
+            wgpu::TextureFormat::Rgba8UnormSrgb => Ok(Self::Rgba8UnormSrgb),
             _ => Err(()),
         }
     }

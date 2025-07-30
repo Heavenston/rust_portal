@@ -1,4 +1,4 @@
-use crate::{ utils::*, * };
+use crate::{ color::*, utils::*, * };
 
 use glam::{ Affine3A, Mat4, Vec3 };
 use derive_more::{ From, Into };
@@ -8,7 +8,7 @@ pub struct Camera {
     pub transform: Affine3A,
     pub projection: Mat4,
 
-    pub clear_color: wgpu::Color,
+    pub clear_color: Srgba,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -48,7 +48,7 @@ pub struct StaticMeshHandle(handle_map::Handle<StaticMeshData>);
 pub struct DirectionalLight {
     pub direction: Vec3,
     pub intensity: f32,
-    pub color: Vec3,
+    pub color: Srgb,
 }
 
 #[derive(Debug)]
@@ -63,7 +63,7 @@ pub struct SpotLight {
     pub position: Vec3,
     pub direction: Vec3,
     pub intensity: f32,
-    pub color: Vec3,
+    pub color: Srgb,
     pub inner_cone_angle: f32,
     pub outer_cone_angle: f32,
 }

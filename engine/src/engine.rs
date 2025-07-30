@@ -6,7 +6,7 @@ mod materials;
 pub use materials::*;
 pub mod pbr_material;
 
-use crate::{ utils::default, * };
+use crate::{ utils::default, *, color::* };
 
 use std::{ iter::empty, sync::Arc, time::Instant };
 use crevice::std140::AsStd140;
@@ -42,7 +42,7 @@ impl StartedEngine {
                     .map(|dl| pbr_material::Light {
                         kind: pbr_material::LightKind::Directional,
                         direction: dl.direction,
-                        color: dl.color,
+                        color: dl.color.into(),
                         intensity: dl.intensity,
                         
                         position: default(),
@@ -57,7 +57,7 @@ impl StartedEngine {
                         kind: pbr_material::LightKind::Spot,
                         position: spot_light.position,
                         direction: spot_light.direction,
-                        color: spot_light.color,
+                        color: spot_light.color.into(),
                         intensity: spot_light.intensity,
                         inner_cone_angle: spot_light.inner_cone_angle,
                         outer_cone_angle: spot_light.outer_cone_angle,
@@ -94,10 +94,16 @@ impl StartedEngine {
 
         // Object rendering pass
         {
+            let cc = LinearRgba::from(camera.clear_color);
             let mut render_pass = render.render_pass()
                 .color_attachment()
                     .texture_view_handle(present_texture_handle)
-                    .color_clear(camera.clear_color)
+                    .color_clear(wgpu::Color {
+                        r: cc.r.into(),
+                        g: cc.g.into(),
+                        b: cc.b.into(),
+                        a: cc.a.into(),
+                    })
                     .finish()
                 .depth_stencil_attachment()
                     .texture_view_handle(depth_buffer_handle)

@@ -1608,7 +1608,6 @@ dependencies = [
  "gltf",
  "itertools",
  "rust-portal-engine",
- "wgpu",
  "winit",
 ]
 
