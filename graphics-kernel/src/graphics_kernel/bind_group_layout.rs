@@ -69,16 +69,16 @@ impl<'f1, PS, S> AddBindGroupLayoutEntryBuilder<'f1, PS, S>
 #[bon::builder(finish_fn = create)]
 pub fn create_bind_group_layout(
     #[builder(start_fn)]
-    renderer: &mut Renderer,
+    kernel: &mut GraphicsKernel,
     #[builder(field)]
     entries: Vec<wgpu::BindGroupLayoutEntry>,
 ) -> BindGroupLayoutHandle {
-    let bind_group_layout = renderer.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+    let bind_group_layout = kernel.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: None,
         entries: &entries,
     });
 
-    renderer.resources.bind_group_layouts.insert(BindGroupLayoutData { bind_group_layout })
+    kernel.resources.bind_group_layouts.insert(BindGroupLayoutData { bind_group_layout })
 }
 
 impl<'a, S> CreateBindGroupLayoutBuilder<'a, S>

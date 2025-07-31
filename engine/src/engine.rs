@@ -7,7 +7,7 @@ pub use materials::*;
 pub mod pbr_material;
 pub mod hdr_tonemapper_material;
 
-use pgk::{ Renderer, BindGroupHandle, BufferHandle };
+use pgk::{ GraphicsKernel, BindGroupHandle, BufferHandle };
 use utils::{ default };
 
 use std::{ iter::empty, sync::Arc, time::Instant };
@@ -32,7 +32,7 @@ impl StartedEngine {
         let state = &mut self.state;
 
         #[cfg(debug_assertions)]
-        state.materials.recreate_outdated(&mut state.renderer);
+        state.materials.recreate_outdated(&mut state.kernel);
 
         // 
         // Write into world uniform buffer
@@ -81,28 +81,28 @@ impl StartedEngine {
                 camera_world_pos: camera.transform.translation.into(),
                 light_count: lights.len().try_into().unwrap(),
             };
-            state.renderer.write_buffer(
+            state.kernel.write_buffer(
                 self.world_uniform_buffer, 0,
                 bytemuck::bytes_of(&uniforms.as_std140()),
             );
-            state.renderer.write_buffer(
+            state.kernel.write_buffer(
                 self.lights_uniform_buffer, 0,
                 bytemuck::cast_slice(&lights),
             );
         }
 
-        let tonemap_material_handle = state.materials.get_handle(&mut state.renderer, &hdr_tonemapper_material::Parameters);
+        let tonemap_material_handle = state.materials.get_handle(&mut state.kernel, &hdr_tonemapper_material::Parameters);
         let tonemap_pipeline = state.materials.get(tonemap_material_handle).pipeline;
-        let tonemap_bind_group_layout = state.renderer.get_pipeline_bind_group_layouts(tonemap_pipeline)[0];
-        let render_target_handle = state.renderer.render_target();
+        let tonemap_bind_group_layout = state.kernel.get_pipeline_bind_group_layouts(tonemap_pipeline)[0];
+        let render_target_handle = state.kernel.render_target();
 
-        let tonemap_bind_group = state.renderer.create_bind_group()
+        let tonemap_bind_group = state.kernel.create_bind_group()
             .layout(tonemap_bind_group_layout)
             .entry(0, render_target_handle)
             .sampler(1)
             .create();
 
-        let mut render = state.renderer.render();
+        let mut render = state.kernel.render();
         let present_texture_handle = render.using_present_texture();
         let render_target_handle = render.using_render_target();
         let depth_buffer_handle = render.using_depth_buffer();
@@ -161,7 +161,7 @@ impl StartedEngine {
 
         render.finish();
 
-        state.renderer.delete_bind_group(tonemap_bind_group);
+        state.kernel.delete_bind_group(tonemap_bind_group);
     }
 
     fn pre_frame(&mut self) {
@@ -193,16 +193,16 @@ impl winit::application::ApplicationHandler for Engine {
         let window = event_loop.create_window(self.window_attributes.clone()).unwrap();
         let window = Arc::new(window);
 
-        let mut state = EngineState::new(Renderer::new(Arc::clone(&window)));
+        let mut state = EngineState::new(GraphicsKernel::new(Arc::clone(&window)));
         let application = self.application_factory.create_application(&mut state);
 
-        let world_uniform_buffer = state.renderer.create_buffer()
+        let world_uniform_buffer = state.kernel.create_buffer()
             .size(pbr_material::WorldUniforms::std140_size_static().try_into().unwrap())
             .create();
-        let lights_uniform_buffer = state.renderer.create_buffer()
+        let lights_uniform_buffer = state.kernel.create_buffer()
             .size(u64::try_from(pbr_material::Light::std140_size_static()).unwrap() * u64::from(pbr_material::MAX_LIGHTS))
             .create();
-        let world_bind_group = state.renderer.create_bind_group()
+        let world_bind_group = state.kernel.create_bind_group()
             .layout(state.world_bind_group_layout)
             .entry(0, world_uniform_buffer)
             .entry(1, lights_uniform_buffer)
@@ -247,7 +247,7 @@ impl winit::application::ApplicationHandler for Engine {
         use winit::event::WindowEvent as We;
         match event {
             We::Resized(physical_size) => {
-                started.state.renderer.resize(physical_size);
+                started.state.kernel.resize(physical_size);
             },
             We::CloseRequested => {
                 self.started = None;

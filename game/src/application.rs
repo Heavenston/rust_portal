@@ -101,10 +101,10 @@ impl Application {
 
     fn upload_texture(
         &mut self,
-        renderer: &mut pgk::Renderer,
+        kernel: &mut pgk::GraphicsKernel,
         image_data: &gltf::image::Data,
     ) -> pgk::TextureHandle {
-        let texture_handle = renderer.create_texture()
+        let texture_handle = kernel.create_texture()
             .width(image_data.width).height(image_data.height)
             .format(pgk::TextureFormat::Rgba8UnormSrgb)
             .create();
@@ -124,7 +124,7 @@ impl Application {
             _ => panic!("Unsupported image gltf format '{:?}'", image_data.format),
         };
 
-        renderer.write_texture(texture_handle, &data);
+        kernel.write_texture(texture_handle, &data);
 
         texture_handle
     }
@@ -144,12 +144,12 @@ impl Application {
         }
 
         let diffuse_texture = bmr.base_color_texture()
-            .map(|diffuse_texture| self.upload_texture(&mut state.renderer, &data.gltf_textures[diffuse_texture.texture().index()]));
+            .map(|diffuse_texture| self.upload_texture(&mut state.kernel, &data.gltf_textures[diffuse_texture.texture().index()]));
 
-        let material = state.materials.get_handle(&mut state.renderer, &engine::pbr_material::Parameters {
+        let material = state.materials.get_handle(&mut state.kernel, &engine::pbr_material::Parameters {
             enable_diffuse_texture: bmr.base_color_texture().is_some(),
         });
-        let material_uniform_buffer = state.renderer.create_buffer()
+        let material_uniform_buffer = state.kernel.create_buffer()
             .size(engine::pbr_material::MaterialUniforms::std140_size_static() as u64)
             .data(engine::pbr_material::MaterialUniforms {
                 base_color: LinearRgba::from_array(bmr.base_color_factor()),
@@ -157,8 +157,8 @@ impl Application {
                 roughness: bmr.roughness_factor(),
             }.as_std140().as_bytes())
             .create();
-        let layout = state.renderer.get_pipeline_bind_group_layouts(state.materials.get(material).pipeline)[2];
-        let mut bind_group = state.renderer.create_bind_group()
+        let layout = state.kernel.get_pipeline_bind_group_layouts(state.materials.get(material).pipeline)[2];
+        let mut bind_group = state.kernel.create_bind_group()
             .layout(layout)
             .entry(0, material_uniform_buffer);
         if let Some(diffuse_texture) = diffuse_texture {
@@ -273,19 +273,19 @@ impl Application {
         let normals_bytes = bytemuck::cast_slice::<_, u8>(batching_mesh.normals.as_slice());
         let indices_bytes = bytemuck::cast_slice::<_, u8>(batching_mesh.indices.as_slice());
 
-        let positions_buffer = state.renderer.create_buffer()
+        let positions_buffer = state.kernel.create_buffer()
             .size(positions_bytes.len().try_into().expect("no overflow"))
             .data(&positions_bytes)
             .create();
-        let texcoords_buffer = state.renderer.create_buffer()
+        let texcoords_buffer = state.kernel.create_buffer()
             .size(texcoords_bytes.len().try_into().expect("no overflow"))
             .data(&texcoords_bytes)
             .create();
-        let normals_buffer = state.renderer.create_buffer()
+        let normals_buffer = state.kernel.create_buffer()
             .size(normals_bytes.len().try_into().expect("no overflow"))
             .data(&normals_bytes)
             .create();
-        let index_buffer = state.renderer.create_buffer()
+        let index_buffer = state.kernel.create_buffer()
             .size(indices_bytes.len().try_into().expect("no overflow"))
             .data(&indices_bytes)
             .create();
@@ -349,7 +349,7 @@ impl engine::Application for Application {
 
             state.camera = Some(engine::Camera {
                 transform: camera.transform,
-                projection: camera.get_projection(state.renderer.aspect_ration()),
+                projection: camera.get_projection(state.kernel.aspect_ration()),
                 clear_color: Srgba::BLACK,
             });
         }

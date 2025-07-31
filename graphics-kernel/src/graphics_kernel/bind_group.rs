@@ -17,7 +17,7 @@ pub enum BindGroupResourceHandle {
 }
 
 impl BindGroupResourceHandle {
-    pub(super) fn to_wgpu<'a>(&'a self, resources: &'a RendererResources) -> Option<wgpu::BindingResource<'a>> {
+    pub(super) fn to_wgpu<'a>(&'a self, resources: &'a GraphicsKernelResources) -> Option<wgpu::BindingResource<'a>> {
         Some(match *self {
             Self::Buffer(handle) => {
                 let buffer = &resources.buffers.get(handle)?.buffer;
@@ -37,26 +37,26 @@ impl BindGroupResourceHandle {
 #[bon::builder(finish_fn = create)]
 pub fn create_bind_group(
     #[builder(start_fn)]
-    renderer: &mut Renderer,
+    kernel: &mut GraphicsKernel,
     #[builder(field)]
     entries: Vec<(u32, BindGroupResourceHandle)>,
     #[builder(name = layout)]
     layout_handle: BindGroupLayoutHandle,
 ) -> BindGroupHandle {
-    let layout = &renderer.resources.bind_group_layouts.get(layout_handle)
+    let layout = &kernel.resources.bind_group_layouts.get(layout_handle)
         .expect("Invalid layout handle given").bind_group_layout;
 
-    let bind_group = renderer.device.create_bind_group(&wgpu::BindGroupDescriptor {
+    let bind_group = kernel.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("object_bind_group"),
         layout,
         entries: &entries.iter().map(|&(binding, ref handle)| wgpu::BindGroupEntry {
             binding,
-            resource: handle.to_wgpu(&renderer.resources)
+            resource: handle.to_wgpu(&kernel.resources)
                 .expect("Invalid bind group handle given"),
         }).collect::<Vec<_>>(),
     });
 
-    renderer.resources.bind_groups.insert(BindGroupData { bind_group })
+    kernel.resources.bind_groups.insert(BindGroupData { bind_group })
 }
 
 impl<'a, S> CreateBindGroupBuilder<'a, S>
@@ -69,7 +69,7 @@ impl<'a, S> CreateBindGroupBuilder<'a, S>
 
     /// I was to lazy to make anything other than hard coded default sampler descriptor
     pub fn sampler(mut self, binding: u32) -> Self {
-        let sampler = self.renderer.device.create_sampler(&wgpu::SamplerDescriptor {
+        let sampler = self.kernel.device.create_sampler(&wgpu::SamplerDescriptor {
             label: None,
             address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::Repeat,

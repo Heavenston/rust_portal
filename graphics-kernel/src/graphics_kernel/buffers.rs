@@ -10,11 +10,11 @@ pub type BufferHandle = handle_map::Handle<BufferData>;
 #[bon::builder(finish_fn = create)]
 pub fn create_buffer_builder(
     #[builder(start_fn)]
-    renderer: &mut Renderer,
+    kernel: &mut GraphicsKernel,
     size: u64,
     data: Option<&[u8]>,
 ) -> BufferHandle {
-    let buffer = renderer.device.create_buffer(&wgpu::BufferDescriptor {
+    let buffer = kernel.device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
         size,
         // TODO: FIXME: As needed instead of everything
@@ -33,5 +33,5 @@ pub fn create_buffer_builder(
         buffer.unmap();
     }
 
-    renderer.resources.buffers.insert(BufferData { buffer })
+    kernel.resources.buffers.insert(BufferData { buffer })
 }

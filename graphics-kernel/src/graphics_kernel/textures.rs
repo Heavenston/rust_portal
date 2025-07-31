@@ -76,14 +76,14 @@ pub type TextureHandle = handle_map::Handle<TextureData>;
 #[bon::builder(finish_fn = create)]
 pub fn create_texture_builder(
     #[builder(start_fn)]
-    renderer: &mut Renderer,
+    kernel: &mut GraphicsKernel,
     width: u32,
     height: u32,
     format: TextureFormat,
 ) -> TextureHandle {
     assert!(width >= 1 && height >= 1, "Texture must not be of size 0 (given {width}x{height})");
 
-    let texture = renderer.device.create_texture(&wgpu::TextureDescriptor {
+    let texture = kernel.device.create_texture(&wgpu::TextureDescriptor {
         label: None,
         size: wgpu::Extent3d {
             width,
@@ -98,5 +98,5 @@ pub fn create_texture_builder(
             wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[wgpu::TextureFormat::from(format).remove_srgb_suffix(), wgpu::TextureFormat::from(format).add_srgb_suffix()],
     });
-    renderer.resources.textures.insert(TextureData::from_wgpu(texture))
+    kernel.resources.textures.insert(TextureData::from_wgpu(texture))
 }

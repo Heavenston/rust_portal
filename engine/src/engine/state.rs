@@ -2,7 +2,7 @@ use utils::{ default, handle_map };
 use pgk::{
     color::{ Srgb, Srgba },
     BindGroupLayoutHandle,
-    Renderer, BufferHandle, BindGroupHandle,
+    GraphicsKernel, BufferHandle, BindGroupHandle,
 };
 use crate::*;
 
@@ -35,10 +35,10 @@ pub struct StaticMesh {
 }
 
 impl StaticMesh {
-    pub fn delete_buffers(&self, renderer: &mut Renderer) {
-        renderer.delete_buffer(self.positions_buffer);
-        renderer.delete_buffer(self.texcoords_buffer);
-        renderer.delete_buffer(self.index_buffer);
+    pub fn delete_buffers(&self, kernel: &mut GraphicsKernel) {
+        kernel.delete_buffer(self.positions_buffer);
+        kernel.delete_buffer(self.texcoords_buffer);
+        kernel.delete_buffer(self.index_buffer);
     }
 }
 
@@ -83,7 +83,7 @@ pub struct SpotLightHandle(handle_map::Handle<SpotLightData>);
 
 #[derive(Debug)]
 pub struct EngineState {
-    pub renderer: Renderer,
+    pub kernel: GraphicsKernel,
 
     pub camera: Option<Camera>,
     /// immutable other than for the public mut methods
@@ -98,19 +98,19 @@ pub struct EngineState {
 }
 
 impl EngineState {
-    pub fn new(mut renderer: Renderer) -> Self {
-        let world_bind_group_layout = renderer.create_bind_group_layout()
+    pub fn new(mut kernel: GraphicsKernel) -> Self {
+        let world_bind_group_layout = kernel.create_bind_group_layout()
             // world uniforms
             .entry().binding(0).uniform_buffer().add()
             // light array
             .entry().binding(1).uniform_buffer().add()
             .create();
-        let object_bind_group_layout = renderer.create_bind_group_layout()
+        let object_bind_group_layout = kernel.create_bind_group_layout()
             .entry().binding(0).uniform_buffer().add()
             .create();
 
         let mut this = Self {
-            renderer,
+            kernel,
 
             camera: default(),
             static_meshes: default(),
@@ -144,15 +144,15 @@ impl EngineState {
     }
 
     pub fn insert_static_mesh(&mut self, mesh: StaticMesh) -> StaticMeshHandle {
-        let renderer = &mut self.renderer;
+        let kernel = &mut self.kernel;
 
         let transform: Mat4 = mesh.transform.into();
-        let uniform_buffer = renderer.create_buffer()
+        let uniform_buffer = kernel.create_buffer()
             .size(size_of::<Mat4>() as u64)
             .data(bytemuck::bytes_of(&transform))
             .create();
 
-        let object_bind_group = renderer.create_bind_group()
+        let object_bind_group = kernel.create_bind_group()
             .layout(self.object_bind_group_layout)
             .entry(0, uniform_buffer)
             .create();

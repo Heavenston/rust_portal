@@ -1,5 +1,5 @@
 use utils::{ default, hash_value };
-use pgk::{ BindGroupHandle, Renderer, PipelineHandle };
+use pgk::{ BindGroupHandle, GraphicsKernel, PipelineHandle };
 use crate::*;
 
 use std::{
@@ -19,15 +19,15 @@ pub struct MaterialData {
 
 pub trait MaterialParameters: Debug + PartialEq + Eq + Hash + Clone + 'static { }
 pub trait MaterialFactory<P>: 'static {
-    fn create(&mut self, renderer: &mut Renderer, parameters: &P) -> MaterialData;
+    fn create(&mut self, kernel: &mut GraphicsKernel, parameters: &P) -> MaterialData;
     fn is_outdated(&mut self, data: &MaterialData) -> bool;
 }
 
 impl<F, P> MaterialFactory<P> for F
-    where F: (FnMut(&mut Renderer, &P) -> MaterialData) + 'static
+    where F: (FnMut(&mut GraphicsKernel, &P) -> MaterialData) + 'static
 {
-    fn create(&mut self, renderer: &mut Renderer, parameters: &P) -> MaterialData {
-        self(renderer, parameters)
+    fn create(&mut self, kernel: &mut GraphicsKernel, parameters: &P) -> MaterialData {
+        self(kernel, parameters)
     }
 
     fn is_outdated(&mut self, _data: &MaterialData) -> bool {
@@ -42,17 +42,17 @@ pub struct EmbeddedShaderFactoryHelper<F, P, E> {
 }
 
 impl<F, P, E> MaterialFactory<P> for EmbeddedShaderFactoryHelper<F, P, E>
-    where F: (FnMut(&mut Renderer, &str, &P) -> MaterialData) + 'static,
+    where F: (FnMut(&mut GraphicsKernel, &str, &P) -> MaterialData) + 'static,
           P: MaterialParameters,
           E: rust_embed::Embed + 'static,
 {
-    fn create(&mut self, renderer: &mut Renderer, parameters: &P) -> MaterialData {
+    fn create(&mut self, kernel: &mut GraphicsKernel, parameters: &P) -> MaterialData {
         let shader_source_file = E::get(&self.file_name)
             .expect("Could not find shader source file");
         let shader_source = str::from_utf8(&shader_source_file.data)
             .expect("Invalid utf8 in shader source file");
 
-        (self.factory)(renderer, shader_source, parameters)
+        (self.factory)(kernel, shader_source, parameters)
     }
 
     fn is_outdated(&mut self, data: &MaterialData) -> bool {
@@ -84,7 +84,7 @@ pub fn embedded_shader_factory_helper<F, P, E>(
 }
 
 trait ObjectSafeFactory: 'static {
-    fn create(&mut self, renderer: &mut Renderer, parameters: &dyn Any) -> MaterialData;
+    fn create(&mut self, kernel: &mut GraphicsKernel, parameters: &dyn Any) -> MaterialData;
     fn is_outdated(&mut self, data: &MaterialData) -> bool;
 }
 
@@ -100,8 +100,8 @@ impl<P, F> ObjectSafeFactory for FactoryWrapper<P, F>
     where P: MaterialParameters,
           F: MaterialFactory<P>
 {
-    fn create(&mut self, renderer: &mut Renderer, parameters: &dyn Any) -> MaterialData {
-        self.factory.create(renderer, parameters.downcast_ref::<P>().expect("Correct type"))
+    fn create(&mut self, kernel: &mut GraphicsKernel, parameters: &dyn Any) -> MaterialData {
+        self.factory.create(kernel, parameters.downcast_ref::<P>().expect("Correct type"))
     }
 
     fn is_outdated(&mut self, data: &MaterialData) -> bool {
@@ -147,13 +147,13 @@ impl MaterialsStore {
         Self::default()
     }
 
-    pub fn recreate_outdated(&mut self, renderer: &mut Renderer) {
+    pub fn recreate_outdated(&mut self, kernel: &mut GraphicsKernel) {
         for (handle, data) in &mut self.materials {
             let factory = self.factories.get_mut(&handle.parameters_type_id)
                 .expect("Present");
             if factory.is_outdated(data) {
                 let parameters = &self.original_parameters[&handle.parameters_hash];
-                *data = factory.create(renderer, &**parameters);
+                *data = factory.create(kernel, &**parameters);
             }
         }
     }
@@ -173,7 +173,7 @@ impl MaterialsStore {
     }
 
     pub fn get_handle<P: MaterialParameters>(
-        &mut self, renderer: &mut Renderer, parameters: &P
+        &mut self, kernel: &mut GraphicsKernel, parameters: &P
     ) -> MaterialHandle {
         let parameters_hash = hash_value(&parameters);
         let parameters_type_id = TypeId::of::<P>();
@@ -187,7 +187,7 @@ impl MaterialsStore {
             let tid = TypeId::of::<P>();
             let factory = self.factories.get_mut(&tid)
                 .expect("Unknown material parameters type given");
-            let data = factory.create(renderer, parameters);
+            let data = factory.create(kernel, parameters);
             self.materials.insert(handle, data);
             self.original_parameters.insert(parameters_hash, Box::new(parameters.clone()));
         }

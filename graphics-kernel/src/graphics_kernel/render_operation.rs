@@ -3,13 +3,13 @@ use std::ops::Range;
 use crate::{ color::Srgba, * };
 use utils::*;
 
-use super::Renderer;
+use super::GraphicsKernel;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RenderPassResourceHandle(Uid);
 
 pub struct RenderPassOperation2<'a> {
-    renderer: &'a Renderer,
+    kernel: &'a GraphicsKernel,
     renderpass: wgpu::RenderPass<'a>,
 }
 
@@ -24,7 +24,7 @@ impl<'a> RenderPassOperation2<'a> {
         &mut self,
         pipeline: PipelineHandle,
     ) {
-        let pipeline = &self.renderer.resources.pipelines.get(pipeline)
+        let pipeline = &self.kernel.resources.pipelines.get(pipeline)
             .expect("Invalid pipeline handle given").pipeline;
         self.renderpass.set_pipeline(pipeline);
     }
@@ -34,7 +34,7 @@ impl<'a> RenderPassOperation2<'a> {
         index: u32,
         bind_group: BindGroupHandle,
     ) {
-        let bind_group = &self.renderer.resources.bind_groups.get(bind_group)
+        let bind_group = &self.kernel.resources.bind_groups.get(bind_group)
             .expect("Invalid pipeline handle given").bind_group;
         self.renderpass.set_bind_group(index, bind_group, &[]);
     }
@@ -44,7 +44,7 @@ impl<'a> RenderPassOperation2<'a> {
         index: u32,
         buffer: BufferHandle,
     ) {
-        let buffer = &self.renderer.resources.buffers.get(buffer)
+        let buffer = &self.kernel.resources.buffers.get(buffer)
             .expect("Invalid pipeline handle given").buffer;
         self.renderpass.set_vertex_buffer(index, buffer.slice(..));
     }
@@ -53,7 +53,7 @@ impl<'a> RenderPassOperation2<'a> {
         &mut self,
         buffer: BufferHandle,
     ) {
-        let buffer = &self.renderer.resources.buffers.get(buffer)
+        let buffer = &self.kernel.resources.buffers.get(buffer)
             .expect("Invalid pipeline handle given").buffer;
         self.renderpass.set_index_buffer(buffer.slice(..), wgpu::IndexFormat::Uint32);
     }
@@ -146,12 +146,12 @@ fn build_render_pass_operation<'a, 'b>(
     #[builder(field)]
     depth_stencil_attachment: Option<RenderPassDepthStencilAttachmentInfo>,
 ) -> RenderPassOperation2<'a> {
-    let RenderPassOperationData { renderer, encoder, resources } = data;
+    let RenderPassOperationData { kernel, encoder, resources } = data;
 
     let color_attachments: Vec<Option<wgpu::RenderPassColorAttachment>> = color_attachments.iter()
         .map(|info| {
             wgpu::RenderPassColorAttachment {
-                view: resources.get_texture_view(renderer, info.texture_view_handle)
+                view: resources.get_texture_view(kernel, info.texture_view_handle)
                     .expect("Invalid color attachment texture view handle given"),
                 depth_slice: None,
                 resolve_target: None,
@@ -169,7 +169,7 @@ fn build_render_pass_operation<'a, 'b>(
         color_attachments: &color_attachments,
         depth_stencil_attachment: depth_stencil_attachment
             .map(|info| wgpu::RenderPassDepthStencilAttachment {
-                view: resources.get_texture_view(renderer, info.texture_view_handle)
+                view: resources.get_texture_view(kernel, info.texture_view_handle)
                     .expect("Invalid color attachment texture view handle given"),
                 depth_ops: info.depth_ops,
                 stencil_ops: info.stencil_ops,
@@ -179,7 +179,7 @@ fn build_render_pass_operation<'a, 'b>(
     });
 
     RenderPassOperation2 {
-        renderer,
+        kernel,
         renderpass,
     }
 }
@@ -211,21 +211,21 @@ struct RenderPassResources {
 
 impl RenderPassResources {
     /// Works with a texture or texture view handle
-    pub fn get_texture_view<'a>(&'a self, renderer: &'a Renderer, handle: RenderPassResourceHandle) -> Option<&'a wgpu::TextureView> {
+    pub fn get_texture_view<'a>(&'a self, kernel: &'a GraphicsKernel, handle: RenderPassResourceHandle) -> Option<&'a wgpu::TextureView> {
         if let Some(present_surface) = &self.present_surface && present_surface.handle == handle {
             return Some(&present_surface.texture_view);
         }
 
         if handle == self.depth_buffer_resource_handle {
-            return Some(&renderer.resources.textures
-                .get(renderer.depth_buffer_handle)
+            return Some(&kernel.resources.textures
+                .get(kernel.depth_buffer_handle)
                 .expect("Depth buffer is present")
                 .view);
         }
 
         if handle == self.render_target_resource_handle {
-            return Some(&renderer.resources.textures
-                .get(renderer.render_target_handle)
+            return Some(&kernel.resources.textures
+                .get(kernel.render_target_handle)
                 .expect("Depth buffer is present")
                 .view);
         }
@@ -235,7 +235,7 @@ impl RenderPassResources {
 }
 
 struct RenderPassOperationData<'a> {
-    renderer: &'a mut Renderer,
+    kernel: &'a mut GraphicsKernel,
     encoder: wgpu::CommandEncoder,
     resources: RenderPassResources,
 }
@@ -245,12 +245,12 @@ pub struct RenderOperation<'a> {
 }
 
 impl<'a> RenderOperation<'a> {
-    pub(super) fn new(renderer: &'a mut Renderer) -> Self {
-        let encoder = renderer.device.create_command_encoder(&Default::default());
+    pub(super) fn new(kernel: &'a mut GraphicsKernel) -> Self {
+        let encoder = kernel.device.create_command_encoder(&Default::default());
 
         Self {
             data: Some(RenderPassOperationData {
-                renderer,
+                kernel,
                 encoder,
                 resources: default(),
             }),
@@ -262,8 +262,8 @@ impl<'a> RenderOperation<'a> {
         let Some(data) = self.data.take()
         else { unreachable!("Already submitted?") };
         if let Some(present_surface) = data.resources.present_surface {
-            data.renderer.queue.submit([data.encoder.finish()]);
-            data.renderer.window.pre_present_notify();
+            data.kernel.queue.submit([data.encoder.finish()]);
+            data.kernel.window.pre_present_notify();
             present_surface.texture.present();
         }
     }
@@ -277,14 +277,14 @@ impl<'a> RenderOperation<'a> {
     fn create_present_surface(&mut self) -> &mut PresentSurfaceResource {
         let data = self.data.as_mut().expect("Already submitted??");
         if data.resources.present_surface.is_none() {
-            let texture = data.renderer
+            let texture = data.kernel
                 .surface
                 .get_current_texture()
                 .expect("failed to acquire next swapchain texture");
             let texture_view = texture
                 .texture
                 .create_view(&wgpu::TextureViewDescriptor {
-                    format: Some(data.renderer.surface_format.add_srgb_suffix()),
+                    format: Some(data.kernel.surface_format.add_srgb_suffix()),
                     ..Default::default()
                 });
 

@@ -19,7 +19,7 @@ pub(crate) static DEPTH_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureForma
 pub static RENDER_TARGET_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
 #[derive(Debug, Default)]
-pub struct RendererResources {
+pub(crate) struct GraphicsKernelResources {
     buffers: HandleMap<BufferData>,
     textures: HandleMap<TextureData>,
     bind_group_layouts: HandleMap<BindGroupLayoutData>,
@@ -28,14 +28,14 @@ pub struct RendererResources {
 }
 
 #[derive(Debug)]
-pub struct Renderer {
+pub struct GraphicsKernel {
     #[expect(dead_code)]
     instance: wgpu::Instance,
     surface: wgpu::Surface<'static>,
     #[expect(dead_code)]
     adapter: wgpu::Adapter,
-    pub(crate) device: wgpu::Device,
-    pub(crate) queue: wgpu::Queue,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
 
     window: Arc<winit::window::Window>,
     size: winit::dpi::PhysicalSize<u32>,
@@ -47,10 +47,10 @@ pub struct Renderer {
     /// Hdr render target
     render_target: wgpu::Texture,
 
-    resources: RendererResources,
+    resources: GraphicsKernelResources,
 }
 
-impl Renderer {
+impl GraphicsKernel {
     async fn new_async(window: Arc<winit::window::Window>) -> Self {
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(Arc::clone(&window)).unwrap();
@@ -84,7 +84,7 @@ impl Renderer {
         let depth_buffer = Self::create_depth_texture(&device, size);
         let render_target = Self::create_render_target_texture(&device, size);
 
-        let mut resources = RendererResources::default();
+        let mut resources = GraphicsKernelResources::default();
         let depth_buffer_handle = resources.textures.insert(TextureData::from_wgpu(depth_buffer.clone()));
         let render_target_handle = resources.textures.insert(TextureData::from_wgpu(render_target.clone()));
 

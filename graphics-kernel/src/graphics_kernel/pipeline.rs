@@ -105,7 +105,7 @@ where PS: create_pipeline_builder_builder::State,
 #[bon::builder(finish_fn = create)]
 pub fn create_pipeline_builder(
     #[builder(start_fn)]
-    renderer: &mut Renderer,
+    kernel: &mut GraphicsKernel,
     #[builder(field)]
     vertex_buffers: Vec<VertexBufferBindingData>,
     #[builder(field)]
@@ -122,7 +122,7 @@ pub fn create_pipeline_builder(
     #[builder(into, default)]
     fragment_pipleline_overrides: HashMap<String, f64>,
 ) -> PipelineHandle {
-    let device = &renderer.device;
+    let device = &kernel.device;
 
     let compiled_shader = crate::compile_shader::compile_shader(
         shader_source,
@@ -145,7 +145,7 @@ pub fn create_pipeline_builder(
         label: None,
         bind_group_layouts: bind_group_layouts.iter()
             .map(|&handle| {
-                &renderer.resources.bind_group_layouts.get(handle)
+                &kernel.resources.bind_group_layouts.get(handle)
                     .expect("Invalid bind group layout handle given")
                     .bind_group_layout
             })
@@ -207,7 +207,7 @@ pub fn create_pipeline_builder(
         cache: None,
     });
 
-    renderer.resources.pipelines.insert(PipelineData { pipeline, bind_group_layouts })
+    kernel.resources.pipelines.insert(PipelineData { pipeline, bind_group_layouts })
 }
 
 impl<'f1, 'f2, S> CreatePipelineBuilderBuilder<'f1, 'f2, S>

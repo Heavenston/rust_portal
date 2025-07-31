@@ -4,7 +4,7 @@ use crate::{
 };
 use pgk::{
     color::{ LinearRgb, LinearRgba },
-    Renderer, RENDER_TARGET_FORMAT,
+    GraphicsKernel, RENDER_TARGET_FORMAT,
 };
 
 use std::time::SystemTime;
@@ -74,8 +74,8 @@ pub(super) fn create_factory(
     let camera_bind_group_layout = engine_state.world_bind_group_layout;
     let object_bind_group_layout = engine_state.object_bind_group_layout;
 
-    let factory = move |renderer: &mut Renderer, shader_source: &str, parameters: &Parameters| -> MaterialData {
-        let mut material_bind_group_layout = renderer.create_bind_group_layout()
+    let factory = move |kernel: &mut GraphicsKernel, shader_source: &str, parameters: &Parameters| -> MaterialData {
+        let mut material_bind_group_layout = kernel.create_bind_group_layout()
             .entry().binding(0).uniform_buffer().add()
         ;
 
@@ -88,7 +88,7 @@ pub(super) fn create_factory(
 
         let material_bind_group_layout = material_bind_group_layout.create();
     
-        let pipeline = renderer.create_pipeline()
+        let pipeline = kernel.create_pipeline()
             .shader_source(shader_source)
             .bind_group_layouts([
                 camera_bind_group_layout,
