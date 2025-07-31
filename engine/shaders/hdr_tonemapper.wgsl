@@ -1,5 +1,9 @@
-//! define ENABLE_ACES_TONE_MAP true
-//! define ENABLE_REINHARD_TONE_MAP false
+// 0 <-> No tone mapping
+// 1 <-> Reinhard operator
+// 2 <-> ACES Tone mapping
+//! ifndef TONE_MAP_IDX
+//! define TONE_MAP_IDX 2
+//! endif
 
 // Maps HDR values to linear values
 // Based on http://www.oscars.org/science-technology/sci-tech-projects/aces
@@ -53,12 +57,12 @@ var hdr_sampler: sampler;
 @fragment
 fn fs_main(vs: VertexOutput) -> @location(0) vec4<f32> {
     let hdr = textureSample(hdr_image, hdr_sampler, vs.uv);
-    //! if ENABLE_ACES_TONE_MAP
-    let sdr = aces_tone_map(hdr.rgb);
-    //! elif ENABLE_REINHARD_TONE_MAP
-    let sdr = hdr.rgb / (hdr.rgb + vec3(1.0));
-    //! else
+    //! if TONE_MAP_IDX == 0
     let sdr = hdr.rgb;
+    //! elif TONE_MAP_IDX == 1
+    let sdr = hdr.rgb / (hdr.rgb + vec3(1.0));
+    //! elif TONE_MAP_IDX == 2
+    let sdr = aces_tone_map(hdr.rgb);
     //! endif
     return vec4(sdr, hdr.a);
 }

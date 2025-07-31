@@ -133,7 +133,7 @@ pub fn create_pipeline_builder(
 
     let compiled_shader = match compiled_shader {
         Ok(c) => c,
-        Err(e) => panic!("Could not compile shader: {e}"),
+        Err(e) => panic!("Could not preprocess shader: {e}"),
     };
 
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
