@@ -146,7 +146,7 @@ pub struct IfStatement {
 }
 
 impl IfStatement {
-    pub const FIRST_TOKENS: &[TokenKind] = &[TokenKind::If, TokenKind::IfDef];
+    pub const FIRST_TOKENS: &[TokenKind] = &[TokenKind::If, TokenKind::IfDef, TokenKind::IfNDef];
 }
 
 #[derive(Debug, Clone)]
@@ -349,12 +349,22 @@ fn parse_define_statement<'a>(lexer: &mut Lexer<'a, '_>) -> Result<DefineStateme
 }
 
 fn parse_if_statement<'a>(lexer: &mut Lexer<'a, '_>) -> Result<IfStatement, ParserError<'a>> {
-    let if_type = expect_one_of(lexer, &[TokenKind::If, TokenKind::Elif, TokenKind::IfDef, TokenKind::ElifDef])?;
+    let if_type = expect_one_of(lexer, &[TokenKind::If, TokenKind::Elif, TokenKind::IfDef, TokenKind::ElifDef, TokenKind::IfNDef, TokenKind::ElifNDef])?;
     let is_isdef = matches!(if_type.kind(), TokenKind::IfDef | TokenKind::ElifDef);
-    let condition = if is_isdef {
+    let is_isndef = matches!(if_type.kind(), TokenKind::IfNDef | TokenKind::ElifNDef);
+
+    let condition = if is_isdef || is_isndef {
         let Token { variant: TokenVariant::Identifier(variable_name), .. } = expect_eq(lexer, TokenKind::Identifier)?
         else { unreachable!() };
-        Expression::IsDef(variable_name.to_string())
+        if is_isdef {
+            Expression::IsDef(variable_name.to_string())
+        }
+        else /* is_isndef */ {
+            Expression::UnOp(UnOpExpression {
+                op: UnOp::Not,
+                operand: Expression::IsDef(variable_name.to_string()).into(),
+            })
+        }
     }
     else {
         parse_expression(lexer)?

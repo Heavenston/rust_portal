@@ -28,8 +28,10 @@ pub enum TokenVariant<'a> {
 
     If,
     IfDef,
+    IfNDef,
     Elif,
     ElifDef,
+    ElifNDef,
     Else,
     Endif,
 
@@ -182,8 +184,10 @@ impl<'a, 'c> Tokenizer<'a, 'c> {
             "false"   => TokenVariant::False,
             "if"      => TokenVariant::If,
             "ifdef"   => TokenVariant::IfDef,
+            "ifndef"   => TokenVariant::IfNDef,
             "elif"    => TokenVariant::Elif,
             "elifdef" => TokenVariant::ElifDef,
+            "elifndef" => TokenVariant::ElifNDef,
             "endif"   => TokenVariant::Endif,
             "else"    => TokenVariant::Else,
             "define"  => TokenVariant::Define,
