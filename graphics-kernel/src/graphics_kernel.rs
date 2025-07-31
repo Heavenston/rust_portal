@@ -15,7 +15,7 @@ use utils::{ handle_map::HandleMap, * };
 
 use std::sync::Arc;
 
-pub(crate) static DEPTH_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
+pub static DEPTH_TEXTURE_FORMAT: TextureFormat = TextureFormat::Depth24PlusStencil8;
 pub static RENDER_TARGET_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
 #[derive(Debug, Default)]
@@ -125,7 +125,7 @@ impl GraphicsKernel {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_TEXTURE_FORMAT,
+            format: DEPTH_TEXTURE_FORMAT.into(),
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::TEXTURE_BINDING
             ,

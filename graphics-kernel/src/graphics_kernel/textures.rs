@@ -1,58 +1,100 @@
 use super::*;
 use utils::handle_map;
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub enum TextureFormat {
-    Rgba8Unorm,
-    Rgba8UnormSrgb,
-    Bgra8Unorm,
-    Bgra8UnormSrgb,
-    Rgba16Float,
-    Rgba32Float,
-}
-
-impl TextureFormat {
-    pub fn pixel_byte_size(self) -> u32 {
-        match self {
-            TextureFormat::Rgba8Unorm |
-            TextureFormat::Rgba8UnormSrgb |
-            TextureFormat::Bgra8Unorm |
-            TextureFormat::Bgra8UnormSrgb
-                => 4,
-            TextureFormat::Rgba16Float => 4 * 2,
-            TextureFormat::Rgba32Float => 4 * 4,
+macro_rules! gen_texture_format {
+    ($($name: ident => $size: expr),*$(,)?) => {
+        #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+        pub enum TextureFormat {
+            $(
+                #[doc = concat!("See [wgpu::TextureFormat::", stringify!($name), "]")]
+                $name,
+            )*
         }
-    }
-}
 
-impl From<TextureFormat> for wgpu::TextureFormat {
-    fn from(value: TextureFormat) -> Self {
-        match value {
-            TextureFormat::Rgba8Unorm     => wgpu::TextureFormat::Rgba8Unorm,
-            TextureFormat::Rgba8UnormSrgb => wgpu::TextureFormat::Rgba8UnormSrgb,
-            TextureFormat::Bgra8Unorm     => wgpu::TextureFormat::Bgra8Unorm,
-            TextureFormat::Bgra8UnormSrgb => wgpu::TextureFormat::Bgra8UnormSrgb,
-            TextureFormat::Rgba16Float    => wgpu::TextureFormat::Rgba16Float,
-            TextureFormat::Rgba32Float    => wgpu::TextureFormat::Rgba32Float,
+        impl TextureFormat {
+            pub fn pixel_byte_size(self) -> u32 {
+                match self {
+                    $(Self::$name => $size,)*
+                }
+            }
         }
-    }
-}
 
-impl TryFrom<wgpu::TextureFormat> for TextureFormat {
-    type Error = ();
-
-    fn try_from(value: wgpu::TextureFormat) -> Result<Self, Self::Error> {
-        match value {
-            wgpu::TextureFormat::Rgba8Unorm     => Ok(Self::Rgba8Unorm),
-            wgpu::TextureFormat::Rgba8UnormSrgb => Ok(Self::Rgba8UnormSrgb),
-            wgpu::TextureFormat::Bgra8Unorm     => Ok(Self::Bgra8Unorm),
-            wgpu::TextureFormat::Bgra8UnormSrgb => Ok(Self::Bgra8UnormSrgb),
-            wgpu::TextureFormat::Rgba16Float    => Ok(Self::Rgba16Float),
-            wgpu::TextureFormat::Rgba32Float    => Ok(Self::Rgba32Float),
-            _ => Err(()),
+        impl From<TextureFormat> for wgpu::TextureFormat {
+            fn from(value: TextureFormat) -> Self {
+                match value {
+                    $(TextureFormat::$name => wgpu::TextureFormat::$name,)*
+                }
+            }
         }
-    }
+
+        impl TryFrom<wgpu::TextureFormat> for TextureFormat {
+            type Error = ();
+
+            fn try_from(value: wgpu::TextureFormat) -> Result<Self, Self::Error> {
+                match value {
+                    $(wgpu::TextureFormat::$name => Ok(TextureFormat::$name),)*
+                    _ => Err(()),
+                }
+            }
+        }
+    };
 }
+
+gen_texture_format!(
+    R8Unorm => 1,
+    R8Snorm => 1,
+    R8Uint => 1,
+    R8Sint => 1,
+
+    R16Uint => 2,
+    R16Sint => 2,
+    R16Float => 2,
+    Rg8Unorm => 2,
+    Rg8Snorm => 2,
+    Rg8Uint => 2,
+    Rg8Sint => 2,
+
+    R32Uint => 4,
+    R32Sint => 4,
+    R32Float => 4,
+    Rg16Uint => 4,
+    Rg16Sint => 4,
+    Rg16Float => 4,
+    Rgba8Unorm => 4,
+    Rgba8UnormSrgb => 4,
+    Rgba8Snorm => 4,
+    Rgba8Uint => 4,
+    Rgba8Sint => 4,
+    Bgra8Unorm => 4,
+    Bgra8UnormSrgb => 4,
+    // too weird for me lol
+    // Rgb9e5Ufloat => 0,
+    // Rgb10a2Uint => 0,
+    // Rgb10a2Unorm => 0,
+    // Rg11b10Ufloat => 0,
+
+    Rg32Uint => 8,
+    Rg32Sint => 8,
+    Rg32Float => 8,
+    Rgba16Uint => 8,
+    Rgba16Sint => 8,
+    Rgba16Float => 8,
+
+    Rgba32Uint => 16,
+    Rgba32Sint => 16,
+    Rgba32Float => 16,
+
+    // TODO: FIXME: They do not actually have a guarenteed size,
+    // splitting into ColorTextureFormat and DepthStencilTextureFormat
+    // and having a merged TextureFormat would be ideal
+    
+    Stencil8 => 1,
+    Depth16Unorm => 2,
+    // FIXME: What is its actual size? (spoiler it is either 4 or 5 depending on wgpu backend)
+    Depth24Plus => 4,
+    Depth24PlusStencil8 => 4,
+    Depth32Float => 4,
+);
 
 #[derive(Debug)]
 pub struct TextureData {
@@ -79,6 +121,8 @@ pub fn create_texture_builder(
     kernel: &mut GraphicsKernel,
     width: u32,
     height: u32,
+    #[builder(default = 1)]
+    depth: u32,
     format: TextureFormat,
 ) -> TextureHandle {
     assert!(width >= 1 && height >= 1, "Texture must not be of size 0 (given {width}x{height})");
@@ -88,7 +132,7 @@ pub fn create_texture_builder(
         size: wgpu::Extent3d {
             width,
             height,
-            depth_or_array_layers: 1,
+            depth_or_array_layers: depth,
         },
         mip_level_count: 1,
         sample_count: 1,
@@ -96,7 +140,10 @@ pub fn create_texture_builder(
         format: format.into(),
         usage: wgpu::TextureUsages::COPY_DST |
             wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[wgpu::TextureFormat::from(format).remove_srgb_suffix(), wgpu::TextureFormat::from(format).add_srgb_suffix()],
+        view_formats: &[
+            wgpu::TextureFormat::from(format).remove_srgb_suffix(),
+            wgpu::TextureFormat::from(format).add_srgb_suffix(),
+        ],
     });
     kernel.resources.textures.insert(TextureData::from_wgpu(texture))
 }

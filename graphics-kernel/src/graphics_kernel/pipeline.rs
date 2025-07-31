@@ -196,7 +196,7 @@ pub fn create_pipeline_builder(
             ..default()
         },
         depth_stencil: depth_buffer.then_some(wgpu::DepthStencilState {
-            format: DEPTH_TEXTURE_FORMAT,
+            format: DEPTH_TEXTURE_FORMAT.into(),
             depth_write_enabled: true,
             depth_compare: wgpu::CompareFunction::LessEqual,
             stencil: default(),
