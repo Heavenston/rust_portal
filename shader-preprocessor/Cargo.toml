@@ -1,5 +1,5 @@
 [package]
-name = "shader-preprocessor"
+name = "portal-shader-preprocessor"
 version = "0.1.0"
 edition = "2024"
 

@@ -1,3 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["engine", "game", "shader-preprocessor"]
+members = ["engine", "game", "graphics-kernel", "utils", "shader-preprocessor"]
+
+[workspace.dependencies]
+utils = { path = "./utils", package = "portal-utils" }
+pgk = { path = "./graphics-kernel", package = "portal-graphics-kernel" }
+engine = { path = "./engine", package = "portal-engine" }
+shader-preprocessor = { path = "./shader-preprocessor", package = "portal-shader-preprocessor" }

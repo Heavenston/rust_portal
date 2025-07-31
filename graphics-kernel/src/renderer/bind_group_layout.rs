@@ -1,7 +1,7 @@
 use std::num::NonZero;
 
 use super::*;
-use crate::handle_map;
+use utils::handle_map;
 
 #[derive(Debug)]
 pub struct BindGroupLayoutData {

@@ -1,7 +1,10 @@
 use crate::{
-    builtin_shaders,
-    color::{ LinearRgb, LinearRgba }, embedded_shader_factory_helper,
-    EngineState, MaterialData, MaterialFactory, MaterialParameters, Renderer
+    builtin_shaders, embedded_shader_factory_helper,
+    EngineState, MaterialData, MaterialFactory, MaterialParameters,
+};
+use pgk::{
+    color::{ LinearRgb, LinearRgba },
+    Renderer, RENDER_TARGET_FORMAT,
 };
 
 use std::time::SystemTime;
@@ -97,7 +100,7 @@ pub(super) fn create_factory(
                 ("MAX_LIGHTS".to_string(), MAX_LIGHTS.into()),
             ])
             
-            .color_target().format(crate::RENDER_TARGET_FORMAT).add()
+            .color_target().format(RENDER_TARGET_FORMAT).add()
             .depth_buffer(true)
 
             // Positions

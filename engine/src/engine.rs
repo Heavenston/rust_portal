@@ -7,7 +7,8 @@ pub use materials::*;
 pub mod pbr_material;
 pub mod hdr_tonemapper_material;
 
-use crate::{ utils::default, * };
+use pgk::{ Renderer, BindGroupHandle, BufferHandle };
+use utils::{ default };
 
 use std::{ iter::empty, sync::Arc, time::Instant };
 use crevice::std140::AsStd140;

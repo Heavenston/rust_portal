@@ -1,6 +1,8 @@
 use std::{collections::HashMap, iter::repeat_n};
 
-use engine::{ color::{ LinearRgb, LinearRgba, Srgb, Srgba }, utils::* };
+use pgk::color::{ LinearRgb, LinearRgba, Srgb, Srgba };
+use utils::*;
+
 use glam::{ Affine3A, Mat4, Vec2, Vec3 };
 use itertools::Itertools;
 use crevice::std140::AsStd140 as _;
@@ -99,12 +101,12 @@ impl Application {
 
     fn upload_texture(
         &mut self,
-        renderer: &mut engine::Renderer,
+        renderer: &mut pgk::Renderer,
         image_data: &gltf::image::Data,
-    ) -> engine::TextureHandle {
+    ) -> pgk::TextureHandle {
         let texture_handle = renderer.create_texture()
             .width(image_data.width).height(image_data.height)
-            .format(engine::TextureFormat::Rgba8UnormSrgb)
+            .format(pgk::TextureFormat::Rgba8UnormSrgb)
             .create();
 
         let data = match image_data.format {

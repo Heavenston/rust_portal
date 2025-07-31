@@ -1,12 +1,16 @@
 [package]
-name = "rust-portal-game"
+name = "portal-game"
 version = "0.0.0"
 edition = "2024"
 
 [dependencies]
+utils = { workspace = true }
+pgk = { workspace = true }
+engine = { workspace = true }
+shader-preprocessor = { workspace = true }
+
 bytemuck = "1.23.1"
 crevice = { version = "0.18.0", features = ["glam"] }
-engine = { version = "0.0.0", path = "../engine", package = "rust-portal-engine" }
 glam = { version = "0.30.4", features = ["bytemuck"] }
 gltf = { version = "1.4.1", features = ["KHR_lights_punctual"] }
 itertools = "0.14.0"

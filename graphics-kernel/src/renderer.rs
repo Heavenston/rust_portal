@@ -11,12 +11,12 @@ pub use bind_group::*;
 mod pipeline;
 pub use pipeline::*;
 
+use utils::{ handle_map::HandleMap, * };
+
 use std::sync::Arc;
 
-use crate::{ handle_map::HandleMap, utils::* };
-
 pub(crate) static DEPTH_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
-pub(crate) static RENDER_TARGET_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
+pub static RENDER_TARGET_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
 #[derive(Debug, Default)]
 pub struct RendererResources {

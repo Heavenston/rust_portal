@@ -1567,6 +1567,74 @@ dependencies = [
 ]
 
 [[package]]
+name = "portal-engine"
+version = "0.0.0"
+dependencies = [
+ "bon",
+ "bytemuck",
+ "crevice",
+ "derive-where",
+ "derive_more",
+ "glam",
+ "pollster",
+ "portal-graphics-kernel",
+ "portal-shader-preprocessor",
+ "portal-utils",
+ "rust-embed",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "portal-game"
+version = "0.0.0"
+dependencies = [
+ "bytemuck",
+ "crevice",
+ "glam",
+ "gltf",
+ "itertools",
+ "portal-engine",
+ "portal-graphics-kernel",
+ "portal-shader-preprocessor",
+ "portal-utils",
+ "winit",
+]
+
+[[package]]
+name = "portal-graphics-kernel"
+version = "0.1.0"
+dependencies = [
+ "bon",
+ "bytemuck",
+ "crevice",
+ "derive_more",
+ "glam",
+ "pollster",
+ "portal-shader-preprocessor",
+ "portal-utils",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "portal-shader-preprocessor"
+version = "0.1.0"
+dependencies = [
+ "constcat",
+ "itertools",
+ "kinded",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "portal-utils"
+version = "0.1.0"
+dependencies = [
+ "derive-where",
+]
+
+[[package]]
 name = "presser"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1701,36 +1769,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-portal-engine"
-version = "0.0.0"
-dependencies = [
- "bon",
- "bytemuck",
- "crevice",
- "derive-where",
- "derive_more",
- "glam",
- "pollster",
- "rust-embed",
- "shader-preprocessor",
- "wgpu",
- "winit",
-]
-
-[[package]]
-name = "rust-portal-game"
-version = "0.0.0"
-dependencies = [
- "bytemuck",
- "crevice",
- "glam",
- "gltf",
- "itertools",
- "rust-portal-engine",
- "winit",
-]
-
-[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1849,16 +1887,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
-]
-
-[[package]]
-name = "shader-preprocessor"
-version = "0.1.0"
-dependencies = [
- "constcat",
- "itertools",
- "kinded",
- "thiserror 2.0.12",
 ]
 
 [[package]]

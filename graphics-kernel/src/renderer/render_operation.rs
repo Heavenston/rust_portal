@@ -1,6 +1,7 @@
 use std::ops::Range;
 
-use crate::{ color::Srgba, utils::*, * };
+use crate::{ color::Srgba, * };
+use utils::*;
 
 use super::Renderer;
 

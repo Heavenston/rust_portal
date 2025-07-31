@@ -1,17 +1,20 @@
 [package]
-name = "rust-portal-engine"
+name = "portal-engine"
 version = "0.0.0"
 edition = "2024"
 
 [dependencies]
+utils = { workspace = true }
+pgk = { workspace = true }
+shader-preprocessor = { workspace = true }
+
 bon = "3.6.5"
 derive-where = { version = "1.5.0", features = ["nightly"] }
 bytemuck = "1.23.1"
 glam = { version = "0.30.4", features = ["bytemuck"] }
 pollster = "0.4.0"
-wgpu = { version = "26.0.1", features = ["naga-ir"] }
-winit = { version = "0.30.11" }
+wgpu = "26.0.1"
+winit = "0.30.11"
 derive_more = { version = "2.0.1", features = ["from", "into"] }
 crevice = { version = "0.18.0", features = ["glam"] }
-shader-preprocessor = { version = "0.1.0", path = "../shader-preprocessor" }
 rust-embed = "8.7.2"

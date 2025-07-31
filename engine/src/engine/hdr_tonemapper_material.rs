@@ -1,7 +1,8 @@
 use crate::{
     builtin_shaders, embedded_shader_factory_helper,
-    EngineState, MaterialData, MaterialFactory, MaterialParameters, Renderer
+    EngineState, MaterialData, MaterialFactory, MaterialParameters
 };
+use pgk::Renderer;
 
 use std::time::{ SystemTime };
 

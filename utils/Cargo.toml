@@ -1,0 +1,7 @@
+[package]
+name = "portal-utils"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+derive-where = { version = "1.5.0", features = ["nightly"] }

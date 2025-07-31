@@ -1,5 +1,5 @@
 use super::*;
-use crate::handle_map;
+use utils::handle_map;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum TextureFormat {
