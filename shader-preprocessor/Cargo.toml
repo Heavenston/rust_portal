@@ -4,5 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+constcat = "0.6.1"
 itertools = "0.14.0"
+kinded = "0.3.0"
 thiserror = "2.0.12"

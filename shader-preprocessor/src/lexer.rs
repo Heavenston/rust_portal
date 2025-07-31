@@ -13,10 +13,17 @@ fn is_identifier_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '-'
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Token<'a> {
-    DummyText(&'a str),
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TokenLocation {
+    pub line: usize,
+    pub column: usize,
+    pub index: usize,
+}
 
+#[derive(Debug, Clone, Copy, PartialEq, kinded::Kinded)]
+#[kinded(kind = TokenKind)]
+pub enum TokenVariant<'a> {
+    DummyText(&'a str),
     IdentifierReplace(&'a str),
 
     If,
@@ -61,6 +68,19 @@ pub enum Token<'a> {
     Error(char),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Token<'a> {
+    pub variant: TokenVariant<'a>,
+    pub text: &'a str,
+    pub location: TokenLocation,
+}
+
+impl<'a> Token<'a> {
+    pub fn kind(&self) -> TokenKind {
+        self.variant.kind()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Tokenizer<'a, 'c> {
     chars: StrCharIter<'a>,
@@ -76,6 +96,14 @@ impl<'a, 'c> Tokenizer<'a, 'c> {
             cfg,
 
             is_in_statement: false,
+        }
+    }
+
+    pub fn location(&self) -> TokenLocation {
+        TokenLocation {
+            line: self.chars.peek_line(),
+            column: self.chars.peek_column(),
+            index: self.chars.peek_idx(),
         }
     }
     
@@ -102,30 +130,30 @@ impl<'a, 'c> Tokenizer<'a, 'c> {
         })
     }
 
-    fn statement_next(&mut self) -> Token<'a> {
+    fn statement_next(&mut self) -> TokenVariant<'a> {
         assert!(self.is_in_statement);
 
         if self.chars.consume_eq("\n") {
             self.is_in_statement = false;
-            return Token::EndOfStatement;
+            return TokenVariant::EndOfStatement;
         }
 
-        const SIMPLE_TOKENS: [(&str, Token); 15] = [
-            ("&&", Token::DoubleAmpersand),
-            ("||", Token::DoublePipe),
-            ("<=", Token::Lte),
-            ("<", Token::Lt),
-            (">=", Token::Gte),
-            (">", Token::Gt),
-            ("!=", Token::BangEqual),
-            ("==", Token::DoubleEqual),
-            ("(", Token::ParenOpen),
-            (")", Token::ParenClose),
-            ("-", Token::Dash),
-            ("*", Token::Star),
-            ("/", Token::Slash),
-            ("+", Token::Plus),
-            ("!", Token::Bang),
+        const SIMPLE_TOKENS: [(&str, TokenVariant); 15] = [
+            ("&&", TokenVariant::DoubleAmpersand),
+            ("||", TokenVariant::DoublePipe),
+            ("<=", TokenVariant::Lte),
+            ("<", TokenVariant::Lt),
+            (">=", TokenVariant::Gte),
+            (">", TokenVariant::Gt),
+            ("!=", TokenVariant::BangEqual),
+            ("==", TokenVariant::DoubleEqual),
+            ("(", TokenVariant::ParenOpen),
+            (")", TokenVariant::ParenClose),
+            ("-", TokenVariant::Dash),
+            ("*", TokenVariant::Star),
+            ("/", TokenVariant::Slash),
+            ("+", TokenVariant::Plus),
+            ("!", TokenVariant::Bang),
         ];
 
         for (str, token) in SIMPLE_TOKENS {
@@ -139,31 +167,31 @@ impl<'a, 'c> Tokenizer<'a, 'c> {
             if num.contains('.') {
                 let Ok(value) = num.parse::<f64>()
                 else { panic!("Invalid number somewhere '{num}'") };
-                return Token::FloatLiteral(value);
+                return TokenVariant::FloatLiteral(value);
             }
             else {
                 let Ok(value) = num.parse::<i64>()
                 else { panic!("Invalid number somewhere '{num}'") };
-                return Token::IntLiteral(value);
+                return TokenVariant::IntLiteral(value);
             }
         }
 
         match self.take_identifier() {
-            ""        => Token::Error(self.chars.next().expect("Not empty at this point")),
-            "true"    => Token::True,
-            "false"   => Token::False,
-            "if"      => Token::If,
-            "ifdef"   => Token::IfDef,
-            "elif"    => Token::Elif,
-            "elifdef" => Token::ElifDef,
-            "endif"   => Token::Endif,
-            "else"    => Token::Else,
-            "define"  => Token::Define,
-            ident => Token::Identifier(ident),
+            ""        => TokenVariant::Error(self.chars.next().expect("Not empty at this point")),
+            "true"    => TokenVariant::True,
+            "false"   => TokenVariant::False,
+            "if"      => TokenVariant::If,
+            "ifdef"   => TokenVariant::IfDef,
+            "elif"    => TokenVariant::Elif,
+            "elifdef" => TokenVariant::ElifDef,
+            "endif"   => TokenVariant::Endif,
+            "else"    => TokenVariant::Else,
+            "define"  => TokenVariant::Define,
+            ident => TokenVariant::Identifier(ident),
         }
     }
 
-    fn no_statement_next(&mut self) -> ControlFlow<Token<'a>> {
+    fn no_statement_next(&mut self) -> ControlFlow<TokenVariant<'a>> {
         assert!(!self.is_in_statement);
 
         if self.chars.consume_eq(&self.cfg.line_statement_prefix) {
@@ -174,9 +202,9 @@ impl<'a, 'c> Tokenizer<'a, 'c> {
         if self.chars.consume_eq(&self.cfg.replace_identifier_prefix) {
             let ident = self.take_identifier();
             if ident.is_empty() {
-                return ControlFlow::Break(Token::Error(self.chars.next().expect("Not empty at this point")));
+                return ControlFlow::Break(TokenVariant::Error(self.chars.next().expect("Not empty at this point")));
             }
-            return ControlFlow::Break(Token::IdentifierReplace(ident));
+            return ControlFlow::Break(TokenVariant::IdentifierReplace(ident));
         }
 
         let dummy_text = self.chars.consumed_slice(|chars| {
@@ -190,7 +218,7 @@ impl<'a, 'c> Tokenizer<'a, 'c> {
 
         debug_assert!(!dummy_text.is_empty());
 
-        ControlFlow::Break(Token::DummyText(dummy_text))
+        ControlFlow::Break(TokenVariant::DummyText(dummy_text))
     }
 }
 
@@ -198,16 +226,19 @@ impl<'a, 'c> Iterator for Tokenizer<'a, 'c> {
     type Item = Token<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
+        let mut location;
+        let variant = loop {
             if self.is_in_statement {
                 self.skip_whitespaces();
             }
+
+            location = self.location();
 
             if self.chars.peek(0).is_none() {
                 // emit a EndOfStatement for EOF too
                 if self.is_in_statement {
                     self.is_in_statement = false;
-                    break Some(Token::EndOfStatement);
+                    break Some(TokenVariant::EndOfStatement);
                 }
                 else {
                     break None;
@@ -220,11 +251,17 @@ impl<'a, 'c> Iterator for Tokenizer<'a, 'c> {
             }
             else {
                 match self.no_statement_next() {
-                    ControlFlow::Continue(()) => (),
+                    ControlFlow::Continue(()) => continue,
                     ControlFlow::Break(token) => break Some(token),
                 }
             }
-        }
+        }?;
+
+        Some(Token {
+            variant,
+            text: &self.chars.str()[location.index..self.chars.peek_idx()],
+            location,
+        })
     }
 }
 

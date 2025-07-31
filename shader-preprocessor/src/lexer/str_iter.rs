@@ -6,6 +6,8 @@ use itertools::Itertools;
 pub struct StrCharIter<'a> {
     str: &'a str,
     indices: CharIndices<'a>,
+    line: usize,
+    column: usize,
 }
 
 impl<'a> StrCharIter<'a> {
@@ -13,13 +15,27 @@ impl<'a> StrCharIter<'a> {
         Self {
             str,
             indices: str.char_indices(),
+            line: 1,
+            column: 0,
         }
+    }
+
+    pub fn str(&self) -> &'a str {
+        self.str
     }
 
     pub fn peek_idx(&self) -> usize {
         self.indices.clone().nth(0)
             .map(|(idx, _)| idx)
             .unwrap_or(self.str.len())
+    }
+
+    pub fn peek_line(&self) -> usize {
+        self.line
+    }
+
+    pub fn peek_column(&self) -> usize {
+        self.column
     }
 
     pub fn peek(&self, n: usize) -> Option<char> {
@@ -71,6 +87,14 @@ impl<'a> Iterator for StrCharIter<'a> {
     type Item = char;
 
     fn next(&mut self) -> Option<char> {
-        self.indices.next().map(|(_, char)| char)
+        let char = self.indices.next().map(|(_, char)| char)?;
+        if char == '\n' {
+            self.line += 1;
+            self.column = 0;
+        }
+        else {
+            self.column += 1;
+        }
+        Some(char)
     }
 }
