@@ -147,3 +147,13 @@ impl AsStd140 for Srgba {
     }
 }
 
+impl From<Srgba> for wgpu::Color {
+    fn from(val: Srgba) -> Self {
+        wgpu::Color {
+            r: val.r.into(),
+            g: val.g.into(),
+            b: val.b.into(),
+            a: val.a.into(),
+        }
+    }
+}

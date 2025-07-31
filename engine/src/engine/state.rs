@@ -119,6 +119,8 @@ impl EngineState {
 
         let factory = pbr_material::create_factory(&mut this);
         this.materials.register(factory);
+        let factory = hdr_tonemapper_material::create_factory(&mut this);
+        this.materials.register(factory);
 
         this
     }

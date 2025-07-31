@@ -1,11 +1,10 @@
 use crate::{
     builtin_shaders,
-    color::{ LinearRgb, LinearRgba },
-    BindGroupLayoutHandle, EngineState, MaterialData, MaterialFactory,
-    MaterialParameters, Renderer,
+    color::{ LinearRgb, LinearRgba }, embedded_shader_factory_helper,
+    EngineState, MaterialData, MaterialFactory, MaterialParameters, Renderer
 };
 
-use std::time::{ Duration, SystemTime };
+use std::time::SystemTime;
 
 use crevice::std140::AsStd140;
 use glam::{ Mat4, Vec3 };
@@ -69,75 +68,55 @@ pub struct MaterialUniforms {
 pub(super) fn create_factory(
     engine_state: &mut EngineState,
 ) -> impl MaterialFactory<Parameters> {
-    struct Factory {
-        camera_bind_group_layout: BindGroupLayoutHandle,
-        object_bind_group_layout: BindGroupLayoutHandle,
-    }
+    let camera_bind_group_layout = engine_state.world_bind_group_layout;
+    let object_bind_group_layout = engine_state.object_bind_group_layout;
 
-    impl MaterialFactory<Parameters> for Factory {
-        fn create(&mut self, renderer: &mut Renderer, parameters: &Parameters) -> MaterialData {
-            let shader_source_file = builtin_shaders::BuiltinShaders::get("pbr_shader.wgsl")
-                .expect("Could not find 'pbr_shader.wgsl'");
-            let shader_source = str::from_utf8(&shader_source_file.data)
-                .expect("Invalid utf8 in 'pbr_shader.wgsl'");
+    let factory = move |renderer: &mut Renderer, shader_source: &str, parameters: &Parameters| -> MaterialData {
+        let mut material_bind_group_layout = renderer.create_bind_group_layout()
+            .entry().binding(0).uniform_buffer().add()
+        ;
 
-            let mut material_bind_group_layout = renderer.create_bind_group_layout()
-                .entry().binding(0).uniform_buffer().add()
-            ;
-
-            if parameters.enable_diffuse_texture {
-                material_bind_group_layout = material_bind_group_layout
-                    .entry().binding(1).texture().add();
-                material_bind_group_layout = material_bind_group_layout
-                    .entry().binding(2).sampler().add();
-            }
-
-            let material_bind_group_layout = material_bind_group_layout.create();
-        
-            let pipeline = renderer.create_pipeline()
-                .shader_source(shader_source)
-                .bind_group_layouts([
-                    self.camera_bind_group_layout,
-                    self.object_bind_group_layout,
-                    material_bind_group_layout,
-                ])
-                .shader_defs([
-                    ("ENABLE_DIFFUSE_TEXTURE".to_string(), parameters.enable_diffuse_texture.into()),
-                    ("MAX_LIGHTS".to_string(), MAX_LIGHTS.into()),
-                ])
-
-                // Positions
-                .vertex_buffer().shader_location(0).vec3().add()
-                // Tex coords
-                .vertex_buffer().shader_location(1).vec2().add()
-                // Normals
-                .vertex_buffer().shader_location(2).vec3().add()
-            .create();
-
-            MaterialData {
-                created_at: SystemTime::now(),
-                pipeline,
-            }
+        if parameters.enable_diffuse_texture {
+            material_bind_group_layout = material_bind_group_layout
+                .entry().binding(1).texture().add();
+            material_bind_group_layout = material_bind_group_layout
+                .entry().binding(2).sampler().add();
         }
 
-        fn is_outdated(&mut self, data: &MaterialData) -> bool {
-            let shader_source_file = builtin_shaders::BuiltinShaders::get("pbr_shader.wgsl")
-                .expect("Could not find 'pbr_shader.wgsl'");
-            let Some(last_modified) = shader_source_file.metadata.last_modified()
-            else {
-                // FIXME: Change to warn! or something
-                println!("Could not get last modified on pbr_shader.wgsl shader");
-                return false;
-            };
-            let last_modified_time =
-                SystemTime::UNIX_EPOCH + Duration::from_secs(last_modified);
+        let material_bind_group_layout = material_bind_group_layout.create();
+    
+        let pipeline = renderer.create_pipeline()
+            .shader_source(shader_source)
+            .bind_group_layouts([
+                camera_bind_group_layout,
+                object_bind_group_layout,
+                material_bind_group_layout,
+            ])
+            .shader_defs([
+                ("ENABLE_DIFFUSE_TEXTURE".to_string(), parameters.enable_diffuse_texture.into()),
+                ("MAX_LIGHTS".to_string(), MAX_LIGHTS.into()),
+            ])
+            
+            .color_target().format(crate::RENDER_TARGET_FORMAT).add()
+            .depth_buffer(true)
 
-            data.created_at < last_modified_time
+            // Positions
+            .vertex_buffer().shader_location(0).vec3().add()
+            // Tex coords
+            .vertex_buffer().shader_location(1).vec2().add()
+            // Normals
+            .vertex_buffer().shader_location(2).vec3().add()
+        .create();
+
+        MaterialData {
+            created_at: SystemTime::now(),
+            pipeline,
         }
-    }
+    };
 
-    Factory {
-        camera_bind_group_layout: engine_state.world_bind_group_layout,
-        object_bind_group_layout: engine_state.object_bind_group_layout,
-    }
+    embedded_shader_factory_helper(
+        factory,
+        builtin_shaders::BuiltinShaders,
+        "pbr_shader.wgsl"
+    )
 }

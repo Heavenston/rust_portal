@@ -5,8 +5,9 @@ pub use state::*;
 mod materials;
 pub use materials::*;
 pub mod pbr_material;
+pub mod hdr_tonemapper_material;
 
-use crate::{ utils::default, *, color::* };
+use crate::{ utils::default, * };
 
 use std::{ iter::empty, sync::Arc, time::Instant };
 use crevice::std140::AsStd140;
@@ -89,24 +90,30 @@ impl StartedEngine {
             );
         }
 
+        let tonemap_material_handle = state.materials.get_handle(&mut state.renderer, &hdr_tonemapper_material::Parameters);
+        let tonemap_pipeline = state.materials.get(tonemap_material_handle).pipeline;
+        let tonemap_bind_group_layout = state.renderer.get_pipeline_bind_group_layouts(tonemap_pipeline)[0];
+        let render_target_handle = state.renderer.render_target();
+
+        let tonemap_bind_group = state.renderer.create_bind_group()
+            .layout(tonemap_bind_group_layout)
+            .entry(0, render_target_handle)
+            .sampler(1)
+            .create();
+
         let mut render = state.renderer.render();
         let present_texture_handle = render.using_present_texture();
+        let render_target_handle = render.using_render_target();
         let depth_buffer_handle = render.using_depth_buffer();
 
-        let mut draw_all_number = 0;
+        let mut draw_call_number = 0;
 
         // Object rendering pass
         {
-            let cc = LinearRgba::from(camera.clear_color);
             let mut render_pass = render.render_pass()
                 .color_attachment()
-                    .texture_view_handle(present_texture_handle)
-                    .color_clear(wgpu::Color {
-                        r: cc.r.into(),
-                        g: cc.g.into(),
-                        b: cc.b.into(),
-                        a: cc.a.into(),
-                    })
+                    .texture_view_handle(render_target_handle)
+                    .clear_color(camera.clear_color)
                     .finish()
                 .depth_stencil_attachment()
                     .texture_view_handle(depth_buffer_handle)
@@ -128,18 +135,32 @@ impl StartedEngine {
                 render_pass.set_bind_group(0, self.world_bind_group);
                 render_pass.set_bind_group(1, *object_bind_group);
                 render_pass.set_bind_group(2, mesh.material_instance.bind_group);
-                render_pass.draw_call()
-                    .draw(0..mesh.vertex_count);
+                render_pass.draw_indexed(0..mesh.vertex_count, 0, 0..1);
 
-                draw_all_number += 1;
+                draw_call_number += 1;
             }
 
             render_pass.finish();
         }
 
-        println!("{draw_all_number} draw calls");
+        // tonemapping pass
+        {
+            let mut render_pass = render.render_pass()
+                .color_attachment()
+                    .texture_view_handle(present_texture_handle)
+                    .finish()
+                .build();
+            render_pass.set_pipeline(tonemap_pipeline);
+            render_pass.set_bind_group(0, tonemap_bind_group);
+            render_pass.draw(0..3, 0..1);
+            render_pass.finish();
+        }
+
+        println!("{draw_call_number} draw calls");
 
         render.finish();
+
+        state.renderer.delete_bind_group(tonemap_bind_group);
     }
 
     fn pre_frame(&mut self) {

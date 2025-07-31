@@ -6,7 +6,7 @@ use std::{
     fmt::Debug,
     hash::Hash,
     marker::PhantomData,
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 #[derive(Debug)]
@@ -30,6 +30,54 @@ impl<F, P> MaterialFactory<P> for F
 
     fn is_outdated(&mut self, _data: &MaterialData) -> bool {
         false
+    }
+}
+
+pub struct EmbeddedShaderFactoryHelper<F, P, E> {
+    parameters: PhantomData<*const (P, E)>,
+    factory: F,
+    file_name: String,
+}
+
+impl<F, P, E> MaterialFactory<P> for EmbeddedShaderFactoryHelper<F, P, E>
+    where F: (FnMut(&mut Renderer, &str, &P) -> MaterialData) + 'static,
+          P: MaterialParameters,
+          E: rust_embed::Embed + 'static,
+{
+    fn create(&mut self, renderer: &mut Renderer, parameters: &P) -> MaterialData {
+        let shader_source_file = E::get(&self.file_name)
+            .expect("Could not find shader source file");
+        let shader_source = str::from_utf8(&shader_source_file.data)
+            .expect("Invalid utf8 in shader source file");
+
+        (self.factory)(renderer, shader_source, parameters)
+    }
+
+    fn is_outdated(&mut self, data: &MaterialData) -> bool {
+        let shader_source_file = builtin_shaders::BuiltinShaders::get(&self.file_name)
+            .expect("Could not find shader source file");
+        let Some(last_modified) = shader_source_file.metadata.last_modified()
+        else {
+            // FIXME: Change to warn! or something
+            println!("Could not get last modified on shader source file");
+            return false;
+        };
+        let last_modified_time =
+            SystemTime::UNIX_EPOCH + Duration::from_secs(last_modified);
+
+        data.created_at < last_modified_time
+    }
+}
+
+pub fn embedded_shader_factory_helper<F, P, E>(
+    fun: F,
+    _embed: E,
+    file_name: impl Into<String>,
+) -> EmbeddedShaderFactoryHelper<F, P, E> {
+    EmbeddedShaderFactoryHelper {
+        parameters: PhantomData,
+        factory: fun,
+        file_name: file_name.into(),
     }
 }
 

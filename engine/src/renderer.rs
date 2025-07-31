@@ -16,6 +16,7 @@ use std::sync::Arc;
 use crate::{ handle_map::HandleMap, utils::* };
 
 pub(crate) static DEPTH_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
+pub(crate) static RENDER_TARGET_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
 #[derive(Debug, Default)]
 pub struct RendererResources {
@@ -38,10 +39,13 @@ pub struct Renderer {
 
     window: Arc<winit::window::Window>,
     size: winit::dpi::PhysicalSize<u32>,
-    pub(crate) surface_format: wgpu::TextureFormat,
+    surface_format: wgpu::TextureFormat,
 
     depth_buffer_handle: TextureHandle,
     depth_buffer: wgpu::Texture,
+    render_target_handle: TextureHandle,
+    /// Hdr render target
+    render_target: wgpu::Texture,
 
     resources: RendererResources,
 }
@@ -76,10 +80,13 @@ impl Renderer {
         let surface_format = cap.formats[0];
 
         let size = window.inner_size();
+
         let depth_buffer = Self::create_depth_texture(&device, size);
+        let render_target = Self::create_render_target_texture(&device, size);
 
         let mut resources = RendererResources::default();
         let depth_buffer_handle = resources.textures.insert(TextureData::from_wgpu(depth_buffer.clone()));
+        let render_target_handle = resources.textures.insert(TextureData::from_wgpu(render_target.clone()));
 
         let this = Self {
             instance,
@@ -94,6 +101,8 @@ impl Renderer {
 
             depth_buffer_handle,
             depth_buffer,
+            render_target_handle,
+            render_target,
 
             resources,
         };
@@ -124,6 +133,25 @@ impl Renderer {
         })
     }
 
+    fn create_render_target_texture(device: &wgpu::Device, size: winit::dpi::PhysicalSize<u32>) -> wgpu::Texture {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: size.width.max(1),
+                height: size.height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: RENDER_TARGET_FORMAT.into(),
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+            ,
+            view_formats: &[],
+        })
+    }
+
     fn configure_surface(&self) {
         self.surface.configure(&self.device, &wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -147,6 +175,18 @@ impl Renderer {
         w / h
     }
 
+    pub fn depth_buffer(&self) -> TextureHandle {
+        self.depth_buffer_handle
+    }
+
+    pub fn render_target(&self) -> TextureHandle {
+        self.render_target_handle
+    }
+
+    pub fn present_surface_format(&self) -> TextureFormat {
+        self.surface_format.try_into().expect("Unsupported texture format?")
+    }
+
     pub fn resize(&mut self, size: winit::dpi::PhysicalSize<u32>) {
         self.size = size;
         self.configure_surface();
@@ -154,6 +194,10 @@ impl Renderer {
         let new_depth_buffer = Self::create_depth_texture(&self.device, size);
         self.depth_buffer = new_depth_buffer.clone();
         self.resources.textures.replace(self.depth_buffer_handle, TextureData::from_wgpu(new_depth_buffer));
+
+        let new_render_target = Self::create_render_target_texture(&self.device, size);
+        self.render_target = new_render_target.clone();
+        self.resources.textures.replace(self.render_target_handle, TextureData::from_wgpu(new_render_target));
     }
 
     pub fn render(&'_ mut self) -> RenderOperation<'_> {

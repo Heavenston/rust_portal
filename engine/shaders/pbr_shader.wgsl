@@ -2,6 +2,7 @@
 // 
 // useful list of equations: https://graphicrants.blogspot.com/2013/08/specular-brdf-reference.html
 
+// Old tests remnents
 //! define ENABLE_INPUT_LINEAR_CONVERSION false
 //! define ENABLE_OUTPUT_LINEAR_CONVERSION false
 
@@ -219,10 +220,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 
     total_radiance += albedo.xyz * AMBIENT_LIGHT;
 
-    // HDR tone map using the Reinhard operator
     var color = total_radiance;
-    color = color / (color + vec3(1.0));
-
     //! if ENABLE_OUTPUT_LINEAR_CONVERSION
     color = pow(color, vec3(1.0/2.2)); 
     //! endif

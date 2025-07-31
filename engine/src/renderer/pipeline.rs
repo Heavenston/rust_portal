@@ -85,12 +85,33 @@ impl<'f1, 'f2, PS, S> AddVertexBufferBuilder<'f1, 'f2, PS, S>
     }
 }
 
+#[bon::builder(finish_fn = add)]
+pub fn add_color_target<'f1, 'f2, PS>(
+    #[builder(start_fn)]
+    mut parent: CreatePipelineBuilderBuilder<'f1, 'f2, PS>,
+    format: TextureFormat,
+) -> CreatePipelineBuilderBuilder<'f1, 'f2, PS>
+where PS: create_pipeline_builder_builder::State,
+{
+    parent.color_targets.push(Some(wgpu::ColorTargetState {
+        format: format.into(),
+        // blend: Some(wgpu::BlendState::REPLACE),
+        blend: None,
+        write_mask: wgpu::ColorWrites::ALL,
+    }));
+    parent
+}
+
 #[bon::builder(finish_fn = create)]
 pub fn create_pipeline_builder(
     #[builder(start_fn)]
     renderer: &mut Renderer,
     #[builder(field)]
     vertex_buffers: Vec<VertexBufferBindingData>,
+    #[builder(field)]
+    color_targets: Vec<Option<wgpu::ColorTargetState>>,
+    #[builder(default = false)]
+    depth_buffer: bool,
     #[builder(into)]
     bind_group_layouts: Vec<BindGroupLayoutHandle>,
     shader_source: &str,
@@ -167,18 +188,14 @@ pub fn create_pipeline_builder(
                 constants: &fragment_overrides,
                 ..default()
             },
-            targets: &[Some(wgpu::ColorTargetState {
-                format: renderer.surface_format,
-                blend: Some(wgpu::BlendState::REPLACE),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
+            targets: &color_targets,
         }),
         primitive: wgpu::PrimitiveState {
             cull_mode: Some(wgpu::Face::Back),
             polygon_mode: wgpu::PolygonMode::Fill,
             ..default()
         },
-        depth_stencil: Some(wgpu::DepthStencilState {
+        depth_stencil: depth_buffer.then_some(wgpu::DepthStencilState {
             format: DEPTH_TEXTURE_FORMAT,
             depth_write_enabled: true,
             depth_compare: wgpu::CompareFunction::LessEqual,
@@ -198,6 +215,10 @@ impl<'f1, 'f2, S> CreatePipelineBuilderBuilder<'f1, 'f2, S>
 {
     pub fn vertex_buffer(self) -> AddVertexBufferBuilder<'f1, 'f2, S> {
         add_vertex_buffer(self)
+    }
+
+    pub fn color_target(self) -> AddColorTargetBuilder<'f1, 'f2, S> {
+        add_color_target(self)
     }
 }
 

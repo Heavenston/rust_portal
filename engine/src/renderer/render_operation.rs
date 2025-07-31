@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::{ *, utils::* };
+use crate::{ color::Srgba, utils::*, * };
 
 use super::Renderer;
 
@@ -12,7 +12,6 @@ pub struct RenderPassOperation2<'a> {
     renderpass: wgpu::RenderPass<'a>,
 }
 
-#[bon::bon]
 impl<'a> RenderPassOperation2<'a> {
     /// Just drop self
     pub fn finish(self) {
@@ -58,23 +57,27 @@ impl<'a> RenderPassOperation2<'a> {
         self.renderpass.set_index_buffer(buffer.slice(..), wgpu::IndexFormat::Uint32);
     }
 
-    #[builder(
-        finish_fn = draw
-    )]
-    pub fn draw_call(
+    pub fn draw_indexed(
         &mut self,
-        #[builder(finish_fn)]
         indices: Range<u32>,
-        #[builder(default = 0)]
         base_vertex: i32,
+        instances: Range<u32>,
     ) {
-        self.renderpass.draw_indexed(indices, base_vertex, 0..1);
+        self.renderpass.draw_indexed(indices, base_vertex, instances);
+    }
+
+    pub fn draw(
+        &mut self,
+        vertices: Range<u32>,
+        instances: Range<u32>,
+    ) {
+        self.renderpass.draw(vertices, instances);
     }
 }
 
 struct RenderPassColorAttachmentInfo {
     texture_view_handle: RenderPassResourceHandle,
-    color_clear: Option<wgpu::Color>,
+    clear_color: Option<Srgba>,
     discard: bool,
 }
 
@@ -87,14 +90,14 @@ fn add_color_attachment<'a, 'b, PS>(
     #[builder(start_fn)]
     mut builder: RenderPassOperationBuilder<'a, 'b, PS>,
     texture_view_handle: RenderPassResourceHandle,
-    color_clear: Option<wgpu::Color>,
+    clear_color: Option<Srgba>,
     #[builder(default = false)]
     discard: bool,
 ) -> RenderPassOperationBuilder<'a, 'b, PS>
 where PS: render_pass_operation_builder::State {
     builder.color_attachments.push(RenderPassColorAttachmentInfo {
         texture_view_handle,
-        color_clear,
+        clear_color,
         discard,
     });
 
@@ -152,7 +155,7 @@ fn build_render_pass_operation<'a, 'b>(
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: info.color_clear.map(wgpu::LoadOp::Clear).unwrap_or(wgpu::LoadOp::Load),
+                    load: info.clear_color.map(wgpu::Color::from).map(wgpu::LoadOp::Clear).unwrap_or(wgpu::LoadOp::Load),
                     store: if info.discard { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store },
                 },
             }
@@ -202,6 +205,7 @@ struct PresentSurfaceResource {
 struct RenderPassResources {
     present_surface: Option<PresentSurfaceResource>,
     depth_buffer_resource_handle: RenderPassResourceHandle,
+    render_target_resource_handle: RenderPassResourceHandle,
 }
 
 impl RenderPassResources {
@@ -214,6 +218,13 @@ impl RenderPassResources {
         if handle == self.depth_buffer_resource_handle {
             return Some(&renderer.resources.textures
                 .get(renderer.depth_buffer_handle)
+                .expect("Depth buffer is present")
+                .view);
+        }
+
+        if handle == self.render_target_resource_handle {
+            return Some(&renderer.resources.textures
+                .get(renderer.render_target_handle)
                 .expect("Depth buffer is present")
                 .view);
         }
@@ -245,6 +256,7 @@ impl<'a> RenderOperation<'a> {
         }
     }
 
+    /// called by the Drop impl
     fn submit(&mut self) {
         let Some(data) = self.data.take()
         else { unreachable!("Already submitted?") };
@@ -296,6 +308,10 @@ impl<'a> RenderOperation<'a> {
 
     pub fn using_depth_buffer(&mut self) -> RenderPassResourceHandle {
         self.data.as_mut().expect("Already submitted??").resources.depth_buffer_resource_handle
+    }
+
+    pub fn using_render_target(&mut self) -> RenderPassResourceHandle {
+        self.data.as_mut().expect("Already submitted??").resources.render_target_resource_handle
     }
 }
 
