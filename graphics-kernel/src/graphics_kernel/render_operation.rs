@@ -1,9 +1,60 @@
-use std::ops::Range;
+use std::{collections::HashMap, ops::Range};
 
 use crate::{ color::Srgba, * };
 use utils::*;
 
 use super::GraphicsKernel;
+
+#[derive(Default,Debug, Clone, Copy)]
+pub enum LoadOperations<V> {
+    #[default]
+    Load,
+    Clear(V),
+}
+
+impl<U, V> From<LoadOperations<U>> for wgpu::LoadOp<V>
+    where V: From<U>
+{
+    fn from(value: LoadOperations<U>) -> Self {
+        match value {
+            LoadOperations::Clear(u) => wgpu::LoadOp::Clear(u.into()),
+            LoadOperations::Load => wgpu::LoadOp::Load,
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+pub enum StoreOperations {
+    #[default]
+    Store,
+    Discard,
+}
+
+impl From<StoreOperations> for wgpu::StoreOp {
+    fn from(value: StoreOperations) -> Self {
+        match value {
+            StoreOperations::Store => wgpu::StoreOp::Store,
+            StoreOperations::Discard => wgpu::StoreOp::Discard,
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+pub struct LoadStoreOperations<V> {
+    pub load: LoadOperations<V>,
+    pub store: StoreOperations,
+}
+
+impl<U, V> From<LoadStoreOperations<U>> for wgpu::Operations<V>
+    where V: From<U>
+{
+    fn from(val: LoadStoreOperations<U>) -> Self {
+        wgpu::Operations {
+            load: val.load.into(),
+            store: val.store.into(),
+        }
+    }
+}
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RenderPassResourceHandle(Uid);
@@ -78,8 +129,7 @@ impl<'a> RenderPassOperation2<'a> {
 
 struct RenderPassColorAttachmentInfo {
     texture_view_handle: RenderPassResourceHandle,
-    clear_color: Option<Srgba>,
-    discard: bool,
+    operations: wgpu::Operations<wgpu::Color>,
 }
 
 #[bon::builder(
@@ -91,18 +141,38 @@ fn add_color_attachment<'a, 'b, PS>(
     #[builder(start_fn)]
     mut builder: RenderPassOperationBuilder<'a, 'b, PS>,
     texture_view_handle: RenderPassResourceHandle,
-    clear_color: Option<Srgba>,
-    #[builder(default = false)]
-    discard: bool,
+    #[builder(default)]
+    load_op: LoadOperations<Srgba>,
+    #[builder(default)]
+    store_op: StoreOperations,
 ) -> RenderPassOperationBuilder<'a, 'b, PS>
 where PS: render_pass_operation_builder::State {
     builder.color_attachments.push(RenderPassColorAttachmentInfo {
         texture_view_handle,
-        clear_color,
-        discard,
+        operations: LoadStoreOperations {
+            load: load_op,
+            store: store_op,
+        }.into(),
     });
 
     builder
+}
+
+impl<'a, 'b, PS, S> AddRenderPassColorAttachment<'a, 'b, PS, S>
+    where PS: render_pass_operation_builder::State,
+          S: add_render_pass_color_attachment::State,
+          S::LoadOp: add_render_pass_color_attachment::IsUnset,
+          S::StoreOp: add_render_pass_color_attachment::IsUnset,
+{
+    pub fn operations(self, operations: LoadStoreOperations<Srgba>) -> AddRenderPassColorAttachment<'a, 'b, PS,
+        add_render_pass_color_attachment::SetStoreOp<
+            add_render_pass_color_attachment::SetLoadOp<
+                S
+            >
+        >
+    > {
+        self.load_op(operations.load).store_op(operations.store)
+    }
 }
 
 struct RenderPassDepthStencilAttachmentInfo {
@@ -120,14 +190,14 @@ fn add_depth_stencil_attachment<'a, 'b, PS>(
     #[builder(start_fn)]
     mut builder: RenderPassOperationBuilder<'a, 'b, PS>,
     texture_view_handle: RenderPassResourceHandle,
-    depth_ops: Option<wgpu::Operations<f32>>,
-    stencil_ops: Option<wgpu::Operations<u32>>,
+    depth_ops: Option<LoadStoreOperations<f32>>,
+    stencil_ops: Option<LoadStoreOperations<u32>>,
 ) -> RenderPassOperationBuilder<'a, 'b, PS>
 where PS: render_pass_operation_builder::State {
     builder.depth_stencil_attachment = Some(RenderPassDepthStencilAttachmentInfo {
         texture_view_handle,
-        depth_ops,
-        stencil_ops,
+        depth_ops: depth_ops.map(wgpu::Operations::from),
+        stencil_ops: stencil_ops.map(wgpu::Operations::from),
     });
 
     builder
@@ -155,10 +225,7 @@ fn build_render_pass_operation<'a, 'b>(
                     .expect("Invalid color attachment texture view handle given"),
                 depth_slice: None,
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: info.clear_color.map(wgpu::Color::from).map(wgpu::LoadOp::Clear).unwrap_or(wgpu::LoadOp::Load),
-                    store: if info.discard { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store },
-                },
+                ops: info.operations,
             }
         })
         .map(Some)
@@ -205,32 +272,19 @@ struct PresentSurfaceResource {
 #[derive(Default)]
 struct RenderPassResources {
     present_surface: Option<PresentSurfaceResource>,
-    depth_buffer_resource_handle: RenderPassResourceHandle,
-    render_target_resource_handle: RenderPassResourceHandle,
+    texture_views: HashMap<RenderPassResourceHandle, wgpu::TextureView>,
 }
 
 impl RenderPassResources {
     /// Works with a texture or texture view handle
     pub fn get_texture_view<'a>(&'a self, kernel: &'a GraphicsKernel, handle: RenderPassResourceHandle) -> Option<&'a wgpu::TextureView> {
+        let _ = kernel;
+
         if let Some(present_surface) = &self.present_surface && present_surface.handle == handle {
             return Some(&present_surface.texture_view);
         }
 
-        if handle == self.depth_buffer_resource_handle {
-            return Some(&kernel.resources.textures
-                .get(kernel.depth_buffer_handle)
-                .expect("Depth buffer is present")
-                .view);
-        }
-
-        if handle == self.render_target_resource_handle {
-            return Some(&kernel.resources.textures
-                .get(kernel.render_target_handle)
-                .expect("Depth buffer is present")
-                .view);
-        }
-
-        None
+        self.texture_views.get(&handle)
     }
 }
 
@@ -307,12 +361,13 @@ impl<'a> RenderOperation<'a> {
         self.create_present_surface().handle
     }
 
-    pub fn using_depth_buffer(&mut self) -> RenderPassResourceHandle {
-        self.data.as_mut().expect("Already submitted??").resources.depth_buffer_resource_handle
-    }
-
-    pub fn using_render_target(&mut self) -> RenderPassResourceHandle {
-        self.data.as_mut().expect("Already submitted??").resources.render_target_resource_handle
+    pub fn using_texture_view(&mut self, texture: TextureHandle) -> Option<RenderPassResourceHandle> {
+        let data = self.data.as_mut().expect("Already submitted??");
+        let texture_view = data
+            .kernel.get_texture_data(texture)?.view.clone();
+        let handle = RenderPassResourceHandle::default();
+        data.resources.texture_views.insert(handle, texture_view);
+        Some(handle)
     }
 }
 

@@ -1,6 +1,8 @@
 use super::*;
 use utils::handle_map;
 
+use derive_more::{ BitAnd, BitOr };
+
 macro_rules! gen_texture_format {
     ($($name: ident => $size: expr),*$(,)?) => {
         #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -96,18 +98,53 @@ gen_texture_format!(
     Depth32Float => 4,
 );
 
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, BitOr, BitAnd)]
+pub struct TextureUsages {
+    pub copy_src: bool,
+    pub copy_dst: bool,
+    pub texture_binding: bool,
+    pub storage_binding: bool,
+    pub render_attachment: bool,
+}
+
+impl From<wgpu::TextureUsages> for TextureUsages {
+    fn from(value: wgpu::TextureUsages) -> Self {
+        Self {
+            copy_src: value.contains(wgpu::TextureUsages::COPY_SRC),
+            copy_dst: value.contains(wgpu::TextureUsages::COPY_DST),
+            texture_binding: value.contains(wgpu::TextureUsages::TEXTURE_BINDING),
+            storage_binding: value.contains(wgpu::TextureUsages::STORAGE_BINDING),
+            render_attachment: value.contains(wgpu::TextureUsages::RENDER_ATTACHMENT),
+        }
+    }
+}
+
+impl Into<wgpu::TextureUsages> for TextureUsages {
+    fn into(self) -> wgpu::TextureUsages {
+        wgpu::TextureUsages::from_bits(
+            wgpu::TextureUsages::COPY_SRC.bits() * self.copy_src as u32 +
+            wgpu::TextureUsages::COPY_DST.bits() * self.copy_dst as u32 +
+            wgpu::TextureUsages::TEXTURE_BINDING.bits() * self.texture_binding as u32 +
+            wgpu::TextureUsages::STORAGE_BINDING.bits() * self.storage_binding as u32 +
+            wgpu::TextureUsages::RENDER_ATTACHMENT.bits() * self.render_attachment as u32
+        ).expect("valid")
+    }
+}
+
 #[derive(Debug)]
 pub struct TextureData {
     pub(super) texture: wgpu::Texture,
     pub(super) view: wgpu::TextureView,
-    pub(super) format: Option<TextureFormat>,
+    pub format: TextureFormat,
+    pub usages: TextureUsages,
 }
 
 impl TextureData {
     pub(super) fn from_wgpu(texture: wgpu::Texture) -> Self {
         Self {
             view: texture.create_view(&default()),
-            format: texture.format().try_into().ok(),
+            format: texture.format().try_into().expect("Unsupported Format"),
+            usages: texture.usage().into(),
             texture,
         }
     }
@@ -119,6 +156,7 @@ pub type TextureHandle = handle_map::Handle<TextureData>;
 pub fn create_texture_builder(
     #[builder(start_fn)]
     kernel: &mut GraphicsKernel,
+    usages: TextureUsages,
     width: u32,
     height: u32,
     #[builder(default = 1)]
@@ -127,6 +165,7 @@ pub fn create_texture_builder(
 ) -> TextureHandle {
     assert!(width >= 1 && height >= 1, "Texture must not be of size 0 (given {width}x{height})");
 
+    let format: wgpu::TextureFormat = format.into();
     let texture = kernel.device.create_texture(&wgpu::TextureDescriptor {
         label: None,
         size: wgpu::Extent3d {
@@ -137,13 +176,23 @@ pub fn create_texture_builder(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: format.into(),
-        usage: wgpu::TextureUsages::COPY_DST |
-            wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[
-            wgpu::TextureFormat::from(format).remove_srgb_suffix(),
-            wgpu::TextureFormat::from(format).add_srgb_suffix(),
-        ],
+        format,
+        usage: usages.into(),
+        view_formats: &[format.remove_srgb_suffix(), format.add_srgb_suffix()],
     });
     kernel.resources.textures.insert(TextureData::from_wgpu(texture))
+}
+
+impl<'a, S> CreateTextureBuilderBuilder<'a, S>
+    where S: create_texture_builder_builder::State,
+          S::Width: create_texture_builder_builder::IsUnset,
+          S::Height: create_texture_builder_builder::IsUnset,
+{
+    pub fn size(self, size: UVec2) -> CreateTextureBuilderBuilder<'a,
+        create_texture_builder_builder::SetHeight<
+            create_texture_builder_builder::SetWidth<S>
+        >,
+    > {
+        self.width(size.x).height(size.y)
+    }
 }

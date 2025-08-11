@@ -7,7 +7,8 @@ use derive_more::From;
 #[derive(Debug)]
 pub struct PipelineData {
     pub(super) pipeline: wgpu::RenderPipeline,
-    pub(super) bind_group_layouts: Vec<BindGroupLayoutHandle>,
+    pub label: Option<String>,
+    pub bind_group_layouts: Box<[BindGroupLayoutHandle]>,
 }
 pub type PipelineHandle = handle_map::Handle<PipelineData>;
 
@@ -45,13 +46,13 @@ struct VertexBufferBindingData {
 }
 
 #[bon::builder(finish_fn = add)]
-pub fn add_vertex_buffer<'f1, 'f2, PS>(
+pub fn add_vertex_buffer<'f1, 'f2, 'f3, PS>(
     #[builder(start_fn)]
-    mut parent: CreatePipelineBuilderBuilder<'f1, 'f2, PS>,
+    mut parent: CreatePipelineBuilderBuilder<'f1, 'f2, 'f3, PS>,
     shader_location: u32,
     #[builder(setters(vis = "", name = "priv_format"))]
     format: (u64, wgpu::VertexFormat),
-) -> CreatePipelineBuilderBuilder<'f1, 'f2, PS>
+) -> CreatePipelineBuilderBuilder<'f1, 'f2, 'f3, PS>
 where PS: create_pipeline_builder_builder::State,
 {
     let (stride, format) = format;
@@ -65,19 +66,19 @@ where PS: create_pipeline_builder_builder::State,
     parent
 }
 
-impl<'f1, 'f2, PS, S> AddVertexBufferBuilder<'f1, 'f2, PS, S>
+impl<'f1, 'f2, 'f3, PS, S> AddVertexBufferBuilder<'f1, 'f2, 'f3, PS, S>
     where PS: create_pipeline_builder_builder::State,
           S: add_vertex_buffer_builder::State,
           S::Format: add_vertex_buffer_builder::IsUnset,
 {
-    pub fn vec2(self) -> AddVertexBufferBuilder<'f1, 'f2, PS, add_vertex_buffer_builder::SetFormat<S>> {
+    pub fn vec2(self) -> AddVertexBufferBuilder<'f1, 'f2, 'f3, PS, add_vertex_buffer_builder::SetFormat<S>> {
         self.priv_format((
             size_of::<glam::Vec2>() as u64,
             wgpu::VertexFormat::Float32x2,
         ))
     }
 
-    pub fn vec3(self) -> AddVertexBufferBuilder<'f1, 'f2, PS, add_vertex_buffer_builder::SetFormat<S>> {
+    pub fn vec3(self) -> AddVertexBufferBuilder<'f1, 'f2, 'f3, PS, add_vertex_buffer_builder::SetFormat<S>> {
         self.priv_format((
             size_of::<glam::Vec3>() as u64,
             wgpu::VertexFormat::Float32x3,
@@ -86,11 +87,11 @@ impl<'f1, 'f2, PS, S> AddVertexBufferBuilder<'f1, 'f2, PS, S>
 }
 
 #[bon::builder(finish_fn = add)]
-pub fn add_color_target<'f1, 'f2, PS>(
+pub fn add_color_target<'f1, 'f2, 'f3, PS>(
     #[builder(start_fn)]
-    mut parent: CreatePipelineBuilderBuilder<'f1, 'f2, PS>,
+    mut parent: CreatePipelineBuilderBuilder<'f1, 'f2, 'f3, PS>,
     format: TextureFormat,
-) -> CreatePipelineBuilderBuilder<'f1, 'f2, PS>
+) -> CreatePipelineBuilderBuilder<'f1, 'f2, 'f3, PS>
 where PS: create_pipeline_builder_builder::State,
 {
     parent.color_targets.push(Some(wgpu::ColorTargetState {
@@ -121,6 +122,8 @@ pub fn create_pipeline_builder(
     vertex_pipleline_overrides: HashMap<String, f64>,
     #[builder(into, default)]
     fragment_pipleline_overrides: HashMap<String, f64>,
+    #[builder(into)]
+    label: Option<Cow<'_, str>>,
 ) -> PipelineHandle {
     let device = &kernel.device;
 
@@ -136,13 +139,17 @@ pub fn create_pipeline_builder(
         Err(e) => panic!("Could not preprocess shader: {e}"),
     };
 
+    let shader_label = label.as_deref()
+        .map(|label| format!("{label} pipeline's shader module"));
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: None,
+        label: shader_label.as_deref(),
         source: wgpu::ShaderSource::Wgsl(Cow::Owned(compiled_shader)),
     });
 
+    let layout_label = label.as_deref()
+        .map(|label| format!("{label} pipeline layout"));
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: None,
+        label: layout_label.as_deref(),
         bind_group_layouts: bind_group_layouts.iter()
             .map(|&handle| {
                 &kernel.resources.bind_group_layouts.get(handle)
@@ -170,7 +177,7 @@ pub fn create_pipeline_builder(
         .collect::<Vec::<_>>();
 
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: None,
+        label: label.as_deref(),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &shader,
@@ -207,27 +214,31 @@ pub fn create_pipeline_builder(
         cache: None,
     });
 
-    kernel.resources.pipelines.insert(PipelineData { pipeline, bind_group_layouts })
+    kernel.resources.pipelines.insert(PipelineData {
+        pipeline,
+        label: label.map(String::from),
+        bind_group_layouts: bind_group_layouts.into_boxed_slice(),
+    })
 }
 
-impl<'f1, 'f2, S> CreatePipelineBuilderBuilder<'f1, 'f2, S>
+impl<'f1, 'f2, 'f3, S> CreatePipelineBuilderBuilder<'f1, 'f2, 'f3, S>
     where S: create_pipeline_builder_builder::State,
 {
-    pub fn vertex_buffer(self) -> AddVertexBufferBuilder<'f1, 'f2, S> {
+    pub fn vertex_buffer(self) -> AddVertexBufferBuilder<'f1, 'f2, 'f3, S> {
         add_vertex_buffer(self)
     }
 
-    pub fn color_target(self) -> AddColorTargetBuilder<'f1, 'f2, S> {
+    pub fn color_target(self) -> AddColorTargetBuilder<'f1, 'f2, 'f3, S> {
         add_color_target(self)
     }
 }
 
-impl<'f1, 'f2, S> CreatePipelineBuilderBuilder<'f1, 'f2, S>
+impl<'f1, 'f2, 'f3, S> CreatePipelineBuilderBuilder<'f1, 'f2, 'f3, S>
     where S: create_pipeline_builder_builder::State,
           S::FragmentPiplelineOverrides: create_pipeline_builder_builder::IsUnset,
           S::VertexPiplelineOverrides: create_pipeline_builder_builder::IsUnset,
 {
-    pub fn pipeline_overrides(self, vals: impl Into<HashMap<String, f64>>) -> CreatePipelineBuilderBuilder<'f1, 'f2, create_pipeline_builder_builder::SetVertexPiplelineOverrides<create_pipeline_builder_builder::SetFragmentPiplelineOverrides<S>>> {
+    pub fn pipeline_overrides(self, vals: impl Into<HashMap<String, f64>>) -> CreatePipelineBuilderBuilder<'f1, 'f2, 'f3, create_pipeline_builder_builder::SetVertexPiplelineOverrides<create_pipeline_builder_builder::SetFragmentPiplelineOverrides<S>>> {
         let vals = vals.into();
         self.fragment_pipleline_overrides(vals.clone())
             .vertex_pipleline_overrides(vals.clone())

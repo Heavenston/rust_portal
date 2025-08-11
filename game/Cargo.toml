@@ -13,5 +13,4 @@ bytemuck = "1.23.1"
 crevice = { version = "0.18.0", features = ["glam"] }
 glam = { version = "0.30.4", features = ["bytemuck"] }
 gltf = { version = "1.4.1", features = ["KHR_lights_punctual"] }
-itertools = "0.14.0"
 winit = "0.30.11"

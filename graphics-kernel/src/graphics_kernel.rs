@@ -15,8 +15,20 @@ use utils::{ handle_map::HandleMap, * };
 
 use std::sync::Arc;
 
+use derive_more::{ From, TryInto, IsVariant };
+use glam::UVec2;
+
 pub static DEPTH_TEXTURE_FORMAT: TextureFormat = TextureFormat::Depth24PlusStencil8;
 pub static RENDER_TARGET_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
+
+#[derive(Debug, Clone, Copy, From, TryInto, IsVariant)]
+pub enum GraphicsResourceHandle {
+    Buffer(BufferHandle),
+    Texture(TextureHandle),
+    BindGroupLayout(BindGroupLayoutHandle),
+    BindGroup(BindGroupHandle),
+    Pipeline(PipelineHandle),
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct GraphicsKernelResources {
@@ -38,14 +50,8 @@ pub struct GraphicsKernel {
     queue: wgpu::Queue,
 
     window: Arc<winit::window::Window>,
-    size: winit::dpi::PhysicalSize<u32>,
+    size: UVec2,
     surface_format: wgpu::TextureFormat,
-
-    depth_buffer_handle: TextureHandle,
-    depth_buffer: wgpu::Texture,
-    render_target_handle: TextureHandle,
-    /// Hdr render target
-    render_target: wgpu::Texture,
 
     resources: GraphicsKernelResources,
 }
@@ -81,12 +87,7 @@ impl GraphicsKernel {
 
         let size = window.inner_size();
 
-        let depth_buffer = Self::create_depth_texture(&device, size);
-        let render_target = Self::create_render_target_texture(&device, size);
-
-        let mut resources = GraphicsKernelResources::default();
-        let depth_buffer_handle = resources.textures.insert(TextureData::from_wgpu(depth_buffer.clone()));
-        let render_target_handle = resources.textures.insert(TextureData::from_wgpu(render_target.clone()));
+        let resources = GraphicsKernelResources::default();
 
         let this = Self {
             instance,
@@ -95,14 +96,9 @@ impl GraphicsKernel {
             device,
             queue,
 
-            size,
+            size: UVec2::new(size.width, size.height),
             window,
             surface_format,
-
-            depth_buffer_handle,
-            depth_buffer,
-            render_target_handle,
-            render_target,
 
             resources,
         };
@@ -114,73 +110,26 @@ impl GraphicsKernel {
         pollster::block_on(Self::new_async(window))
     }
 
-    fn create_depth_texture(device: &wgpu::Device, size: winit::dpi::PhysicalSize<u32>) -> wgpu::Texture {
-        device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width: size.width.max(1),
-                height: size.height.max(1),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_TEXTURE_FORMAT.into(),
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-            ,
-            view_formats: &[],
-        })
-    }
-
-    fn create_render_target_texture(device: &wgpu::Device, size: winit::dpi::PhysicalSize<u32>) -> wgpu::Texture {
-        device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width: size.width.max(1),
-                height: size.height.max(1),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: RENDER_TARGET_FORMAT.into(),
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-            ,
-            view_formats: &[],
-        })
-    }
-
     fn configure_surface(&self) {
         self.surface.configure(&self.device, &wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: self.surface_format,
             view_formats: vec![self.surface_format.add_srgb_suffix()],
             alpha_mode: wgpu::CompositeAlphaMode::Opaque,
-            width: self.size.width,
-            height: self.size.height,
+            width: self.size.x,
+            height: self.size.y,
             desired_maximum_frame_latency: 2,
             present_mode: wgpu::PresentMode::Fifo,
         });
     }
 
-    pub fn viewport_size(&self) -> winit::dpi::PhysicalSize<u32> {
+    pub fn viewport_size(&self) -> UVec2 {
         self.size
     }
 
     pub fn aspect_ration(&self) -> f32 {
-        let w = self.size.width as f32;
-        let h = self.size.height as f32;
-        w / h
-    }
-
-    pub fn depth_buffer(&self) -> TextureHandle {
-        self.depth_buffer_handle
-    }
-
-    pub fn render_target(&self) -> TextureHandle {
-        self.render_target_handle
+        let size = self.size.as_vec2();
+        size.x / size.y
     }
 
     pub fn present_surface_format(&self) -> TextureFormat {
@@ -188,26 +137,12 @@ impl GraphicsKernel {
     }
 
     pub fn resize(&mut self, size: winit::dpi::PhysicalSize<u32>) {
-        self.size = size;
+        self.size = UVec2::new(size.width, size.height);
         self.configure_surface();
-
-        let new_depth_buffer = Self::create_depth_texture(&self.device, size);
-        self.depth_buffer = new_depth_buffer.clone();
-        self.resources.textures.replace(self.depth_buffer_handle, TextureData::from_wgpu(new_depth_buffer));
-
-        let new_render_target = Self::create_render_target_texture(&self.device, size);
-        self.render_target = new_render_target.clone();
-        self.resources.textures.replace(self.render_target_handle, TextureData::from_wgpu(new_render_target));
     }
 
     pub fn render(&'_ mut self) -> RenderOperation<'_> {
         RenderOperation::new(self)
-    }
-
-    pub fn write_buffer(&self, buffer_handle: BufferHandle, offset: u64, data: &[u8]) {
-        let buffer = &self.resources.buffers.get(buffer_handle)
-            .expect("Invalid buffer handle given").buffer;
-        self.queue.write_buffer(buffer, offset, data);
     }
 
     pub fn create_buffer<'a, 'b>(&'a mut self) -> CreateBufferBuilderBuilder<'a, 'b> {
@@ -218,14 +153,34 @@ impl GraphicsKernel {
         self.resources.buffers.remove(handle);
     }
 
+    pub fn get_buffer_data(&self, handle: BufferHandle) -> Option<&BufferData> {
+        self.resources.buffers.get(handle)
+    }
+
+    pub fn write_buffer(&self, buffer_handle: BufferHandle, offset: u64, data: &[u8]) {
+        let buffer = &self.resources.buffers.get(buffer_handle)
+            .expect("Invalid buffer handle given").buffer;
+        self.queue.write_buffer(buffer, offset, data);
+    }
+
+    pub fn create_texture<'a>(&'a mut self) -> CreateTextureBuilderBuilder<'a> {
+        create_texture_builder(self)
+    }
+
+    pub fn delete_texture(&mut self, handle: TextureHandle) {
+        self.resources.textures.remove(handle);
+    }
+
+    pub fn get_texture_data(&self, handle: TextureHandle) -> Option<&TextureData> {
+        self.resources.textures.get(handle)
+    }
+
     pub fn write_texture(&self, texture_handle: TextureHandle, data: &[u8]) {
         let texture_data = &self.resources.textures.get(texture_handle)
             .expect("Invalid texture handle given");
         let texture = &texture_data.texture;
         let size = texture.size();
-        let format = texture_data.format.expect("Writing to this texture is not supported");
-
-        let pixel_byte_size = format.pixel_byte_size();
+        let pixel_byte_size = texture_data.format.pixel_byte_size();
 
         self.queue.write_texture(wgpu::TexelCopyTextureInfoBase {
             texture,
@@ -243,15 +198,7 @@ impl GraphicsKernel {
         });
     }
 
-    pub fn create_texture<'a>(&'a mut self) -> CreateTextureBuilderBuilder<'a> {
-        create_texture_builder(self)
-    }
-
-    pub fn delete_texture(&mut self, handle: TextureHandle) {
-        self.resources.textures.remove(handle);
-    }
-
-    pub fn create_bind_group_layout(&'_ mut self) -> CreateBindGroupLayoutBuilder<'_> {
+    pub fn create_bind_group_layout<'f2>(&'_ mut self) -> CreateBindGroupLayoutBuilder<'_, 'f2> {
         create_bind_group_layout(self)
     }
 
@@ -259,7 +206,11 @@ impl GraphicsKernel {
         self.resources.bind_group_layouts.remove(handle);
     }
 
-    pub fn create_bind_group(&'_ mut self) -> CreateBindGroupBuilder<'_> {
+    pub fn get_bind_group_layout_data(&self, handle: BindGroupLayoutHandle) -> Option<&BindGroupLayoutData> {
+        self.resources.bind_group_layouts.get(handle)
+    }
+
+    pub fn create_bind_group<'f2>(&'_ mut self) -> CreateBindGroupBuilder<'_, 'f2> {
         create_bind_group(self)
     }
 
@@ -267,17 +218,19 @@ impl GraphicsKernel {
         self.resources.bind_groups.remove(handle);
     }
 
-    pub fn create_pipeline<'a, 'f2>(&'a mut self) -> CreatePipelineBuilderBuilder<'a, 'f2> {
-        create_pipeline_builder(self)
+    pub fn get_bind_group_data(&self, handle: BindGroupHandle) -> Option<&BindGroupData> {
+        self.resources.bind_groups.get(handle)
     }
 
-    pub fn get_pipeline_bind_group_layouts(&self, handle: PipelineHandle) -> &[BindGroupLayoutHandle] {
-        &self.resources.pipelines.get(handle)
-            .expect("Invalind pipeline handle given")
-            .bind_group_layouts
+    pub fn create_pipeline<'f2, 'f3>(&'_ mut self) -> CreatePipelineBuilderBuilder<'_, 'f2, 'f3> {
+        create_pipeline_builder(self)
     }
 
     pub fn delete_pipeline(&mut self, handle: PipelineHandle) {
         self.resources.pipelines.remove(handle);
+    }
+
+    pub fn get_pipeline_data(&self, handle: PipelineHandle) -> Option<&PipelineData> {
+        self.resources.pipelines.get(handle)
     }
 }

@@ -1,12 +1,12 @@
 use crate::concat_arrays;
 
-use std::{ cell::Cell, sync::atomic::{ AtomicU32, Ordering } };
+use std::{ cell::Cell, marker::PhantomData, sync::atomic::{ AtomicU32, Ordering } };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive_where::derive_where(Clone, Copy, PartialEq, Eq, Hash)]
 // Byte array to keep alignment of 1
-pub struct Uid([u8; 8]);
+pub struct Uid<T = ()>([u8; 8], PhantomData<*const T>);
 
-impl Uid {
+impl<T> Uid<T> {
     pub fn new() -> Self {
         // As it is not serializable this is enough
         // for serialization using an additional timestamp (and reducing the size
@@ -30,14 +30,21 @@ impl Uid {
             let thread_id = data.thread_id;
             let counter = data.counter.replace(data.counter.get().checked_add(1).expect("No overflow"));
 
-            Self(concat_arrays(thread_id.to_ne_bytes(), counter.to_ne_bytes()))
+            Self(concat_arrays(counter.to_ne_bytes(), thread_id.to_ne_bytes()), PhantomData)
         })
     }
 }
 
-impl Default for Uid {
+impl<T> Default for Uid<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
+impl<T> std::fmt::Debug for Uid<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Uid")
+            .field(&u64::from_ne_bytes(self.0))
+            .finish()
+    }
+}

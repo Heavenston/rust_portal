@@ -10,8 +10,13 @@ shader-preprocessor = { workspace = true }
 wgpu = { version = "26.0.1" }
 winit = { version = "0.30.11" }
 pollster = "0.4.0"
-derive_more = { version = "2.0.1", features = ["from", "into"] }
+derive_more = { version = "2.0.1", features = ["from", "try_into", "into", "is_variant", "add"] }
 bon = "3.6.5"
 bytemuck = "1.23.1"
 glam = { version = "0.30.4", features = ["bytemuck"] }
 crevice = { version = "0.18.0", features = ["glam"] }
+kinded = "0.3.0"
+
+[features]
+default = ["checks"]
+checks = []

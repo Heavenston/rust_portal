@@ -1,9 +1,20 @@
 mod map_id {
-    #[derive(Default, Debug, Clone, Copy, Hash, PartialEq, Eq)]
-    pub struct MapId {
+    use std::marker::PhantomData;
+
+    #[derive_where::derive_where(Default, Clone, Copy, Hash, PartialEq, Eq)]
+    pub struct MapId<T> {
         #[cfg(debug_assertions)]
-        map_id: crate::uid::Uid,
-        _private_field: (),
+        map_id: crate::uid::Uid<T>,
+        _private_field: PhantomData<*const T>,
+    }
+
+    impl<T> std::fmt::Debug for MapId<T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let mut debug_tuple = f.debug_tuple("MapId");
+            #[cfg(debug_assertions)]
+            debug_tuple.field(&self.map_id);
+            debug_tuple.finish()
+        }
     }
 }
 
@@ -16,14 +27,14 @@ use derive_where::derive_where;
 #[derive_where(Default, Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Handle<T> {
     id: Uid,
-    map_id: MapId,
+    map_id: MapId<T>,
     _phantom: PhantomData<*const T>,
 }
 
 #[derive(Debug, Clone)]
 #[derive_where(Default)]
 pub struct HandleMap<T> {
-    map_id: MapId,
+    map_id: MapId<T>,
     // FIXME: Can and probably should be replaced with a sparse index map
     values: HashMap<Uid, T>,
 }
@@ -41,8 +52,9 @@ impl<T> HandleMap<T> {
         }
     }
 
-    fn assert_handle(&self, handle: Handle<T>) {
-        assert_eq!(self.map_id, handle.map_id);
+    #[must_use]
+    fn assert_handle(&self, handle: Handle<T>) -> Option<()> {
+        (self.map_id == handle.map_id).then_some(())
     }
 
     pub fn reserve(&self) -> Handle<T> {
@@ -57,7 +69,7 @@ impl<T> HandleMap<T> {
     }
 
     pub fn replace(&mut self, handle: Handle<T>, val: T) -> Option<T> {
-        self.assert_handle(handle);
+        self.assert_handle(handle)?;
         use std::collections::hash_map::Entry;
         match self.values.entry(handle.id) {
             Entry::Occupied(mut entry) => {
@@ -71,7 +83,7 @@ impl<T> HandleMap<T> {
     }
 
     pub fn remove(&mut self, handle: Handle<T>) -> Option<T> {
-        self.assert_handle(handle);
+        self.assert_handle(handle)?;
         self.values.remove(&handle.id)
     }
 
@@ -80,12 +92,12 @@ impl<T> HandleMap<T> {
     }
 
     pub fn get(&self, handle: Handle<T>) -> Option<&T> {
-        self.assert_handle(handle);
+        self.assert_handle(handle)?;
         self.values.get(&handle.id)
     }
 
     pub fn get_mut(&mut self, handle: Handle<T>) -> Option<&mut T> {
-        self.assert_handle(handle);
+        self.assert_handle(handle)?;
         self.values.get_mut(&handle.id)
     }
 

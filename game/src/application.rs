@@ -105,6 +105,11 @@ impl Application {
         image_data: &gltf::image::Data,
     ) -> pgk::TextureHandle {
         let texture_handle = kernel.create_texture()
+            .usages(pgk::TextureUsages {
+                copy_dst: true,
+                texture_binding: true,
+                ..default()
+            })
             .width(image_data.width).height(image_data.height)
             .format(pgk::TextureFormat::Rgba8UnormSrgb)
             .create();
@@ -132,37 +137,40 @@ impl Application {
     fn load_gltf_material(
         &mut self,
         data: &mut GltfLoadingData,
-        material: gltf::Material,
+        gltf_material: gltf::Material,
     ) -> engine::MaterialInstance {
         let state = &mut data.state;
 
-        let material_index = material.index();
-        let bmr = material.pbr_metallic_roughness();
+        let material_index = gltf_material.index();
+        let bmr = gltf_material.pbr_metallic_roughness();
 
         if let Some(&instance) = data.created_materials.get(&material_index) {
             return instance;
         }
 
-        let diffuse_texture = bmr.base_color_texture()
+        let base_color_texture = bmr.base_color_texture()
             .map(|diffuse_texture| self.upload_texture(&mut state.kernel, &data.gltf_textures[diffuse_texture.texture().index()]));
 
         let material = state.materials.get_handle(&mut state.kernel, &engine::pbr_material::Parameters {
-            enable_diffuse_texture: bmr.base_color_texture().is_some(),
+            enable_base_color_texture: base_color_texture.is_some(),
         });
         let material_uniform_buffer = state.kernel.create_buffer()
-            .size(engine::pbr_material::MaterialUniforms::std140_size_static() as u64)
-            .data(engine::pbr_material::MaterialUniforms {
+            .data(&engine::pbr_material::MaterialUniforms {
                 base_color: LinearRgba::from_array(bmr.base_color_factor()),
                 metallic: bmr.metallic_factor(),
                 roughness: bmr.roughness_factor(),
-            }.as_std140().as_bytes())
+            }.as_std140())
             .create();
-        let layout = state.kernel.get_pipeline_bind_group_layouts(state.materials.get(material).pipeline)[2];
+        let pipeline_data = state.kernel.get_pipeline_data(state.materials.get(material).pipeline)
+            .unwrap();
+        let layout = pipeline_data.bind_group_layouts[2];
+
         let mut bind_group = state.kernel.create_bind_group()
+            .label(format!("GLTF Material{} bind group", gltf_material.name().map(|n| format!(" '{n}'")).unwrap_or_default()))
             .layout(layout)
             .entry(0, material_uniform_buffer);
-        if let Some(diffuse_texture) = diffuse_texture {
-            bind_group = bind_group.entry(1, diffuse_texture).sampler(2);
+        if let Some(base_color_texture) = base_color_texture {
+            bind_group = bind_group.entry(1, base_color_texture).sampler(2);
         }
         let bind_group = bind_group.create();
         let instance = engine::MaterialInstance { material, bind_group };
@@ -268,26 +276,17 @@ impl Application {
         material_instance: engine::MaterialInstance,
         batching_mesh: &BatchingStaticMesh,
     ) {
-        let positions_bytes = bytemuck::cast_slice::<_, u8>(batching_mesh.positions.as_slice());
-        let texcoords_bytes = bytemuck::cast_slice::<_, u8>(batching_mesh.texcoords.as_slice());
-        let normals_bytes = bytemuck::cast_slice::<_, u8>(batching_mesh.normals.as_slice());
-        let indices_bytes = bytemuck::cast_slice::<_, u8>(batching_mesh.indices.as_slice());
-
         let positions_buffer = state.kernel.create_buffer()
-            .size(positions_bytes.len().try_into().expect("no overflow"))
-            .data(&positions_bytes)
+            .slice(&batching_mesh.positions)
             .create();
         let texcoords_buffer = state.kernel.create_buffer()
-            .size(texcoords_bytes.len().try_into().expect("no overflow"))
-            .data(&texcoords_bytes)
+            .slice(&batching_mesh.texcoords)
             .create();
         let normals_buffer = state.kernel.create_buffer()
-            .size(normals_bytes.len().try_into().expect("no overflow"))
-            .data(&normals_bytes)
+            .slice(&batching_mesh.normals)
             .create();
         let index_buffer = state.kernel.create_buffer()
-            .size(indices_bytes.len().try_into().expect("no overflow"))
-            .data(&indices_bytes)
+            .slice(&batching_mesh.indices)
             .create();
 
         state.insert_static_mesh(engine::StaticMesh {

@@ -125,7 +125,7 @@ struct MaterialUniforms {
 
 @group(2) @binding(0)
 var<uniform> material_uniforms: MaterialUniforms;
-//! if ENABLE_DIFFUSE_TEXTURE
+//! if ENABLE_BASE_COLOR_TEXTURE
     @group(2) @binding(1)
     var t_diffuse: texture_2d<f32>;
     @group(2) @binding(2)
@@ -169,7 +169,7 @@ struct FragmentOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOutput {
     let normal = normalize(in.world_normal);
-    //! if ENABLE_DIFFUSE_TEXTURE
+    //! if ENABLE_BASE_COLOR_TEXTURE
         var albedo = textureSample(t_diffuse, s_diffuse, in.texcoords);
     //! else
         var albedo = material_uniforms.base_color;

@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use utils::{ default, handle_map };
 use pgk::{
     color::{ Srgb, Srgba },
@@ -7,7 +9,6 @@ use pgk::{
 use crate::*;
 
 use glam::{ Affine3A, Mat4, Vec3 };
-use derive_more::{ From, Into };
 
 #[derive(Debug, Clone, Copy)]
 pub struct Camera {
@@ -43,12 +44,11 @@ impl StaticMesh {
 }
 
 #[derive(Debug)]
-pub(super) struct StaticMeshData {
+pub struct StaticMeshData {
     pub mesh: StaticMesh,
     pub object_bind_group: BindGroupHandle,
 }
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Into, From)]
-pub struct StaticMeshHandle(handle_map::Handle<StaticMeshData>);
+pub type StaticMeshHandle = handle_map::Handle<StaticMeshData>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct DirectionalLight {
@@ -58,11 +58,10 @@ pub struct DirectionalLight {
 }
 
 #[derive(Debug)]
-pub(super) struct DirectionalLightData {
+pub struct DirectionalLightData {
     pub directional_light: DirectionalLight,
 }
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Into, From)]
-pub struct DirectionalLightHandle(handle_map::Handle<DirectionalLightData>);
+pub type DirectionalLightHandle = handle_map::Handle<DirectionalLightData>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SpotLight {
@@ -75,52 +74,63 @@ pub struct SpotLight {
 }
 
 #[derive(Debug)]
-pub(super) struct SpotLightData {
+pub struct SpotLightData {
     pub spot_light: SpotLight,
 }
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Into, From)]
-pub struct SpotLightHandle(handle_map::Handle<SpotLightData>);
+pub type SpotLightHandle = handle_map::Handle<SpotLightData>;
+
+// Basically the readonly (for users) parts of the EngineState,
+// separated beacause the readonly crate prevents destructuring and partial borrows
+// of the struct for users but this is the indented usage of EngineState
+#[derive(Default, Debug)]
+#[utils::readonly::make]
+pub struct EngineStateResources {
+    pub static_meshes_map: handle_map::HandleMap<StaticMeshData>,
+    pub directional_lights_map: handle_map::HandleMap<DirectionalLightData>,
+    pub spot_lights_map: handle_map::HandleMap<SpotLightData>,
+
+    pub world_bind_group_layout: BindGroupLayoutHandle,
+    pub object_bind_group_layout: BindGroupLayoutHandle,
+}
+
+impl EngineStateResources {
+    
+}
 
 #[derive(Debug)]
 pub struct EngineState {
     pub kernel: GraphicsKernel,
-
-    pub camera: Option<Camera>,
-    /// immutable other than for the public mut methods
-    pub(super) static_meshes: handle_map::HandleMap<StaticMeshData>,
-    pub(super) directional_lights: handle_map::HandleMap<DirectionalLightData>,
-    pub(super) spot_lights: handle_map::HandleMap<SpotLightData>,
-
-    pub(super) world_bind_group_layout: BindGroupLayoutHandle,
-    pub(super) object_bind_group_layout: BindGroupLayoutHandle,
-
     pub materials: MaterialsStore,
+    pub camera: Option<Camera>,
+
+    pub resources: EngineStateResources,
 }
 
 impl EngineState {
     pub fn new(mut kernel: GraphicsKernel) -> Self {
         let world_bind_group_layout = kernel.create_bind_group_layout()
+            .label("World Bind Group Layout")
             // world uniforms
             .entry().binding(0).uniform_buffer().add()
             // light array
             .entry().binding(1).uniform_buffer().add()
             .create();
         let object_bind_group_layout = kernel.create_bind_group_layout()
+            .label("Object Bind Group Layout")
             .entry().binding(0).uniform_buffer().add()
             .create();
 
         let mut this = Self {
             kernel,
-
-            camera: default(),
-            static_meshes: default(),
-            directional_lights: default(),
-            spot_lights: default(),
-
-            world_bind_group_layout,
-            object_bind_group_layout,
-
             materials: default(),
+            camera: default(),
+
+            resources: EngineStateResources {
+                world_bind_group_layout,
+                object_bind_group_layout,
+
+                ..default()
+            },
         };
 
         let factory = pbr_material::create_factory(&mut this);
@@ -132,15 +142,15 @@ impl EngineState {
     }
 
     pub fn static_meshes(&self) -> impl Iterator<Item = (StaticMeshHandle, &StaticMesh)> + ExactSizeIterator {
-        self.static_meshes.iter().map(|(handle, data)| (handle.into(), &data.mesh))
+        self.resources.static_meshes_map.iter().map(|(handle, data)| (handle.into(), &data.mesh))
     }
 
     pub fn directional_lights(&self) -> impl Iterator<Item = (DirectionalLightHandle, &DirectionalLight)> + ExactSizeIterator {
-        self.directional_lights.iter().map(|(handle, data)| (handle.into(), &data.directional_light))
+        self.resources.directional_lights_map.iter().map(|(handle, data)| (handle.into(), &data.directional_light))
     }
 
     pub fn spot_lights(&self) -> impl Iterator<Item = (SpotLightHandle, &SpotLight)> + ExactSizeIterator {
-        self.spot_lights.iter().map(|(handle, data)| (handle.into(), &data.spot_light))
+        self.resources.spot_lights_map.iter().map(|(handle, data)| (handle.into(), &data.spot_light))
     }
 
     pub fn insert_static_mesh(&mut self, mesh: StaticMesh) -> StaticMeshHandle {
@@ -148,19 +158,18 @@ impl EngineState {
 
         let transform: Mat4 = mesh.transform.into();
         let uniform_buffer = kernel.create_buffer()
-            .size(size_of::<Mat4>() as u64)
-            .data(bytemuck::bytes_of(&transform))
+            .data(&transform)
             .create();
 
         let object_bind_group = kernel.create_bind_group()
-            .layout(self.object_bind_group_layout)
+            .layout(self.resources.object_bind_group_layout)
             .entry(0, uniform_buffer)
             .create();
 
-        self.static_meshes.insert(StaticMeshData {
+        self.resources.static_meshes_map.insert(StaticMeshData {
             mesh,
             object_bind_group,
-        }).into()
+        })
     }
 
     pub fn remove_static_mesh(&mut self, handle: StaticMeshHandle) -> Option<StaticMesh> {
@@ -173,28 +182,36 @@ impl EngineState {
     pub fn insert_directional_light(
         &mut self, directional_light: DirectionalLight
     ) -> DirectionalLightHandle {
-        self.directional_lights.insert(DirectionalLightData {
+        self.resources.directional_lights_map.insert(DirectionalLightData {
             directional_light,
-        }).into()
+        })
     }
 
     pub fn remove_directional_light(
         &mut self, handle: DirectionalLightHandle,
     ) -> Option<DirectionalLight> {
-        self.directional_lights.remove(handle.into()).map(|data| data.directional_light)
+        self.resources.directional_lights_map.remove(handle.into()).map(|data| data.directional_light)
     }
 
     pub fn insert_spot_light(
         &mut self, spot_light: SpotLight
     ) -> SpotLightHandle {
-        self.spot_lights.insert(SpotLightData {
+        self.resources.spot_lights_map.insert(SpotLightData {
             spot_light,
-        }).into()
+        })
     }
 
     pub fn remove_spot_light(
         &mut self, handle: SpotLightHandle,
     ) -> Option<SpotLight> {
-        self.spot_lights.remove(handle.into()).map(|data| data.spot_light)
+        self.resources.spot_lights_map.remove(handle.into()).map(|data| data.spot_light)
+    }
+}
+
+impl Deref for EngineState {
+    type Target = EngineStateResources;
+
+    fn deref(&self) -> &Self::Target {
+        &self.resources
     }
 }

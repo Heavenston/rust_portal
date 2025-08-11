@@ -16,7 +16,7 @@ pub static MAX_LIGHTS: u32 = 8;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Parameters {
-    pub enable_diffuse_texture: bool,
+    pub enable_base_color_texture: bool,
 }
 impl MaterialParameters for Parameters { }
 
@@ -71,24 +71,26 @@ pub struct MaterialUniforms {
 pub(super) fn create_factory(
     engine_state: &mut EngineState,
 ) -> impl MaterialFactory<Parameters> {
-    let camera_bind_group_layout = engine_state.world_bind_group_layout;
-    let object_bind_group_layout = engine_state.object_bind_group_layout;
+    let camera_bind_group_layout = engine_state.resources.world_bind_group_layout;
+    let object_bind_group_layout = engine_state.resources.object_bind_group_layout;
 
     let factory = move |kernel: &mut GraphicsKernel, shader_source: &str, parameters: &Parameters| -> MaterialData {
         let mut material_bind_group_layout = kernel.create_bind_group_layout()
+            .label(format!("PBR Material bind group layout ({parameters:?})"))
             .entry().binding(0).uniform_buffer().add()
         ;
 
-        if parameters.enable_diffuse_texture {
+        if parameters.enable_base_color_texture {
             material_bind_group_layout = material_bind_group_layout
-                .entry().binding(1).texture().add();
-            material_bind_group_layout = material_bind_group_layout
-                .entry().binding(2).sampler().add();
+                .entry().binding(1).texture().add()
+                .entry().binding(2).sampler().add()
+            ;
         }
 
         let material_bind_group_layout = material_bind_group_layout.create();
     
         let pipeline = kernel.create_pipeline()
+            .label(format!("PBR Material pipeline ({parameters:?})"))
             .shader_source(shader_source)
             .bind_group_layouts([
                 camera_bind_group_layout,
@@ -96,7 +98,7 @@ pub(super) fn create_factory(
                 material_bind_group_layout,
             ])
             .shader_defs([
-                ("ENABLE_DIFFUSE_TEXTURE".to_string(), parameters.enable_diffuse_texture.into()),
+                ("ENABLE_BASE_COLOR_TEXTURE".to_string(), parameters.enable_base_color_texture.into()),
                 ("MAX_LIGHTS".to_string(), MAX_LIGHTS.into()),
             ])
             

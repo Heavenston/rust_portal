@@ -2,9 +2,13 @@
 
 #![expect(incomplete_features)]
 
+// pub use getset;
+pub use readonly;
+pub use itertools;
+
 pub mod handle_map;
 mod uid;
-pub use uid::*;
+pub use uid::Uid;
 
 use std::hash::{ DefaultHasher, Hasher, Hash };
 

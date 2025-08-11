@@ -1,5 +1,7 @@
+use std::borrow::Cow;
+
 use super::*;
-use utils::handle_map;
+use utils::{handle_map, itertools::{chain, Itertools}};
 
 use derive_more::From;
 
@@ -9,7 +11,7 @@ pub struct BindGroupData {
 }
 pub type BindGroupHandle = handle_map::Handle<BindGroupData>;
 
-#[derive(Debug, Clone, From)]
+#[derive(Debug, Clone, From, kinded::Kinded)]
 pub enum BindGroupResourceHandle {
     Buffer(BufferHandle),
     Texture(TextureHandle),
@@ -17,6 +19,17 @@ pub enum BindGroupResourceHandle {
 }
 
 impl BindGroupResourceHandle {
+    pub fn matches_type(&self, ty: BindingEntryType) -> bool {
+        match (self, ty) {
+            (Self::Buffer(..), BindingEntryType::UniformBuffer) => true,
+            (Self::Buffer(..), _) => false,
+            (Self::Texture(..), BindingEntryType::Texture) => true,
+            (Self::Texture(..), _) => false,
+            (Self::Sampler(..), BindingEntryType::FilteringSampler) => true,
+            (Self::Sampler(..), _) => false,
+        }
+    }
+
     pub(super) fn to_wgpu<'a>(&'a self, resources: &'a GraphicsKernelResources) -> Option<wgpu::BindingResource<'a>> {
         Some(match *self {
             Self::Buffer(handle) => {
@@ -42,12 +55,36 @@ pub fn create_bind_group(
     entries: Vec<(u32, BindGroupResourceHandle)>,
     #[builder(name = layout)]
     layout_handle: BindGroupLayoutHandle,
+    #[builder(into)]
+    label: Option<Cow<'_, str>>,
 ) -> BindGroupHandle {
-    let layout = &kernel.resources.bind_group_layouts.get(layout_handle)
-        .expect("Invalid layout handle given").bind_group_layout;
+    let layout_data = kernel.resources.bind_group_layouts.get(layout_handle)
+        .expect("Invalid layout handle given");
+    let layout = &layout_data.bind_group_layout;
+
+    if cfg!(feature = "checks") {
+        let layout_name = layout_data.label.as_ref()
+            .map(|name| Cow::Owned(format!(" '{name}'")))
+            .unwrap_or(Cow::Borrowed(" unnamed"));
+        chain(
+            layout_data.entries.iter()
+                .map(|entry| (entry.binding, (Some(entry.ty), None))),
+            entries.iter().map(|&(a, ref b)| (a, b))
+                .map(|(binding, handle)| (binding, (None, Some(handle))))
+        ).into_grouping_map().reduce(|(ty, handle), _binding, (nty, nhandle)| {
+            (ty.or(nty), handle.or(nhandle))
+        }).into_iter().for_each(|(binding, (ty, handle))| {
+            match (ty, handle) {
+                (None, None) => unreachable!(),
+                (Some(ty), Some(handle)) => assert!(handle.matches_type(ty), "Binding {binding} has a mismatched type with the bind group layout{layout_name}, binding type: {ty:?}, got handle type: {}", handle.kind()),
+                (None, Some(handle)) => panic!("Given binding {binding} that isn't present in the bind group layout{layout_name}, got handle type: {}", handle.kind()),
+                (Some(ty), None) => panic!("Required binding {binding} of type {ty:?} from bind group layout{layout_name} was not given"),
+            }
+        });
+    }
 
     let bind_group = kernel.device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("object_bind_group"),
+        label: label.as_deref(),
         layout,
         entries: &entries.iter().map(|&(binding, ref handle)| wgpu::BindGroupEntry {
             binding,
@@ -59,7 +96,7 @@ pub fn create_bind_group(
     kernel.resources.bind_groups.insert(BindGroupData { bind_group })
 }
 
-impl<'a, S> CreateBindGroupBuilder<'a, S>
+impl<'a, 'b, S> CreateBindGroupBuilder<'a, 'b, S>
     where S: create_bind_group_builder::State,
 {
     pub fn entry(mut self, binding: u32, handle: impl Into<BindGroupResourceHandle>) -> Self {

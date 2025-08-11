@@ -1,27 +1,25 @@
 mod application;
 pub use application::*;
 mod state;
+use glam::UVec2;
 pub use state::*;
 mod materials;
 pub use materials::*;
 pub mod pbr_material;
 pub mod hdr_tonemapper_material;
 
-use pgk::{ GraphicsKernel, BindGroupHandle, BufferHandle };
-use utils::{ default };
+use crate::renderers::{forward_renderer::ForwardRenderer, Renderer};
 
-use std::{ iter::empty, sync::Arc, time::Instant };
-use crevice::std140::AsStd140;
+use pgk::GraphicsKernel;
+
+use std::{ sync::Arc, time::Instant };
 
 struct StartedEngine {
     window: Arc<winit::window::Window>,
 
     state: EngineState,
     application: Box<dyn Application>,
-
-    world_uniform_buffer: BufferHandle,
-    lights_uniform_buffer: BufferHandle,
-    world_bind_group: BindGroupHandle,
+    renderer: Box<dyn Renderer>,
 
     // FIXME: Probably not the best way to do this
     last_update: Option<Instant>,
@@ -30,138 +28,13 @@ struct StartedEngine {
 impl StartedEngine {
     fn render(&mut self) {
         let state = &mut self.state;
+        let kernel = &mut state.kernel;
 
-        #[cfg(debug_assertions)]
-        state.materials.recreate_outdated(&mut state.kernel);
-
-        // 
-        // Write into world uniform buffer
-        // 
-        let Some(camera) = state.camera
-        else { eprintln!("NO CAMERA"); return; };
-
-        {
-            let mut lights: Vec<pbr_material::Std140Light> = empty()
-                .chain(
-                    state.directional_lights.iter().map(|(_, b)| b.directional_light)
-                    .map(|dl| pbr_material::Light {
-                        kind: pbr_material::LightKind::Directional,
-                        direction: dl.direction,
-                        color: dl.color.into(),
-                        intensity: dl.intensity,
-                        
-                        position: default(),
-                        inner_cone_angle: default(),
-                        outer_cone_angle: default(),
-                    })
-                    .map(|light| light.as_std140())
-                )
-                .chain(
-                    state.spot_lights.iter().map(|(_, b)| b.spot_light)
-                    .map(|spot_light| pbr_material::Light {
-                        kind: pbr_material::LightKind::Spot,
-                        position: spot_light.position,
-                        direction: spot_light.direction,
-                        color: spot_light.color.into(),
-                        intensity: spot_light.intensity,
-                        inner_cone_angle: spot_light.inner_cone_angle,
-                        outer_cone_angle: spot_light.outer_cone_angle,
-                    })
-                    .map(|light| light.as_std140())
-                )
-                .collect();
-            println!("Light count: {}/{}", lights.len(), pbr_material::MAX_LIGHTS);
-            lights.truncate(pbr_material::MAX_LIGHTS.try_into().unwrap());
-            
-            let view = camera.transform.inverse();
-            let proj = camera.projection;
-            let view_proj = proj * view;
-            let uniforms = pbr_material::WorldUniforms {
-                view_projection: view_proj,
-                camera_world_pos: camera.transform.translation.into(),
-                light_count: lights.len().try_into().unwrap(),
-            };
-            state.kernel.write_buffer(
-                self.world_uniform_buffer, 0,
-                bytemuck::bytes_of(&uniforms.as_std140()),
-            );
-            state.kernel.write_buffer(
-                self.lights_uniform_buffer, 0,
-                bytemuck::cast_slice(&lights),
-            );
+        if cfg!(debug_assertions) {
+            state.materials.recreate_outdated(kernel);
         }
 
-        let tonemap_material_handle = state.materials.get_handle(&mut state.kernel, &hdr_tonemapper_material::Parameters);
-        let tonemap_pipeline = state.materials.get(tonemap_material_handle).pipeline;
-        let tonemap_bind_group_layout = state.kernel.get_pipeline_bind_group_layouts(tonemap_pipeline)[0];
-        let render_target_handle = state.kernel.render_target();
-
-        let tonemap_bind_group = state.kernel.create_bind_group()
-            .layout(tonemap_bind_group_layout)
-            .entry(0, render_target_handle)
-            .sampler(1)
-            .create();
-
-        let mut render = state.kernel.render();
-        let present_texture_handle = render.using_present_texture();
-        let render_target_handle = render.using_render_target();
-        let depth_buffer_handle = render.using_depth_buffer();
-
-        let mut draw_call_number = 0;
-
-        // Object rendering pass
-        {
-            let mut render_pass = render.render_pass()
-                .color_attachment()
-                    .texture_view_handle(render_target_handle)
-                    .clear_color(camera.clear_color)
-                    .finish()
-                .depth_stencil_attachment()
-                    .texture_view_handle(depth_buffer_handle)
-                    .depth_ops(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.),
-                        store: wgpu::StoreOp::Discard,
-                    })
-                    .finish()
-                .build();
-
-            for (_, StaticMeshData { mesh, object_bind_group }) in state.static_meshes.iter() {
-                render_pass.set_pipeline(
-                    state.materials.get(mesh.material_instance.material).pipeline
-                );
-                render_pass.set_index_buffer(mesh.index_buffer);
-                render_pass.set_vertex_buffer(0, mesh.positions_buffer);
-                render_pass.set_vertex_buffer(1, mesh.texcoords_buffer);
-                render_pass.set_vertex_buffer(2, mesh.normals_buffer);
-                render_pass.set_bind_group(0, self.world_bind_group);
-                render_pass.set_bind_group(1, *object_bind_group);
-                render_pass.set_bind_group(2, mesh.material_instance.bind_group);
-                render_pass.draw_indexed(0..mesh.vertex_count, 0, 0..1);
-
-                draw_call_number += 1;
-            }
-
-            render_pass.finish();
-        }
-
-        // tonemapping pass
-        {
-            let mut render_pass = render.render_pass()
-                .color_attachment()
-                    .texture_view_handle(present_texture_handle)
-                    .finish()
-                .build();
-            render_pass.set_pipeline(tonemap_pipeline);
-            render_pass.set_bind_group(0, tonemap_bind_group);
-            render_pass.draw(0..3, 0..1);
-            render_pass.finish();
-        }
-
-        println!("{draw_call_number} draw calls");
-
-        render.finish();
-
-        state.kernel.delete_bind_group(tonemap_bind_group);
+        self.renderer.render(state);
     }
 
     fn pre_frame(&mut self) {
@@ -190,33 +63,23 @@ impl winit::application::ApplicationHandler for Engine {
             return;
         }
 
-        let window = event_loop.create_window(self.window_attributes.clone()).unwrap();
+        let window = event_loop.create_window(self.window_attributes.clone()
+            .with_visible(false)
+        ).unwrap();
         let window = Arc::new(window);
 
         let mut state = EngineState::new(GraphicsKernel::new(Arc::clone(&window)));
         let application = self.application_factory.create_application(&mut state);
+        let renderer = Box::new(ForwardRenderer::new(&mut state));
 
-        let world_uniform_buffer = state.kernel.create_buffer()
-            .size(pbr_material::WorldUniforms::std140_size_static().try_into().unwrap())
-            .create();
-        let lights_uniform_buffer = state.kernel.create_buffer()
-            .size(u64::try_from(pbr_material::Light::std140_size_static()).unwrap() * u64::from(pbr_material::MAX_LIGHTS))
-            .create();
-        let world_bind_group = state.kernel.create_bind_group()
-            .layout(state.world_bind_group_layout)
-            .entry(0, world_uniform_buffer)
-            .entry(1, lights_uniform_buffer)
-            .create();
+        window.set_visible(true);
 
         self.started = Some(StartedEngine {
             window,
 
             state,
             application,
-
-            world_uniform_buffer,
-            lights_uniform_buffer,
-            world_bind_group,
+            renderer,
 
             last_update: None,
         });
@@ -248,6 +111,10 @@ impl winit::application::ApplicationHandler for Engine {
         match event {
             We::Resized(physical_size) => {
                 started.state.kernel.resize(physical_size);
+                started.renderer.resize(&mut started.state, UVec2::new(
+                    physical_size.width,
+                    physical_size.height,
+                ));
             },
             We::CloseRequested => {
                 self.started = None;

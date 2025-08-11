@@ -15,6 +15,7 @@ pub(super) fn create_factory(
 ) -> impl MaterialFactory<Parameters> {
     let factory = |kernel: &mut GraphicsKernel, shader_source: &str, Parameters: &Parameters| {
         let bind_group_layout = kernel.create_bind_group_layout()
+            .label("HDR Tomemapper bind group layout")
             .entry().binding(0).texture().add()
             .entry().binding(1).sampler().add()
             .create()
@@ -23,6 +24,7 @@ pub(super) fn create_factory(
         let present_surface_format = kernel.present_surface_format();
     
         let pipeline = kernel.create_pipeline()
+            .label("HDR Tomemapper pipeline")
             .shader_source(shader_source)
             .color_target().format(present_surface_format).add()
             .bind_group_layouts([ bind_group_layout ])
