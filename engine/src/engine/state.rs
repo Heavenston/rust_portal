@@ -104,6 +104,8 @@ pub struct EngineState {
     pub camera: Option<Camera>,
 
     pub resources: EngineStateResources,
+
+    pub input: input::EngineInputState,
 }
 
 impl EngineState {
@@ -131,6 +133,8 @@ impl EngineState {
 
                 ..default()
             },
+
+            input: default(),
         };
 
         let factory = pbr_material::create_factory(&mut this);

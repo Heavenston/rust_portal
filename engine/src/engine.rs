@@ -1,14 +1,15 @@
 mod application;
 pub use application::*;
 mod state;
-use glam::UVec2;
+use glam::{ DVec2, UVec2 };
 pub use state::*;
 mod materials;
 pub use materials::*;
 pub mod pbr_material;
 pub mod hdr_tonemapper_material;
+pub mod input;
 
-use crate::renderers::{forward_renderer::ForwardRenderer, Renderer};
+use crate::{input::InputButton, renderers::{forward_renderer::ForwardRenderer, Renderer}};
 
 use pgk::GraphicsKernel;
 
@@ -44,6 +45,7 @@ impl StartedEngine {
         self.last_update = Some(Instant::now());
 
         self.application.pre_frame(&mut self.state, dt);
+        self.state.input.pre_frame_apply_changes(&self.window);
     }
 }
 
@@ -93,6 +95,45 @@ impl winit::application::ApplicationHandler for Engine {
         started.window.request_redraw();
     }
 
+    fn device_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        let Some(started) = &mut self.started
+        else {
+            event_loop.exit();
+            return;
+        };
+
+        use winit::event::{
+            DeviceEvent as De,
+            RawKeyEvent, MouseScrollDelta,
+        };
+        use winit::keyboard::{
+            PhysicalKey,
+        };
+        match event {
+            De::MouseMotion { delta: (dx, dy) } => {
+                started.state.input.register_mouse_motion(DVec2::new(dx, dy).as_vec2());
+            },
+            De::MouseWheel { delta: MouseScrollDelta::LineDelta(_, dy) } => {
+                if dy > 0. {
+                    started.state.input.register_tapped(InputButton::MouseWheelDown);
+                }
+                else if dy < 0. {
+                    started.state.input.register_tapped(InputButton::MouseWheelUp);
+                }
+            },
+            De::Key(RawKeyEvent { physical_key: PhysicalKey::Code(keycode), state }) => {
+                started.state.input.register_button_state(keycode, state.is_pressed());
+            },
+
+            _ => (),
+        }
+    }
+
     #[allow(unused_variables)]
     fn window_event(
         &mut self,
@@ -107,7 +148,10 @@ impl winit::application::ApplicationHandler for Engine {
         };
         debug_assert!(window_id == started.window.id());
 
-        use winit::event::WindowEvent as We;
+        use winit::event::{
+            WindowEvent as We,
+            ElementState,
+        };
         match event {
             We::Resized(physical_size) => {
                 started.state.kernel.resize(physical_size);
@@ -116,46 +160,38 @@ impl winit::application::ApplicationHandler for Engine {
                     physical_size.height,
                 ));
             },
-            We::CloseRequested => {
+            We::Destroyed | We::CloseRequested => {
                 self.started = None;
                 event_loop.exit();
             },
-            We::Destroyed => {
-                self.started = None;
-                event_loop.exit();
-            },
-            We::Focused(_) => {
-                
-            },
-            We::KeyboardInput { device_id, event, is_synthetic } => {
-                
-            },
-            We::ModifiersChanged(modifiers) => {
-                
-            },
-            We::Ime(ime) => {
-                
+            We::Focused(focused) => {
+                if focused {
+                    started.state.input.register_pressed(InputButton::WindowFocused);
+                }
+                else {
+                    started.state.input.register_released(InputButton::WindowFocused);
+                }
             },
             We::CursorMoved { device_id, position } => {
-                
+                started.state.input.register_mouse_pos(DVec2::new(
+                    position.x, position.y
+                ).as_vec2());
             },
             We::CursorEntered { device_id } => {
-                
+                started.state.input.register_pressed(InputButton::MouseEntered);
             },
             We::CursorLeft { device_id } => {
-                
-            },
-            We::MouseWheel { device_id, delta, phase } => {
-                
+                started.state.input.register_released(InputButton::MouseEntered);
             },
             We::MouseInput { device_id, state, button } => {
-                
-            },
-            We::AxisMotion { device_id, axis, value } => {
-                
-            },
-            We::Touch(touch) => {
-                
+                match state {
+                    ElementState::Pressed => {
+                        started.state.input.register_pressed(button);
+                    },
+                    ElementState::Released => {
+                        started.state.input.register_released(button);
+                    },
+                }
             },
             We::RedrawRequested => {
                 started.render();

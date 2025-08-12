@@ -1,15 +1,20 @@
 use std::{collections::HashMap, iter::repeat_n};
 
+use engine::input::{CursorGrabMode, InputButton, KeyCode};
 use pgk::color::{ LinearRgb, LinearRgba, Srgb, Srgba };
 use utils::*;
 
-use glam::{ Affine3A, Mat4, Vec2, Vec3 };
+use glam::{ Affine3A, Mat4, Vec2, Vec3, Vec3A };
 use itertools::Itertools;
 use crevice::std140::AsStd140 as _;
+use winit::event::MouseButton;
 
 static SCENE_BYTES: &[u8] = include_bytes!("../../resources/simple_scene.glb");
 // static SCENE_BYTES: &[u8] = include_bytes!("../../resources/just-sun.glb");
 // static SCENE_BYTES: &[u8] = include_bytes!("../../resources/outdoor_scene.glb");
+
+const MOVEMENT_SPEED: f32 = 8.;
+const LOOK_SPEED: f32 = 0.0008;
 
 #[derive(Debug, Clone, Copy)]
 struct Camera {
@@ -25,6 +30,17 @@ impl Camera {
             Mat4::perspective_rh(self.fov, aspect_ratio, self.znear, zfar)
         } else {
             Mat4::perspective_infinite_rh(self.fov, aspect_ratio, self.znear)
+        }
+    }
+}
+
+impl Default for Camera {
+    fn default() -> Self {
+        Self {
+            transform: default(),
+            fov: (90f32).to_radians(),
+            znear: 0.001,
+            zfar: None,
         }
     }
 }
@@ -46,13 +62,13 @@ struct GltfLoadingData<'a> {
 }
 
 pub struct Application {
-    camera: Option<Camera>,
+    camera: Camera,
 }
 
 impl Application {
     pub fn new(state: &mut engine::EngineState) -> Self {
         let mut this = Application {
-            camera: None,
+            camera: default(),
         };
         this.init(state);
         this
@@ -93,10 +109,6 @@ impl Application {
         println!("Loaded: {} static meshes", state.static_meshes().len());
         println!("Loaded: {} directional lights", state.directional_lights().len());
         println!("Loaded: {} spot lights", state.spot_lights().len());
-
-        if self.camera.is_none() {
-            panic!("No camera was added");
-        }
     }
 
     fn upload_texture(
@@ -320,16 +332,15 @@ impl Application {
             self.load_gltf_mesh(data, global_affine, mesh);
         }
 
-        if self.camera.is_none() &&
-            let Some(camera) = node.camera() &&
-            let gltf::camera::Projection::Perspective(perspective) = camera.projection()
+        if let Some(camera) = node.camera() &&
+           let gltf::camera::Projection::Perspective(perspective) = camera.projection()
         {
-            self.camera = Some(Camera {
+            self.camera = Camera {
                 transform: global_affine,
                 fov: perspective.yfov(),
                 znear: perspective.znear(),
                 zfar: perspective.zfar(),
-            });
+            };
         }
 
         for child_node in node.children() {
@@ -340,19 +351,70 @@ impl Application {
 
 impl engine::Application for Application {
     fn pre_frame(&mut self, state: &mut engine::EngineState, dt: f32) {
-        println!("Frame {dt}s (~{}fps)!", 1. / dt);
+        // println!("Frame {dt}s (~{}fps)!", 1. / dt);
+        
+        let forward_vector = Vec3A::from(-self.camera.transform.z_axis).normalize();
+        let left_vector = Vec3A::from(-self.camera.transform.x_axis).normalize();
+        let up_vector = Vec3A::from(self.camera.transform.y_axis).normalize();
 
-        if let Some(camera) = &mut self.camera {
-            // let rotation = Affine3A::from_rotation_y(dt);
-            // camera.transform = rotation * camera.transform;
-
-            state.camera = Some(engine::Camera {
-                transform: camera.transform,
-                projection: camera.get_projection(state.kernel.aspect_ration()),
-                clear_color: Srgba::BLACK,
-            });
+        let mut input_vector = Vec3A::ZERO;
+        if state.input.pressed(KeyCode::KeyW) {
+            input_vector += forward_vector;
+        }
+        if state.input.pressed(KeyCode::KeyS) {
+            input_vector -= forward_vector;
+        }
+        if state.input.pressed(KeyCode::KeyA) {
+            input_vector += left_vector;
+        }
+        if state.input.pressed(KeyCode::KeyD) {
+            input_vector -= left_vector;
+        }
+        if state.input.pressed(KeyCode::Space) {
+            input_vector += up_vector;
         }
 
+        input_vector = input_vector.normalize_or_zero() * dt * MOVEMENT_SPEED;
+        self.camera.transform.translation += input_vector;
+
+        if state.input.just_pressed(MouseButton::Left) {
+            if !state.input.cursor_grab_mode().captured {
+                state.input.set_cursor_grab_mode(CursorGrabMode::CAPTURED);
+            }
+            else {
+                state.input.set_cursor_grab_mode(CursorGrabMode::VISIBLE);
+            }
+        }
+
+        if state.input.cursor_grab_mode().captured {
+            let mouse_delta = state.input.mouse_motion() * -LOOK_SPEED;
+
+            let (scale, rotation, translation) = self.camera.transform.to_scale_rotation_translation();
+            let (ry, rx, rz) = rotation.to_euler(glam::EulerRot::YXZ);
+            let rotation = glam::Quat::from_euler(glam::EulerRot::YXZ,
+                ry + mouse_delta.x,
+                f32::clamp(rx + mouse_delta.y, -std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2),
+                rz,
+            );
+            self.camera.transform = Affine3A::from_scale_rotation_translation(scale, rotation, translation);
+
+            state.input.set_mouse_pos(
+                state.kernel.viewport_size().as_vec2() / 2.
+            );
+        }
+
+        if state.input.just_pressed(InputButton::MouseWheelDown) {
+            self.camera.fov *= 1.1;
+        }
+        if state.input.just_pressed(InputButton::MouseWheelUp) {
+            self.camera.fov /= 1.1;
+        }
+
+        state.camera = Some(engine::Camera {
+            transform: self.camera.transform,
+            projection: self.camera.get_projection(state.kernel.aspect_ration()),
+            clear_color: Srgba::BLACK,
+        });
     }
 }
 

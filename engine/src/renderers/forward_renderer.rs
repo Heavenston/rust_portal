@@ -85,7 +85,6 @@ impl ForwardRenderer {
                 .map(|light| light.as_std140())
             )
             .collect();
-        println!("Light count: {}/{}", lights.len(), pbr_material::MAX_LIGHTS);
         lights.truncate(pbr_material::MAX_LIGHTS.try_into().unwrap());
         
         let view = camera.transform.inverse();
@@ -170,8 +169,6 @@ impl Renderer for ForwardRenderer {
         let depth_buffer_handle = render.using_texture_view(self.depth_buffer_handle)
             .expect("valid handle");
 
-        let mut draw_call_number = 0;
-
         // Object rendering pass
         {
             let mut render_pass = render.render_pass()
@@ -201,8 +198,6 @@ impl Renderer for ForwardRenderer {
                 render_pass.set_bind_group(1, *object_bind_group);
                 render_pass.set_bind_group(2, mesh.material_instance.bind_group);
                 render_pass.draw_indexed(0..mesh.vertex_count, 0, 0..1);
-
-                draw_call_number += 1;
             }
 
             render_pass.finish();
@@ -220,8 +215,6 @@ impl Renderer for ForwardRenderer {
             render_pass.draw(0..3, 0..1);
             render_pass.finish();
         }
-
-        println!("{draw_call_number} draw calls");
 
         render.finish();
 
