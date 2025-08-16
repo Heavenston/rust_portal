@@ -355,7 +355,6 @@ impl engine::Application for Application {
         
         let forward_vector = Vec3A::from(-self.camera.transform.z_axis).normalize();
         let left_vector = Vec3A::from(-self.camera.transform.x_axis).normalize();
-        let up_vector = Vec3A::from(self.camera.transform.y_axis).normalize();
 
         let mut input_vector = Vec3A::ZERO;
         if state.input.pressed(KeyCode::KeyW) {
@@ -371,7 +370,7 @@ impl engine::Application for Application {
             input_vector -= left_vector;
         }
         if state.input.pressed(KeyCode::Space) {
-            input_vector += up_vector;
+            input_vector += Vec3A::Y;
         }
 
         input_vector = input_vector.normalize_or_zero() * dt * MOVEMENT_SPEED;
