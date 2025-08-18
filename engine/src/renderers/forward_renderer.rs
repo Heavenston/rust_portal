@@ -1,20 +1,19 @@
 use super::Renderer;
 
 use crate::{
-    hdr_tonemapper_material, pbr_material, Camera, EngineState, MeshData
+    DEPTH_TEXTURE_FORMAT, RENDER_TARGET_FORMAT,
+    hdr_tonemapper_material, pbr_material, Camera, EngineState, MeshData,
 };
 
 use pgk::{
-    BindGroupHandle, BufferHandle, LoadOperations, LoadStoreOperations, StoreOperations, TextureFormat, TextureHandle
+    BindGroupHandle, BufferHandle, LoadOperations, LoadStoreOperations,
+    StoreOperations, TextureHandle
 };
 use utils::default;
 
 use std::{ iter::empty };
 use glam::UVec2;
 use crevice::std140::AsStd140 as _;
-
-pub static DEPTH_TEXTURE_FORMAT: TextureFormat = TextureFormat::Depth24PlusStencil8;
-pub static RENDER_TARGET_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 
 pub struct ForwardRenderer {
     depth_buffer_handle: TextureHandle,

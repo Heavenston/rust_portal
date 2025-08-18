@@ -18,9 +18,6 @@ use std::sync::Arc;
 use derive_more::{ From, TryInto, IsVariant };
 use glam::UVec2;
 
-pub static DEPTH_TEXTURE_FORMAT: TextureFormat = TextureFormat::Depth24PlusStencil8;
-pub static RENDER_TARGET_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
-
 #[derive(Debug, Clone, Copy, From, TryInto, IsVariant)]
 pub enum GraphicsResourceHandle {
     Buffer(BufferHandle),

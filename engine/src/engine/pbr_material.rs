@@ -1,10 +1,9 @@
 use crate::{
-    builtin_shaders, embedded_shader_factory_helper,
-    EngineState, MaterialData, MaterialFactory, MaterialParameters,
+    builtin_shaders, embedded_shader_factory_helper, EngineState, MaterialData, MaterialFactory, MaterialParameters, DEPTH_TEXTURE_FORMAT, RENDER_TARGET_FORMAT
 };
 use pgk::{
     color::{ LinearRgb, LinearRgba },
-    GraphicsKernel, RENDER_TARGET_FORMAT,
+    GraphicsKernel,
 };
 
 use std::time::SystemTime;
@@ -108,7 +107,7 @@ pub(super) fn create_factory(
             ])
             
             .color_target().format(RENDER_TARGET_FORMAT).add()
-            .depth_buffer(true)
+            .depth_stencil().format(DEPTH_TEXTURE_FORMAT).add()
 
             // Positions
             .vertex_buffer().shader_location(0).vec3().add()

@@ -40,8 +40,8 @@ impl Default for Camera {
         Self {
             transform: default(),
             fov: (90f32).to_radians(),
-            znear: 0.001,
-            zfar: None,
+            znear: 0.1,
+            zfar: Some(1000.),
         }
     }
 }

@@ -1,4 +1,5 @@
 use crevice::std140::AsStd140;
+use pgk::color::LinearRgb;
 use utils::{default, itertools::Itertools};
 
 use std::{ collections::HashMap, iter::{ repeat, repeat_n, zip } };
@@ -39,6 +40,8 @@ fn add_face_to_mesh(
     let last_index = positions_end as u32;
     let vertex_count = positions_end - positions_start;
 
+    assert!(vertex_count >= 3);
+
     let texture = face.texture();
     mesh.vertex_texcoords.extend(
         face.vertices()
@@ -54,9 +57,8 @@ fn add_face_to_mesh(
 
     // triangulation by triangle fan using the indices
     mesh.indices.extend(
-        zip(repeat(first_index),
-            (first_index + 1..last_index).tuple_windows::<(_, _)>())
-        .map(|(a, (b, c))| [a, b, c])
+        (first_index + 1..last_index).tuple_windows::<(_, _)>()
+        .map(|(b, c)| [c, b, first_index])
         .flatten()
     );
 }
@@ -87,7 +89,8 @@ pub fn create_bsp_meshes(state: &mut engine::EngineState, bsp: &vbsp::Bsp) -> Re
         let bind_group_layout = pipeline_data.bind_group_layouts[2];
         let material_buffer = state.kernel.create_buffer()
             .data(&engine::pbr_material::MaterialUniforms {
-                base_color: pgk::color::LinearRgba::new(1., 1., 1., 1.),
+                base_color: LinearRgb::from_array_u8(texture_info.debug_color())
+                    .with_alpha(1.),
                 metallic: 0.,
                 roughness: 1.,
             }.as_std140())

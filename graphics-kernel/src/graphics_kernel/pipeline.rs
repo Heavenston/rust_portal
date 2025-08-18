@@ -103,6 +103,68 @@ where PS: create_pipeline_builder_builder::State,
     parent
 }
 
+/// See [wgpu::CompareFunction]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+pub enum CompareFunction {
+    Never,
+    Less,
+    Equal,
+    LessEqual,
+    Greater,
+    NotEqual,
+    GreaterEqual,
+    Always,
+}
+
+impl From<CompareFunction> for wgpu::CompareFunction {
+    fn from(value: CompareFunction) -> Self {
+        match value {
+            CompareFunction::Never        => wgpu::CompareFunction::Never,
+            CompareFunction::Less         => wgpu::CompareFunction::Less,
+            CompareFunction::Equal        => wgpu::CompareFunction::Equal,
+            CompareFunction::LessEqual    => wgpu::CompareFunction::LessEqual,
+            CompareFunction::Greater      => wgpu::CompareFunction::Greater,
+            CompareFunction::NotEqual     => wgpu::CompareFunction::NotEqual,
+            CompareFunction::GreaterEqual => wgpu::CompareFunction::GreaterEqual,
+            CompareFunction::Always       => wgpu::CompareFunction::Always,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+pub struct DepthStencilState {
+    pub format: TextureFormat,
+    pub depth_write_enable: bool,
+    pub depth_compare: CompareFunction,
+}
+
+impl From<DepthStencilState> for wgpu::DepthStencilState {
+    fn from(state: DepthStencilState) -> Self {
+        wgpu::DepthStencilState {
+            format: state.format.into(),
+            depth_write_enabled: state.depth_write_enable,
+            depth_compare: state.depth_compare.into(),
+            stencil: default(),
+            bias: default(),
+        }
+    }
+}
+
+#[bon::builder(finish_fn = add)]
+pub fn add_depth_stencil_state<'f1, 'f2, 'f3, PS>(
+    #[builder(start_fn)]
+    parent: CreatePipelineBuilderBuilder<'f1, 'f2, 'f3, PS>,
+    format: TextureFormat,
+    #[builder(default = true)]
+    depth_write_enable: bool,
+    #[builder(default = CompareFunction::LessEqual)]
+    depth_compare: CompareFunction,
+) -> CreatePipelineBuilderBuilder<'f1, 'f2, 'f3, create_pipeline_builder_builder::SetDepthStencilState<PS>>
+where PS: create_pipeline_builder_builder::State,
+      PS::DepthStencilState: create_pipeline_builder_builder::IsUnset {
+    parent.with_depth_stencil_state(DepthStencilState { format, depth_write_enable, depth_compare })
+}
+
 #[bon::builder(finish_fn = create)]
 pub fn create_pipeline_builder(
     #[builder(start_fn)]
@@ -111,8 +173,8 @@ pub fn create_pipeline_builder(
     vertex_buffers: Vec<VertexBufferBindingData>,
     #[builder(field)]
     color_targets: Vec<Option<wgpu::ColorTargetState>>,
-    #[builder(default = false)]
-    depth_buffer: bool,
+    #[builder(setters(name = with_depth_stencil_state))]
+    depth_stencil_state: Option<DepthStencilState>,
     #[builder(into)]
     bind_group_layouts: Vec<BindGroupLayoutHandle>,
     shader_source: &str,
@@ -203,13 +265,7 @@ pub fn create_pipeline_builder(
             polygon_mode: wgpu::PolygonMode::Fill,
             ..default()
         },
-        depth_stencil: depth_buffer.then_some(wgpu::DepthStencilState {
-            format: DEPTH_TEXTURE_FORMAT.into(),
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::LessEqual,
-            stencil: default(),
-            bias: default(),
-        }),
+        depth_stencil: depth_stencil_state.map(Into::into),
         multisample: default(),
         multiview: None,
         cache: None,
@@ -243,5 +299,14 @@ impl<'f1, 'f2, 'f3, S> CreatePipelineBuilderBuilder<'f1, 'f2, 'f3, S>
         let vals = vals.into();
         self.fragment_pipleline_overrides(vals.clone())
             .vertex_pipleline_overrides(vals.clone())
+    }
+}
+
+impl<'f1, 'f2, 'f3, S> CreatePipelineBuilderBuilder<'f1, 'f2, 'f3, S>
+where S: create_pipeline_builder_builder::State,
+      S::DepthStencilState: create_pipeline_builder_builder::IsUnset,
+{
+    pub fn depth_stencil(self) -> AddDepthStencilStateBuilder<'f1, 'f2, 'f3, S> {
+        add_depth_stencil_state(self)
     }
 }

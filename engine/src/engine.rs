@@ -1,7 +1,6 @@
 mod application;
 pub use application::*;
 mod state;
-use glam::{ DVec2, UVec2 };
 pub use state::*;
 mod materials;
 pub use materials::*;
@@ -14,6 +13,10 @@ use crate::{input::InputButton, renderers::{forward_renderer::ForwardRenderer, R
 use pgk::GraphicsKernel;
 
 use std::{ sync::Arc, time::Instant };
+use glam::{ DVec2, UVec2 };
+
+pub static DEPTH_TEXTURE_FORMAT: pgk::TextureFormat = pgk::TextureFormat::Depth24PlusStencil8;
+pub static RENDER_TARGET_FORMAT: pgk::TextureFormat = pgk::TextureFormat::Rgba16Float;
 
 struct StartedEngine {
     window: Arc<winit::window::Window>,

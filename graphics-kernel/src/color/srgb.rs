@@ -27,6 +27,14 @@ impl Srgb {
     pub fn from_array(array: [f32; 3]) -> Self {
         array.into()
     }
+
+    pub fn from_array_u8(array: [u8; 3]) -> Self {
+        array.into()
+    }
+
+    pub fn with_alpha(self, a: f32) -> Srgba {
+        Srgba { r: self.r, g: self.g, b: self.b, a }
+    }
 }
 
 impl From<Srgb> for [f32; 3] {
@@ -38,6 +46,16 @@ impl From<Srgb> for [f32; 3] {
 impl From<[f32; 3]> for Srgb {
     fn from(value: [f32; 3]) -> Self {
         bytemuck::cast(value)
+    }
+}
+
+impl From<[u8; 3]> for Srgb {
+    fn from([r, g, b]: [u8; 3]) -> Self {
+        Self {
+            r: r as f32 / 255.,
+            g: g as f32 / 255.,
+            b: b as f32 / 255.,
+        }
     }
 }
 
