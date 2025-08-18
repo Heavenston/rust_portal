@@ -14,3 +14,9 @@ crevice = { version = "0.18.0", features = ["glam"] }
 glam = { version = "0.30.4", features = ["bytemuck"] }
 gltf = { version = "1.4.1", features = ["KHR_lights_punctual"] }
 winit = "0.30.11"
+rapier3d = "0.28.0"
+
+vmdl = "0.2.0"
+vtf = "0.3.1"
+vbsp = "0.9.1"
+vtkio = "0.6.3"

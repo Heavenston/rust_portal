@@ -1,7 +1,7 @@
 use super::Renderer;
 
 use crate::{
-    hdr_tonemapper_material, pbr_material, Camera, EngineState, StaticMeshData
+    hdr_tonemapper_material, pbr_material, Camera, EngineState, MeshData
 };
 
 use pgk::{
@@ -186,7 +186,7 @@ impl Renderer for ForwardRenderer {
                     .finish()
                 .build();
 
-            for (_, StaticMeshData { mesh, object_bind_group }) in state.resources.static_meshes_map.iter() {
+            for (_, MeshData { mesh, object_bind_group, uniform_buffer: _ }) in state.resources.meshes_map.iter() {
                 render_pass.set_pipeline(
                     state.materials.get(mesh.material_instance.material).pipeline
                 );

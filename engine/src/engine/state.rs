@@ -1,5 +1,6 @@
 use std::ops::Deref;
 
+use crevice::std140::AsStd140;
 use utils::{ default, handle_map };
 use pgk::{
     color::{ Srgb, Srgba },
@@ -19,7 +20,7 @@ pub struct Camera {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct StaticMesh {
+pub struct Mesh {
     pub transform: Affine3A,
     /// list of vec3
     pub positions_buffer: BufferHandle,
@@ -35,20 +36,22 @@ pub struct StaticMesh {
     pub material_instance: MaterialInstance,
 }
 
-impl StaticMesh {
+impl Mesh {
     pub fn delete_buffers(&self, kernel: &mut GraphicsKernel) {
         kernel.delete_buffer(self.positions_buffer);
         kernel.delete_buffer(self.texcoords_buffer);
+        kernel.delete_buffer(self.normals_buffer);
         kernel.delete_buffer(self.index_buffer);
     }
 }
 
 #[derive(Debug)]
-pub struct StaticMeshData {
-    pub mesh: StaticMesh,
+pub struct MeshData {
+    pub mesh: Mesh,
     pub object_bind_group: BindGroupHandle,
+    pub uniform_buffer: BufferHandle,
 }
-pub type StaticMeshHandle = handle_map::Handle<StaticMeshData>;
+pub type MeshHandle = handle_map::Handle<MeshData>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct DirectionalLight {
@@ -85,7 +88,7 @@ pub type SpotLightHandle = handle_map::Handle<SpotLightData>;
 #[derive(Default, Debug)]
 #[utils::readonly::make]
 pub struct EngineStateResources {
-    pub static_meshes_map: handle_map::HandleMap<StaticMeshData>,
+    pub meshes_map: handle_map::HandleMap<MeshData>,
     pub directional_lights_map: handle_map::HandleMap<DirectionalLightData>,
     pub spot_lights_map: handle_map::HandleMap<SpotLightData>,
 
@@ -145,8 +148,8 @@ impl EngineState {
         this
     }
 
-    pub fn static_meshes(&self) -> impl Iterator<Item = (StaticMeshHandle, &StaticMesh)> + ExactSizeIterator {
-        self.resources.static_meshes_map.iter().map(|(handle, data)| (handle.into(), &data.mesh))
+    pub fn meshes(&self) -> impl Iterator<Item = (MeshHandle, &Mesh)> + ExactSizeIterator {
+        self.resources.meshes_map.iter().map(|(handle, data)| (handle.into(), &data.mesh))
     }
 
     pub fn directional_lights(&self) -> impl Iterator<Item = (DirectionalLightHandle, &DirectionalLight)> + ExactSizeIterator {
@@ -157,12 +160,13 @@ impl EngineState {
         self.resources.spot_lights_map.iter().map(|(handle, data)| (handle.into(), &data.spot_light))
     }
 
-    pub fn insert_static_mesh(&mut self, mesh: StaticMesh) -> StaticMeshHandle {
+    pub fn insert_mesh(&mut self, mesh: Mesh) -> MeshHandle {
         let kernel = &mut self.kernel;
 
-        let transform: Mat4 = mesh.transform.into();
         let uniform_buffer = kernel.create_buffer()
-            .data(&transform)
+            .data(&pbr_material::ObjectUniforms {
+                model: mesh.transform.into(),
+            }.as_std140())
             .create();
 
         let object_bind_group = kernel.create_bind_group()
@@ -170,17 +174,31 @@ impl EngineState {
             .entry(0, uniform_buffer)
             .create();
 
-        self.resources.static_meshes_map.insert(StaticMeshData {
+        self.resources.meshes_map.insert(MeshData {
             mesh,
+            uniform_buffer,
             object_bind_group,
         })
     }
 
-    pub fn remove_static_mesh(&mut self, handle: StaticMeshHandle) -> Option<StaticMesh> {
-        let _ = handle;
-        // This leads to leaks (the uniform buffer) which without reference counted handles i dont
-        // know how to fix (other than just included the uniform buffer in StaticMeshData)
-        unimplemented!()
+    pub fn remove_mesh(&mut self, handle: MeshHandle) -> Option<Mesh> {
+        let data = self.resources.meshes_map.remove(handle)?;
+
+        data.mesh.delete_buffers(&mut self.kernel);
+        self.kernel.delete_buffer(data.uniform_buffer);
+        self.kernel.delete_bind_group(data.object_bind_group);
+
+        Some(data.mesh)
+    }
+
+    /// Sets and writes the transform of a mesh to the GPU
+    pub fn set_mesh_transform(&mut self, handle: MeshHandle, transform: Affine3A) {
+        let data = self.resources.meshes_map.get_mut(handle).expect("Valid Mesh handle");
+
+        data.mesh.transform = transform;
+        self.kernel.write_buffer(data.uniform_buffer, 0, pbr_material::ObjectUniforms {
+            model: transform.into(),
+        }.as_std140().as_bytes());
     }
 
     pub fn insert_directional_light(

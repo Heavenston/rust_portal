@@ -62,6 +62,11 @@ pub struct WorldUniforms {
 }
 
 #[derive(AsStd140, Debug, Clone, Copy)]
+pub struct ObjectUniforms {
+    pub model: Mat4,
+}
+
+#[derive(AsStd140, Debug, Clone, Copy)]
 pub struct MaterialUniforms {
     pub base_color: LinearRgba,
     pub metallic: f32,

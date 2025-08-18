@@ -2,6 +2,7 @@
 
 mod application;
 use application::*;
+mod bsp_loader;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = winit::event_loop::EventLoop::new()?;

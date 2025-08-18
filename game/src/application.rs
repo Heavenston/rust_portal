@@ -1,19 +1,20 @@
-use std::{collections::HashMap, iter::repeat_n};
+use std::{ iter::empty, path::PathBuf, sync::LazyLock };
 
 use engine::input::{CursorGrabMode, InputButton, KeyCode};
-use pgk::color::{ LinearRgb, LinearRgba, Srgb, Srgba };
-use utils::*;
+use pgk::color::{ Srgba };
+use utils::{ itertools::Itertools as _, * };
 
-use glam::{ Affine3A, Mat4, Vec2, Vec3, Vec3A };
-use itertools::Itertools;
-use crevice::std140::AsStd140 as _;
+use glam::{ Affine3A, Mat4, Vec3, Vec3A };
 use winit::event::MouseButton;
 
-static SCENE_BYTES: &[u8] = include_bytes!("../../resources/simple_scene.glb");
-// static SCENE_BYTES: &[u8] = include_bytes!("../../resources/just-sun.glb");
-// static SCENE_BYTES: &[u8] = include_bytes!("../../resources/outdoor_scene.glb");
+use crate::bsp_loader::create_bsp_meshes;
 
-const MOVEMENT_SPEED: f32 = 8.;
+static PORTAL_GAME_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
+    std::env::var("PORTAL_GAME_PATH")
+        .expect("Could not find env variable PORTAL_GAME_PATH")
+        .into()
+});
+const MOVEMENT_SPEED: f32 = 100.;
 const LOOK_SPEED: f32 = 0.0008;
 
 #[derive(Debug, Clone, Copy)]
@@ -45,20 +46,15 @@ impl Default for Camera {
     }
 }
 
-#[derive(Default)]
-struct BatchingStaticMesh {
-    positions: Vec<Vec3>,
-    texcoords: Vec<Vec2>,
-    normals: Vec<Vec3>,
-    indices: Vec<u32>,
-}
+fn fan_triangulate(mut vertices: impl Iterator<Item = Vec3>) -> impl Iterator<Item = Vec3> {
+    let Some(first) = vertices.next()
+    else { return itertools::Either::Right(empty()) };
 
-struct GltfLoadingData<'a> {
-    state: &'a mut engine::EngineState,
-    gltf_buffers: Vec<gltf::buffer::Data>,
-    gltf_textures: Vec<gltf::image::Data>,
-    created_materials: HashMap<Option<usize>, engine::MaterialInstance>,
-    batched_static_meshes: HashMap<Option<usize>, BatchingStaticMesh>,
+    itertools::Either::Left(
+        vertices.tuple_windows()
+            .map(move |(a, b)| [first, a, b])
+            .flatten()
+    )
 }
 
 pub struct Application {
@@ -70,283 +66,148 @@ impl Application {
         let mut this = Application {
             camera: default(),
         };
-        this.init(state);
+        this.init(state).expect("Could not init");
         this
     }
 
-    fn init(&mut self, state: &mut engine::EngineState) {
+    fn init(&mut self, state: &mut engine::EngineState) -> Result<(), Box<dyn std::error::Error>> {
         println!("Loading scene...");
-        let (document, gltf_buffers, gltf_textures) = gltf::import_slice(SCENE_BYTES).expect("Could not load scene");
 
-        let mut data = GltfLoadingData {
-            state,
-            gltf_buffers,
-            gltf_textures,
+        let maps_path = PORTAL_GAME_PATH.join("portal/maps/");
+        let pak_path = PORTAL_GAME_PATH.join("portal/portal_pak_dir.vpk");
 
-            created_materials: default(),
-            batched_static_meshes: default(),
-        };
-        println!("Creating materials...");
-        for material in document.materials() {
-            self.load_gltf_material(&mut data, material);
-        }
-        println!("Creating meshes...");
-        for scene in document.scenes() {
-            for node in scene.nodes() {
-                self.load_gltf_node(&mut data, Mat4::default(), node);
-            }
-        }
-        for (material_index, batching_mesh) in &data.batched_static_meshes {
-            let Some(&material_instance) = data.created_materials.get(material_index)
-            else {
-                println!("Skipped a mesh with not material\n");
-                continue;
-            };
-            self.commit_batching_mesh(data.state, material_instance, batching_mesh);
-        }
-        println!("Done loading");
+        let map_path = maps_path.join("testchmb_a_04.bsp");
+        let bsp = vbsp::Bsp::read(&std::fs::read(&map_path).unwrap()).unwrap();
 
-        println!("Loaded: {} static meshes", state.static_meshes().len());
+        println!("Loading map '{}'", map_path.to_str().expect("Valid utf8"));
+        create_bsp_meshes(state, &bsp)?;
+
+        println!("Loaded: {} static meshes", state.meshes().len());
         println!("Loaded: {} directional lights", state.directional_lights().len());
         println!("Loaded: {} spot lights", state.spot_lights().len());
+
+        Ok(())
     }
 
-    fn upload_texture(
-        &mut self,
-        kernel: &mut pgk::GraphicsKernel,
-        image_data: &gltf::image::Data,
-    ) -> pgk::TextureHandle {
-        let texture_handle = kernel.create_texture()
-            .usages(pgk::TextureUsages {
-                copy_dst: true,
-                texture_binding: true,
-                ..default()
-            })
-            .width(image_data.width).height(image_data.height)
-            .format(pgk::TextureFormat::Rgba8UnormSrgb)
-            .create();
+    // fn load_model(&mut self, prefix: &str, state: &mut engine::EngineState, model: &vmdl::Model) -> Result<(), Box<dyn std::error::Error>> {
+    //     let positions_buffer: pgk::BufferHandle;
+    //     let texcoords_buffer: pgk::BufferHandle;
+    //     let normals_buffer: pgk::BufferHandle;
+    //     {
+    //         let (positions, texcoords, normals): (Vec<_>, Vec<_>, Vec<_>) = model.vertices().iter().map(|vertex| (
+    //             Vec3::new(vertex.position.x, vertex.position.y, vertex.position.z),
+    //             Vec2::from_array(vertex.texture_coordinates),
+    //             Vec3::new(vertex.normal.x, vertex.normal.y, vertex.normal.z),
+    //         )).collect();
 
-        let data = match image_data.format {
-            gltf::image::Format::R8G8B8 => {
-                image_data.pixels.iter().copied()
-                    .array_chunks::<3>()
-                    .map(|[r, g, b]| [r, g, b, 255])
-                    .flatten()
-                    .collect_vec()
-            },
-            gltf::image::Format::R8G8B8A8 => {
-                image_data.pixels.clone()
-            },
+    //         positions_buffer = state.kernel.create_buffer().slice(&positions).create();
+    //         texcoords_buffer = state.kernel.create_buffer().slice(&texcoords).create();
+    //         normals_buffer = state.kernel.create_buffer().slice(&normals).create();
+    //     }
 
-            _ => panic!("Unsupported image gltf format '{:?}'", image_data.format),
-        };
+    //     let material = state.materials.get_handle(&mut state.kernel, &engine::pbr_material::Parameters {
+    //         enable_base_color_texture: true,
+    //     });
+    //     let material_data = state.materials.get(material);
+    //     let pipeline_data = state.kernel.get_pipeline_data(material_data.pipeline).expect("valid");
+    //     let bind_group_layout = pipeline_data.bind_group_layouts[2];
 
-        kernel.write_texture(texture_handle, &data);
+    //     println!("{:#?}", model.textures());
 
-        texture_handle
-    }
+    //     for mesh in model.meshes() {
+    //         println!("model {} idx {}", mesh.model_name, mesh.material_index());
+    //         let texture = &model.textures()[mesh.material_index() as usize];
+    //         let color_texture_handle = self.load_vtf_texture(state, texture.search_paths.iter()
+    //         .map(|path| format!("{prefix}materials/{}{}", path.to_lowercase(), texture.name.to_lowercase())))?;
 
-    fn load_gltf_material(
-        &mut self,
-        data: &mut GltfLoadingData,
-        gltf_material: gltf::Material,
-    ) -> engine::MaterialInstance {
-        let state = &mut data.state;
+    //         let indices: Vec<u32> = mesh.vertex_strip_indices()
+    //             .flatten()
+    //             .map(|i| u32::try_from(i).expect("No overflow"))
+    //             .collect();
 
-        let material_index = gltf_material.index();
-        let bmr = gltf_material.pbr_metallic_roughness();
+    //         let index_buffer = state.kernel.create_buffer().slice(&indices).create();
 
-        if let Some(&instance) = data.created_materials.get(&material_index) {
-            return instance;
-        }
+    //         let material_uniform = state.kernel.create_buffer()
+    //             .data(&engine::pbr_material::MaterialUniforms {
+    //                 base_color: LinearRgba::new(1., 1., 1., 1.),
+    //                 metallic: 0.,
+    //                 roughness: 1.,
+    //             }.as_std140())
+    //             .create();
 
-        let base_color_texture = bmr.base_color_texture()
-            .map(|diffuse_texture| self.upload_texture(&mut state.kernel, &data.gltf_textures[diffuse_texture.texture().index()]));
+    //         let bind_group = state.kernel.create_bind_group()
+    //             .layout(bind_group_layout)
+    //             .entry(0, material_uniform)
+    //             .entry(1, color_texture_handle).sampler(2)
+    //             .create();
 
-        let material = state.materials.get_handle(&mut state.kernel, &engine::pbr_material::Parameters {
-            enable_base_color_texture: base_color_texture.is_some(),
-        });
-        let material_uniform_buffer = state.kernel.create_buffer()
-            .data(&engine::pbr_material::MaterialUniforms {
-                base_color: LinearRgba::from_array(bmr.base_color_factor()),
-                metallic: bmr.metallic_factor(),
-                roughness: bmr.roughness_factor(),
-            }.as_std140())
-            .create();
-        let pipeline_data = state.kernel.get_pipeline_data(state.materials.get(material).pipeline)
-            .unwrap();
-        let layout = pipeline_data.bind_group_layouts[2];
+    //         state.insert_mesh(engine::Mesh {
+    //             transform: Affine3A::from_mat4(Mat4::from_cols_array(model.root_transform().as_ref())),
+    //             positions_buffer, texcoords_buffer, normals_buffer, index_buffer,
+    //             vertex_count: indices.len().try_into().unwrap(),
+    //             material_instance: engine::MaterialInstance {
+    //                 material, bind_group,
+    //             },
+    //         });
+    //     }
 
-        let mut bind_group = state.kernel.create_bind_group()
-            .label(format!("GLTF Material{} bind group", gltf_material.name().map(|n| format!(" '{n}'")).unwrap_or_default()))
-            .layout(layout)
-            .entry(0, material_uniform_buffer);
-        if let Some(base_color_texture) = base_color_texture {
-            bind_group = bind_group.entry(1, base_color_texture).sampler(2);
-        }
-        let bind_group = bind_group.create();
-        let instance = engine::MaterialInstance { material, bind_group };
-        data.created_materials.insert(material_index, instance);
-        instance
-    }
+    //     Ok(())
+    // }
 
-    fn load_gltf_primitive(
-        &mut self,
-        data: &mut GltfLoadingData,
-        transform: Affine3A,
-        primitive: gltf::Primitive,
-    ) {
-        let reader = primitive.reader(|buffer| data.gltf_buffers.get(buffer.index()).map(|p| &**p));
-        let batched_static_mesh = data.batched_static_meshes.entry(primitive.material().index()).or_default();
+    // fn load_vtf_texture(
+    //     &mut self,
+    //     state: &mut engine::EngineState,
+    //     paths: impl IntoIterator<Item = String>,
+    // ) -> Result<pgk::TextureHandle, Box<dyn std::error::Error>> {
+    //     let mut bytes = None::<Vec<u8>>;
+    //     for path in paths {
+    //         print!("Reading {path} - ");
+    //         match std::fs::read(path) {
+    //             Ok(b) => {
+    //                 println!("Found");
+    //                 bytes = Some(b);
+    //                 break;
+    //             },
+    //             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+    //                 println!("Not Found");
+    //                 continue;
+    //             },
+    //             Err(e) => {
+    //                 println!("Error: {e}");
+    //                 return Err(e.into());
+    //             },
+    //         }
+    //     }
+    //     let Some(bytes) = bytes
+    //     else { return Err(format!("Could not find any valid paths").into()) };
+    //     let vtf = vtf::from_bytes(&bytes)?;
 
-        debug_assert_eq!(batched_static_mesh.positions.len(), batched_static_mesh.texcoords.len());
-        debug_assert_eq!(batched_static_mesh.texcoords.len(), batched_static_mesh.normals.len());
-        let indices_offset = batched_static_mesh.positions.len() as u32;
+    //     println!("{} of {}x{}", vtf.highres_image.format, vtf.highres_image.width, vtf.highres_image.height);
 
-        let vertex_count = reader.read_positions().unwrap().count();
+    //     let rgba8_data = match vtf.highres_image.format {
+    //         // the `vtf` lib seems to break this conversion somehow
+    //         vtf::ImageFormat::Bgr888 => vtf.highres_image.get_frame(0)?.iter().copied()
+    //             .array_chunks()
+    //             .flat_map(|[b, g, r]| [r, g, b, 255])
+    //             .collect(),
+    //         _ => vtf.highres_image.decode(0)?.into_rgba8().into_vec(),
+    //     };
 
-        batched_static_mesh.positions.extend(
-            reader.read_positions().expect("Mesh without positions?")
-            .map(Vec3::from_array)
-            .map(|point| transform.transform_point3(point))
-        );
-        if let Some(tex_coords) = reader.read_tex_coords(0) {
-            batched_static_mesh.texcoords.extend(
-                tex_coords.into_f32().map(Vec2::from_array)
-            );
-        }
-        else {
-            batched_static_mesh.texcoords.extend(
-                repeat_n(Vec2::ZERO, vertex_count)
-            );
-        }
-        batched_static_mesh.normals.extend(
-            reader.read_normals().expect("Mesh without normals?")
-            .map(Vec3::from_array)
-            .map(|point| transform.transform_vector3(point))
-        );
-        batched_static_mesh.indices.extend(
-            reader.read_indices().expect("Mesh without indices?")
-            .into_u32()
-            .map(|idx| idx + indices_offset)
-        );
-    }
+    //     let texture_handle = state.kernel.create_texture()
+    //         .width(vtf.highres_image.width.into())
+    //         .height(vtf.highres_image.height.into())
+    //         .usages(pgk::TextureUsages {
+    //             copy_dst: true,
+    //             texture_binding: true,
+    //             ..default()
+    //         })
+    //         .format(pgk::TextureFormat::Rgba8UnormSrgb)
+    //         .create()
+    //     ;
+    //     state.kernel.write_texture(texture_handle, &rgba8_data);
 
-    fn load_gltf_mesh(
-        &mut self,
-        data: &mut GltfLoadingData,
-        transform: Affine3A,
-        mesh: gltf::Mesh,
-    ) {
-        for primitive in mesh.primitives() {
-            self.load_gltf_primitive(data, transform, primitive);
-        }
-    }
-
-    fn load_gltf_light(
-        &mut self,
-        data: &mut GltfLoadingData,
-        transform: Affine3A,
-        light: gltf::khr_lights_punctual::Light,
-    ) {
-        let position: Vec3 = transform.translation.into();
-        let direction = transform.transform_vector3(Vec3::NEG_Z);
-        // FIXME: Should not be hard coded ?
-        // let intensity = 1.;
-        let intensity = light.intensity() * 0.001;
-        let color: Srgb = LinearRgb::from_array(light.color()).into();
-
-        use gltf::khr_lights_punctual::Kind;
-        match light.kind() {
-            Kind::Directional => {
-                data.state.insert_directional_light(engine::DirectionalLight {
-                    direction,
-                    intensity,
-                    color,
-                });
-            },
-            Kind::Point => {
-                panic!("Unsupported point light!");
-            },
-            Kind::Spot { inner_cone_angle, outer_cone_angle } => {
-                data.state.insert_spot_light(engine::SpotLight {
-                    position,
-                    direction,
-                    intensity,
-                    color,
-                    inner_cone_angle,
-                    outer_cone_angle,
-                });
-            },
-        }
-
-    }
-
-    fn commit_batching_mesh(
-        &mut self,
-        state: &mut engine::EngineState,
-        material_instance: engine::MaterialInstance,
-        batching_mesh: &BatchingStaticMesh,
-    ) {
-        let positions_buffer = state.kernel.create_buffer()
-            .slice(&batching_mesh.positions)
-            .create();
-        let texcoords_buffer = state.kernel.create_buffer()
-            .slice(&batching_mesh.texcoords)
-            .create();
-        let normals_buffer = state.kernel.create_buffer()
-            .slice(&batching_mesh.normals)
-            .create();
-        let index_buffer = state.kernel.create_buffer()
-            .slice(&batching_mesh.indices)
-            .create();
-
-        state.insert_static_mesh(engine::StaticMesh {
-            transform: default(),
-            positions_buffer,
-            texcoords_buffer,
-            normals_buffer,
-            index_buffer,
-            vertex_count: batching_mesh.indices.len().try_into().expect("No overflow"),
-            material_instance,
-        }.into());
-    }
-
-    fn load_gltf_node(
-        &mut self,
-        data: &mut GltfLoadingData,
-        parent_transform: Mat4,
-        node: gltf::Node,
-    ) {
-        let local_transform = Mat4::from_cols_array(
-            &flatten_array::<f32, 4, 4>(node.transform().matrix())
-        );
-        let global_transform = parent_transform * local_transform;
-        let global_affine = Affine3A::from_mat4(global_transform);
-
-        if let Some(light) = node.light() {
-            self.load_gltf_light(data, global_affine, light);
-        }
-
-        if let Some(mesh) = node.mesh() {
-            self.load_gltf_mesh(data, global_affine, mesh);
-        }
-
-        if let Some(camera) = node.camera() &&
-           let gltf::camera::Projection::Perspective(perspective) = camera.projection()
-        {
-            self.camera = Camera {
-                transform: global_affine,
-                fov: perspective.yfov(),
-                znear: perspective.znear(),
-                zfar: perspective.zfar(),
-            };
-        }
-
-        for child_node in node.children() {
-            self.load_gltf_node(data, global_transform, child_node);
-        }
-    }
+    //     Ok(texture_handle)
+    // }
 }
 
 impl engine::Application for Application {
