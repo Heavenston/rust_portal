@@ -16,6 +16,7 @@ pub static MAX_LIGHTS: u32 = 8;
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Parameters {
     pub enable_base_color_texture: bool,
+    pub unlit: bool,
 }
 impl MaterialParameters for Parameters { }
 
@@ -104,6 +105,7 @@ pub(super) fn create_factory(
             .shader_defs([
                 ("ENABLE_BASE_COLOR_TEXTURE".to_string(), parameters.enable_base_color_texture.into()),
                 ("MAX_LIGHTS".to_string(), MAX_LIGHTS.into()),
+                ("UNLIT".to_string(), parameters.unlit.into()),
             ])
             
             .color_target().format(RENDER_TARGET_FORMAT).add()

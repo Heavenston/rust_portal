@@ -260,8 +260,7 @@ pub fn create_pipeline_builder(
             targets: &color_targets,
         }),
         primitive: wgpu::PrimitiveState {
-            // cull_mode: Some(wgpu::Face::Back),
-            cull_mode: None,
+            cull_mode: Some(wgpu::Face::Back),
             polygon_mode: wgpu::PolygonMode::Fill,
             ..default()
         },

@@ -7,14 +7,14 @@ use utils::{ itertools::Itertools as _, * };
 use glam::{ Affine3A, Mat4, Vec3, Vec3A };
 use winit::event::MouseButton;
 
-use crate::bsp_loader::create_bsp_meshes;
+use crate::{bsp_loader::{create_bsp_meshes, FROM_BSP_TRANSFORM}, vhv_parser::Vhv};
 
 static PORTAL_GAME_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
     std::env::var("PORTAL_GAME_PATH")
         .expect("Could not find env variable PORTAL_GAME_PATH")
         .into()
 });
-const MOVEMENT_SPEED: f32 = 100.;
+const MOVEMENT_SPEED: f32 = 150.;
 const LOOK_SPEED: f32 = 0.0008;
 
 #[derive(Debug, Clone, Copy)]
@@ -76,11 +76,57 @@ impl Application {
         let maps_path = PORTAL_GAME_PATH.join("portal/maps/");
         let pak_path = PORTAL_GAME_PATH.join("portal/portal_pak_dir.vpk");
 
-        let map_path = maps_path.join("testchmb_a_04.bsp");
+        println!("Reading vpk...");
+        let vpk = valve_pak::VPK::open(&pak_path)?;
+
+        println!("Reading bsp...");
+        let map_path = maps_path.join("testchmb_a_00.bsp");
         let bsp = vbsp::Bsp::read(&std::fs::read(&map_path).unwrap()).unwrap();
 
+        println!("{:?}", bsp.entities.iter().map(|entity| entity.prop("classname").unwrap_or_default()).unique().join(", "));
+        for entity in bsp.entities.iter() {
+            let classname = entity.prop("classname").unwrap_or_default();
+
+            match classname {
+                "info_player_start" => {
+                    let origin =
+                        entity.prop_parse::<vbsp::Vector>("origin")
+                        .expect("Present").expect("Valid");
+                    let origin = FROM_BSP_TRANSFORM.transform_point3a(Vec3A::new(origin.x, origin.y, origin.z));
+
+                    self.camera.transform.translation = origin;
+                    println!("Found player start at {origin}");
+                },
+                _ => (),
+            }
+        }
+
         println!("Loading map '{}'", map_path.to_str().expect("Valid utf8"));
-        create_bsp_meshes(state, &bsp)?;
+        create_bsp_meshes(state, &bsp, &vpk)?;
+
+        let vhv_bytes = bsp.pack.get("sp_13.vhv").unwrap().unwrap();
+        let vhv = Vhv::from_bytes(&vhv_bytes).expect("Could not parse vhv file");
+
+        println!("{:?}", vhv.header);
+        println!("{:#?}", vhv.meshes);
+
+        let vhv_bytes = bsp.pack.get("sp_22.vhv").unwrap().unwrap();
+        let vhv = Vhv::from_bytes(&vhv_bytes).expect("Could not parse vhv file");
+
+        println!("{:?}", vhv.header);
+        println!("{:#?}", vhv.meshes);
+
+        let vhv_bytes = bsp.pack.get("sp_24.vhv").unwrap().unwrap();
+        let vhv = Vhv::from_bytes(&vhv_bytes).expect("Could not parse vhv file");
+
+        println!("{:?}", vhv.header);
+        println!("{:#?}", vhv.meshes);
+
+        println!("{}",
+            bsp.pack.into_zip().into_inner().unwrap().file_names()
+            .filter(|l| !l.ends_with(".vmt") && !l.ends_with(".vtf"))
+            .join(",")
+        );
 
         println!("Loaded: {} static meshes", state.meshes().len());
         println!("Loaded: {} directional lights", state.directional_lights().len());
