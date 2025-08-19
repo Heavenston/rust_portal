@@ -1,4 +1,4 @@
-use utils::{ default, hash_value };
+use utils::prelude::*;
 use pgk::{ BindGroupHandle, GraphicsKernel, PipelineHandle };
 use crate::*;
 

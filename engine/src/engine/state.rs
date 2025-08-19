@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use crevice::std140::AsStd140;
-use utils::{ default, handle_map };
+use utils::prelude::*;
 use pgk::{
     color::{ Srgb, Srgba },
     BindGroupLayoutHandle,

@@ -1,4 +1,4 @@
-use utils::default;
+use utils::prelude::*;
 
 use std::collections::HashMap;
 use shader_preprocessor as sprep;

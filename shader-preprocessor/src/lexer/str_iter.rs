@@ -1,6 +1,6 @@
 use std::str::CharIndices;
 
-use utils::itertools::Itertools;
+use utils::prelude::*;
 
 #[derive(Debug, Clone)]
 pub struct StrCharIter<'a> {

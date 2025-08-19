@@ -1,7 +1,6 @@
 use std::{borrow::Cow, num::NonZero};
 
 use super::*;
-use utils::handle_map;
 
 #[derive(Debug)]
 pub struct BindGroupLayoutData {

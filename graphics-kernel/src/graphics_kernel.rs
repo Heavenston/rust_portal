@@ -11,7 +11,7 @@ pub use bind_group::*;
 mod pipeline;
 pub use pipeline::*;
 
-use utils::{ handle_map::HandleMap, * };
+use utils::prelude::*;
 
 use std::sync::Arc;
 

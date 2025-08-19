@@ -1,5 +1,4 @@
 use super::*;
-use utils::handle_map;
 
 #[derive(Debug)]
 pub struct BufferData {

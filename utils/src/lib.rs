@@ -2,7 +2,15 @@
 
 #![expect(incomplete_features)]
 
-// pub use getset;
+pub mod prelude {
+    pub use crate::{
+        Uid,
+        default, concat_arrays, flatten_array, hash_value,
+        itertools::Itertools as _,
+        readonly, handle_map::{ self, HandleMap },
+    };
+}
+
 pub use readonly;
 pub use itertools;
 

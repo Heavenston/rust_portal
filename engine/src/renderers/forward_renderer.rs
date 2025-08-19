@@ -9,7 +9,7 @@ use pgk::{
     BindGroupHandle, BufferHandle, LoadOperations, LoadStoreOperations,
     StoreOperations, TextureHandle
 };
-use utils::default;
+use utils::prelude::*;
 
 use std::{ iter::empty };
 use glam::UVec2;
