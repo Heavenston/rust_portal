@@ -1,42 +1,13 @@
 use std::ops::BitOr;
 
+mod vec_helper;
+pub use vec_helper::*;
+mod iterator;
+pub use iterator::*;
+
 use glam::BVec3;
 
-#[derive(Debug, Clone, Copy)]
-pub struct AxisInBitfieldIterator {
-    field: u32,
-    idx: usize,
-}
-
-impl Iterator for AxisInBitfieldIterator {
-    type Item = Axis;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if self.idx >= Axis::VARIANTS.len() {
-                return None;
-            }
-            let dir = Axis::VARIANTS[self.idx];
-            self.idx += 1;
-            if (self.field & dir.as_bit()) != 0 {
-                return Some(dir);
-            }
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let direction_bits = Axis::VARIANTS.into_iter()
-            .map(Axis::as_bit)
-            .sum::<u32>();
-        // only count the bits that are valid directions for accurate length
-        let size = u32::count_ones(direction_bits & self.field);
-        let size = usize::try_from(size).expect("no overflow");
-
-        (size, Some(size))
-    }
-}
-
-impl ExactSizeIterator for AxisInBitfieldIterator { }
+use crate::prelude::{AxisDirection, StrictSign};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Axis {
@@ -60,6 +31,16 @@ impl Axis {
         }
     }
 
+    pub fn from_idx(idx: usize) -> Self {
+        assert!(idx < 3);
+        match idx {
+            0 => Self::X,
+            1 => Self::Y,
+            2 => Self::Z,
+            _ => unreachable!(),
+        }
+    }
+
     pub fn as_bit(self) -> u32 {
         1u32 << self.idx()
     }
@@ -74,6 +55,10 @@ impl Axis {
 
     pub fn iter_in_bitfield(field: u32) -> AxisInBitfieldIterator {
         AxisInBitfieldIterator { field, idx: 0 }
+    }
+
+    pub fn with_sign(self, sign: StrictSign) -> AxisDirection {
+        AxisDirection::new(self, sign)
     }
 }
 

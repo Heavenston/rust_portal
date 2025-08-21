@@ -10,7 +10,9 @@ pub mod prelude {
         itertools::Itertools as _,
         readonly, handle_map::{ self, HandleMap },
         strict_sign::{ StrictSign, StrictlySigned },
-        sign::{ Sign, Signed }, axis::Axis, axis_direction::AxisDirection,
+        sign::{ Sign, Signed },
+        axis::{ Axis, AxisVecHelper },
+        axis_direction::AxisDirection,
     };
 }
 

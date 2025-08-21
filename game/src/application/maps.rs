@@ -14,6 +14,7 @@ pub enum MapCellMaterial {
     #[default]
     Metal,
     Concrete,
+    UVCheck,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,12 +29,6 @@ impl MapCell {
     pub const DEFAULT: MapCell = MapCell::Filled {
         materials: [MapCellMaterial::Metal; AxisDirection::VARIANT_COUNT],
     };
-
-    pub fn filled_with(material: MapCellMaterial) -> Self {
-        Self::Filled {
-            materials: std::array::from_fn(|_| material),
-        }
-    }
 }
 
 impl Default for MapCell {
@@ -99,6 +94,10 @@ pub struct Map {
 }
 
 impl Map {
+    pub fn has_cell(&self, pos: IVec3) -> bool {
+        self.chunks.contains_key(&chunk_of_cell(pos))
+    }
+
     pub fn get_cell(&self, pos: IVec3) -> &MapCell {
         let Some(chunk) = self.chunks.get(&chunk_of_cell(pos))
         else { return &MapCell::DEFAULT };
@@ -113,12 +112,18 @@ impl Map {
         chunk.cell_from_global_pos_mut(pos)
     }
 
-    /// Sets the given cell to air and then sets the wall on the given
-    /// direction to the given material (if the wall exists)
+    /// Sets the wall on the given direction to the given material
+    /// (if the wall exists)
     pub fn set_air_cell_wall(&mut self, pos: IVec3, wall: AxisDirection, material: MapCellMaterial) {
-        *self.get_cell_mut(pos) = MapCell::Air;
+        if !matches!(self.get_cell(pos), MapCell::Air) {
+            return;
+        }
 
-        let neighbor_cell = self.get_cell_mut(pos + wall.as_diff());
+        let neighbor_pos = pos + wall.as_ivec3();
+        if !self.has_cell(neighbor_pos) && material == MapCellMaterial::default() {
+            return;
+        }
+        let neighbor_cell = self.get_cell_mut(neighbor_pos);
 
         match neighbor_cell {
             // nothing to do here, the selected wall does not exist
@@ -150,6 +155,7 @@ impl Map {
     }
 
     pub fn clear(&mut self, from: IVec3, to: IVec3, wall_directions: u32, material: MapCellMaterial) {
+        self.fill(from, to, MapCell::Air);
         Self::iter_aabb(from, to, |pos| self.set_air_cell_walls(pos, wall_directions, material));
     }
 

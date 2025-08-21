@@ -7,8 +7,7 @@
 //! define ENABLE_OUTPUT_LINEAR_CONVERSION false
 
 override PI: f32 = 3.14159265359;
-// override AMBIENT_LIGHT: f32 = 0.1;
-override AMBIENT_LIGHT: f32 = 1.;
+override AMBIENT_LIGHT: f32 = 0.1;
 
 fn distributionGGX(normal_direction: vec3<f32>, halfway_direction: vec3<f32>, roughness_value: f32) -> f32 {
     let alpha = roughness_value * roughness_value;
@@ -186,7 +185,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 
     var total_radiance = vec3<f32>(0.);
     //! if UNLIT
-    total_radiance = vec3<f32>(1.);
+    total_radiance = albedo.xyz;
     //! else
     for (var light_i: u32 = 0; light_i < world_uniforms.light_count; light_i++) {
         let light = lights[light_i];

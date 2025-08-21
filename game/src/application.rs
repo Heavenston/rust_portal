@@ -1,8 +1,8 @@
 use engine::input::{CursorGrabMode, InputButton, KeyCode};
-use pgk::color::{ Srgb, Srgba };
+use pgk::color::{Srgb, Srgba};
 use utils::prelude::*;
 
-use glam::{ Affine3A, IVec3, Mat4, Vec3, Vec3A };
+use glam::{ Affine3A, IVec3, Mat4, UVec3, Vec3, Vec3A };
 use winit::event::MouseButton;
 
 mod maps;
@@ -95,13 +95,13 @@ impl Application {
             maps::MapCellMaterial::Concrete,
         );
         
-        default_map.mesh().upload(state);
+        default_map.mesh(None).upload(state);
 
-        // state.insert_point_light(engine::PointLight {
-        //     position: Vec3::ZERO,
-        //     intensity: 999.,
-        //     color: Srgb::WHITE,
-        // });
+        state.insert_point_light(engine::PointLight {
+            position: IVec3::new(width, height, width).as_vec3() / 2.,
+            intensity: 10.,
+            color: Srgb::WHITE,
+        });
 
         println!("Loaded: {} static meshes", state.meshes().len());
         println!("Loaded: {} directional lights", state.directional_lights().len());
@@ -171,6 +171,13 @@ impl engine::Application for Application {
         if state.input.just_pressed(InputButton::MouseWheelUp) {
             self.movement_speed *= MOVEMENT_SPEED_SCROLL_CHANGE;
             println!("Movement speed: {}", self.movement_speed);
+        }
+
+        if state.input.just_pressed(KeyCode::KeyP) {
+            let looking_at = self.camera.transform.transform_vector3(Vec3::NEG_Z);
+            let axis = looking_at.abs().max_axis();
+            let direction = axis.with_sign(looking_at[axis].strict_sign());
+            println!("Looking towards: {direction:?}");
         }
 
         state.camera = Some(engine::Camera {

@@ -6,6 +6,11 @@ use crate::Resources;
 
 use super::*;
 
+struct MeshCtx<'a> {
+    override_material: Option<MapMaterial>,
+    model: &'a mut MapModel,
+}
+
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MapMaterialPart {
     #[default]
@@ -25,7 +30,7 @@ impl From<AxisDirection> for MapMaterialPart {
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MapMaterial(MapCellMaterial, MapMaterialPart);
+pub struct MapMaterial(pub MapCellMaterial, pub MapMaterialPart);
 
 impl MapMaterial {
     fn from_cell_material(
@@ -35,23 +40,34 @@ impl MapMaterial {
     }
 
     fn upload(&self, state: &mut engine::EngineState) -> engine::MaterialInstance {
+        use MapCellMaterial::*;
+        use MapMaterialPart::*;
+
         let material_uniform_buffer = state.kernel.create_buffer()
             .data(&engine::pbr_material::MaterialUniforms {
                 base_color: LinearRgba::new(1., 1., 1., 1.),
-                metallic: 0.5,
-                roughness: 0.5,
+                metallic: match self.0 {
+                    Metal => 0.5,
+                    Concrete => 0.1,
+                    UVCheck => 0.01,
+                },
+                roughness: match self.0 {
+                    Metal => 0.8,
+                    Concrete => 0.8,
+                    UVCheck => 1.,
+                },
             }.as_std140())
             .create();
 
-        use MapCellMaterial::*;
-        use MapMaterialPart::*;
         let texture_path = match (self.0, self.1) {
             (Metal, Wall) => "portal_1/metal/metalwall048b.png",
             (Metal, Floor | Ceiling) => "portal_1/metal/metal_modular_floor001.png",
             (Concrete, Wall) => "portal_1/concrete/concrete_modular_wall001a.png",
             (Concrete, Floor) => "portal_1/concrete/concrete_modular_floor001a.png",
             (Concrete, Ceiling) => "portal_1/concrete/concrete_modular_ceiling001a.png",
+            (UVCheck, _) => "UV_checker_Map_byValle.png",
         };
+        println!("Loading texture '{texture_path}'...");
         let texture_file = Resources::get(texture_path).expect("File exists");
         let texture_data = &*texture_file.data;
         let texture_image = image::load_from_memory(&texture_data).expect("Could not decode image")
@@ -70,7 +86,7 @@ impl MapMaterial {
 
         let material = state.materials.get_handle(&mut state.kernel, &engine::pbr_material::Parameters {
             enable_base_color_texture: true,
-            unlit: false,
+            unlit: self.0 == UVCheck,
         });
         let material_data = state.materials.get(material);
         let pipeline_data = state.kernel.get_pipeline_data(material_data.pipeline)
@@ -104,7 +120,7 @@ impl MapMesh {
     fn create_plane(&mut self, pos: Vec3, size: Vec3, dir: AxisDirection) {
         let base_index = self.positions.len() as u32;
     
-        let normal = match dir {
+        match dir {
             AxisDirection::PosX => {
                 let x = pos.x + size.x;
                 self.positions.extend([
@@ -114,12 +130,11 @@ impl MapMesh {
                     Vec3::new(x, pos.y,          pos.z + size.z),
                 ]);
                 self.texcoords.extend([
-                    Vec2::new(0.,     0.),
-                    Vec2::new(0.,     size.y),
                     Vec2::new(size.z, size.y),
                     Vec2::new(size.z, 0.),
+                    Vec2::new(0.,     0.),
+                    Vec2::new(0.,     size.y),
                 ]);
-                Vec3::NEG_X
             },
             AxisDirection::NegX => {
                 let x = pos.x;
@@ -130,12 +145,11 @@ impl MapMesh {
                     Vec3::new(x, pos.y + size.y, pos.z + size.z),
                 ]);
                 self.texcoords.extend([
-                    Vec2::new(0.,     size.y),
                     Vec2::new(0.,     0.),
-                    Vec2::new(size.z, 0.),
+                    Vec2::new(0.,     size.y),
                     Vec2::new(size.z, size.y),
+                    Vec2::new(size.z, 0.),
                 ]);
-                Vec3::X
             },
             AxisDirection::PosY => {
                 let y = pos.y + size.y;
@@ -151,7 +165,6 @@ impl MapMesh {
                     Vec2::new(size.x, size.z),
                     Vec2::new(size.x, 0.    ),
                 ]);
-                Vec3::NEG_Y
             },
             AxisDirection::NegY => {
                 let y = pos.y;
@@ -167,7 +180,6 @@ impl MapMesh {
                     Vec2::new(size.x, size.z),
                     Vec2::new(0.,     size.z),
                 ]);
-                Vec3::Y
             },
             AxisDirection::PosZ => {
                 let z = pos.z + size.z;
@@ -178,12 +190,11 @@ impl MapMesh {
                     Vec3::new(pos.x,          pos.y + size.y, z),
                 ]);
                 self.texcoords.extend([
-                    Vec2::new(size.x, 0.),
-                    Vec2::new(0.,     0.),
                     Vec2::new(0.,     size.y),
                     Vec2::new(size.x, size.y),
+                    Vec2::new(size.x, 0.),
+                    Vec2::new(0.,     0.),
                 ]);
-                Vec3::NEG_Z
             },
             AxisDirection::NegZ => {
                 let z = pos.z;
@@ -194,23 +205,15 @@ impl MapMesh {
                     Vec3::new(pos.x,          pos.y,          z),
                 ]);
                 self.texcoords.extend([
-                    Vec2::new(size.x, size.y),
-                    Vec2::new(0.,     size.y),
-                    Vec2::new(0.,     0.),
                     Vec2::new(size.x, 0.),
+                    Vec2::new(0.,     0.),
+                    Vec2::new(0.,     size.y),
+                    Vec2::new(size.x, size.y),
                 ]);
-                Vec3::Z
             },
-        };
+        }
     
-        self.normals.extend([normal; 4]);
-    
-        // self.texcoords.extend([
-        //     Vec2::new(0.0,         0.0),
-        //     Vec2::new(tex_scale.x, 0.0),
-        //     Vec2::new(tex_scale.x, tex_scale.y),
-        //     Vec2::new(0.0,         tex_scale.y),
-        // ]);
+        self.normals.extend([dir.as_ivec3().as_vec3(); 4]);
     
         self.indices.extend([
             base_index, base_index + 1, base_index + 2,
@@ -265,56 +268,62 @@ impl MapModel {
         }
     }
 
-    pub fn upload(&self, state: &mut engine::EngineState) {
-        for mesh in &self.meshes {
-            mesh.upload(state);
-        }
+    pub fn upload(&self, state: &mut engine::EngineState) -> Vec<engine::MeshHandle> {
+        self.meshes.iter()
+            .map(|mesh| mesh.upload(state))
+            .collect()
     }
 }
 
 impl Map {
-    fn mesh_cell_direction(&self, cell_pos: IVec3, dir: AxisDirection, model: &mut MapModel) {
+    fn mesh_cell_direction(&self, ctx: &mut MeshCtx, cell_pos: IVec3, dir: AxisDirection) {
         let MapCell::Filled { materials } = self.get_cell(cell_pos)
         else { return };
 
-        let neighbor = self.get_cell(cell_pos + dir.as_diff());
+        let neighbor = self.get_cell(cell_pos + dir.as_ivec3());
         if !matches!(neighbor, MapCell::Air) {
             return;
         }
 
-        let material = materials[dir.idx()];
-        let mesh = model.for_material(MapMaterial::from_cell_material(material, dir));
+        let material = ctx.override_material
+            .unwrap_or_else(|| MapMaterial::from_cell_material(materials[dir.idx()], dir));
+        let mesh = ctx.model.for_material(material);
 
         mesh.create_plane(cell_pos.as_vec3(), Vec3::splat(1.), dir);
     }
 
-    fn mesh_cell(&self, cell_pos: IVec3, model: &mut MapModel) {
+    fn mesh_cell(&self, ctx: &mut MeshCtx, cell_pos: IVec3) {
         for dir in AxisDirection::VARIANTS {
-            self.mesh_cell_direction(cell_pos, dir, model);
+            self.mesh_cell_direction(ctx, cell_pos, dir);
         }
     }
 
-    fn mesh_chunk(&self, chunk_pos: IVec3, model: &mut MapModel) {
+    fn mesh_chunk(&self, ctx: &mut MeshCtx, chunk_pos: IVec3) {
         for dz in 0..CHUNK_SIZE.z {
             for dy in 0..CHUNK_SIZE.y {
                 for dx in 0..CHUNK_SIZE.x {
                     let dpos = UVec3::new(dx, dy, dz);
                     let cell_pos = chunk_pos * CHUNK_SIZE.as_ivec3() + dpos.as_ivec3();
-                    self.mesh_cell(cell_pos, model);
+                    self.mesh_cell(ctx, cell_pos);
                 }
             }
         }
     }
 
-    pub fn mesh(&self) -> MapModel {
+    pub fn mesh(&self, override_material: Option<MapMaterial>) -> MapModel {
         let mut model = MapModel::default();
 
+        let mut ctx = MeshCtx {
+            override_material,
+            model: &mut model,
+        };
+
         for &chunk_pos in self.chunks.keys() {
-            self.mesh_chunk(chunk_pos, &mut model);
+            self.mesh_chunk(&mut ctx, chunk_pos);
             for dir in AxisDirection::VARIANTS {
-                let neighbor_pos = chunk_pos + dir.as_diff();
+                let neighbor_pos = chunk_pos + dir.as_ivec3();
                 if !self.chunks.contains_key(&neighbor_pos) {
-                    self.mesh_chunk(neighbor_pos, &mut model);
+                    self.mesh_chunk(&mut ctx, neighbor_pos);
                 }
             }
         }

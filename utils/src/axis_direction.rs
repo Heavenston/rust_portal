@@ -102,7 +102,7 @@ impl AxisDirection {
         }
     }
 
-    pub fn as_diff(self) -> IVec3 {
+    pub fn as_ivec3(self) -> IVec3 {
         IVec3::from(self.axis().as_bvec3()) * i32::from(self.sign().as_i8())
     }
 
