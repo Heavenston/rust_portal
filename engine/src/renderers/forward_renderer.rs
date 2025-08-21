@@ -83,6 +83,20 @@ impl ForwardRenderer {
                 })
                 .map(|light| light.as_std140())
             )
+            .chain(
+                state.point_lights_map.iter().map(|(_, b)| b.point_light)
+                .map(|point_light| pbr_material::Light {
+                    kind: pbr_material::LightKind::Point,
+                    position: point_light.position,
+                    color: point_light.color.into(),
+                    intensity: point_light.intensity,
+
+                    direction: default(),
+                    inner_cone_angle: default(),
+                    outer_cone_angle: default(),
+                })
+                .map(|light| light.as_std140())
+            )
             .collect();
         lights.truncate(pbr_material::MAX_LIGHTS.try_into().unwrap());
         

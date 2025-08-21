@@ -1,7 +1,12 @@
 #![feature(iter_array_chunks)]
+#![feature(array_repeat)]
 
 mod application;
 use application::*;
+
+#[derive(rust_embed::Embed)]
+#[folder = "../resources"]
+pub struct Resources;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = winit::event_loop::EventLoop::new()?;

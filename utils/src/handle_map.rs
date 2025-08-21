@@ -17,11 +17,10 @@ mod map_id {
         }
     }
 }
-
-use std::{ collections::HashMap, marker::PhantomData, ops::{ Index, IndexMut } };
-
-use crate::*;
 use map_id::*;
+
+use crate::{ default, uid::Uid };
+use std::{ collections::HashMap, marker::PhantomData, ops::{ Index, IndexMut } };
 use derive_where::derive_where;
 
 #[derive_where(Default, Debug, Clone, Copy, Hash, PartialEq, Eq)]

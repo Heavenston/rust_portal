@@ -7,7 +7,8 @@
 //! define ENABLE_OUTPUT_LINEAR_CONVERSION false
 
 override PI: f32 = 3.14159265359;
-override AMBIENT_LIGHT: f32 = 0.1;
+// override AMBIENT_LIGHT: f32 = 0.1;
+override AMBIENT_LIGHT: f32 = 1.;
 
 fn distributionGGX(normal_direction: vec3<f32>, halfway_direction: vec3<f32>, roughness_value: f32) -> f32 {
     let alpha = roughness_value * roughness_value;
@@ -88,6 +89,7 @@ fn calculatePBRDirectLighting(
 
 override LIGHT_KIND_DIRECTIONAL: u32 = 0;
 override LIGHT_KIND_SPOT: u32 = 1;
+override LIGHT_KIND_POINT: u32 = 2;
 
 struct Light {
     kind: u32,
@@ -206,6 +208,14 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
             let conning = smoothstep(cosOuter, cosInner, cosTheta);
             
             let prop = (light.intensity * conning) / (0.001 + dist2);
+            light_color = vec4<f32>(light.color, prop);
+        }
+        if (light.kind == LIGHT_KIND_POINT) {
+            let diff = light.position - in.world_pos;
+            let dist2 = dot(diff, diff);
+            light_direction = normalize(diff);
+            
+            let prop = light.intensity / (0.001 + dist2);
             light_color = vec4<f32>(light.color, prop);
         }
 

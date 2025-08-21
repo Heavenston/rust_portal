@@ -82,6 +82,19 @@ pub struct SpotLightData {
 }
 pub type SpotLightHandle = handle_map::Handle<SpotLightData>;
 
+#[derive(Debug, Clone, Copy)]
+pub struct PointLight {
+    pub position: Vec3,
+    pub intensity: f32,
+    pub color: Srgb,
+}
+
+#[derive(Debug)]
+pub struct PointLightData {
+    pub point_light: PointLight,
+}
+pub type PointLightHandle = handle_map::Handle<PointLightData>;
+
 // Basically the readonly (for users) parts of the EngineState,
 // separated beacause the readonly crate prevents destructuring and partial borrows
 // of the struct for users but this is the indented usage of EngineState
@@ -91,6 +104,7 @@ pub struct EngineStateResources {
     pub meshes_map: handle_map::HandleMap<MeshData>,
     pub directional_lights_map: handle_map::HandleMap<DirectionalLightData>,
     pub spot_lights_map: handle_map::HandleMap<SpotLightData>,
+    pub point_lights_map: handle_map::HandleMap<PointLightData>,
 
     pub world_bind_group_layout: BindGroupLayoutHandle,
     pub object_bind_group_layout: BindGroupLayoutHandle,
@@ -160,6 +174,10 @@ impl EngineState {
         self.resources.spot_lights_map.iter().map(|(handle, data)| (handle.into(), &data.spot_light))
     }
 
+    pub fn point_lights(&self) -> impl Iterator<Item = (PointLightHandle, &PointLight)> + ExactSizeIterator {
+        self.resources.point_lights_map.iter().map(|(handle, data)| (handle.into(), &data.point_light))
+    }
+
     pub fn insert_mesh(&mut self, mesh: Mesh) -> MeshHandle {
         let kernel = &mut self.kernel;
 
@@ -227,6 +245,20 @@ impl EngineState {
         &mut self, handle: SpotLightHandle,
     ) -> Option<SpotLight> {
         self.resources.spot_lights_map.remove(handle.into()).map(|data| data.spot_light)
+    }
+
+    pub fn insert_point_light(
+        &mut self, point_light: PointLight
+    ) -> PointLightHandle {
+        self.resources.point_lights_map.insert(PointLightData {
+            point_light,
+        })
+    }
+
+    pub fn remove_point_light(
+        &mut self, handle: PointLightHandle,
+    ) -> Option<PointLight> {
+        self.resources.point_lights_map.remove(handle.into()).map(|data| data.point_light)
     }
 }
 

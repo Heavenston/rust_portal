@@ -1,13 +1,16 @@
 #![feature(generic_const_exprs)]
+#![feature(never_type)]
 
 #![expect(incomplete_features)]
 
 pub mod prelude {
     pub use crate::{
-        Uid,
+        uid::Uid,
         default, concat_arrays, flatten_array, hash_value,
         itertools::Itertools as _,
         readonly, handle_map::{ self, HandleMap },
+        strict_sign::{ StrictSign, StrictlySigned },
+        sign::{ Sign, Signed }, axis::Axis, axis_direction::AxisDirection,
     };
 }
 
@@ -15,8 +18,11 @@ pub use readonly;
 pub use itertools;
 
 pub mod handle_map;
-mod uid;
-pub use uid::Uid;
+pub mod uid;
+pub mod strict_sign;
+pub mod sign;
+pub mod axis;
+pub mod axis_direction;
 
 use std::hash::{ DefaultHasher, Hasher, Hash };
 

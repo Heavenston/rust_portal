@@ -8,3 +8,4 @@ derive-where = { version = "1.5.0", features = ["nightly"] }
 getset = "0.1.6"
 readonly = "0.2.13"
 itertools = "0.14.0"
+glam = { version = "0.30.4", features = ["bytemuck"] }

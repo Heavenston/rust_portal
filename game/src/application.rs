@@ -1,11 +1,15 @@
 use engine::input::{CursorGrabMode, InputButton, KeyCode};
-use pgk::color::{ Srgba };
+use pgk::color::{ Srgb, Srgba };
 use utils::prelude::*;
 
-use glam::{ Affine3A, Mat4, Vec3A };
+use glam::{ Affine3A, IVec3, Mat4, Vec3, Vec3A };
 use winit::event::MouseButton;
 
-const MOVEMENT_SPEED: f32 = 150.;
+mod maps;
+
+// const MOVEMENT_SPEED: f32 = 150.;
+const DEFAULT_MOVEMENT_SPEED: f32 = 25.;
+const MOVEMENT_SPEED_SCROLL_CHANGE: f32 = 1.3;
 const LOOK_SPEED: f32 = 0.0008;
 
 #[derive(Debug, Clone, Copy)]
@@ -39,12 +43,14 @@ impl Default for Camera {
 
 pub struct Application {
     camera: Camera,
+    movement_speed: f32,
 }
 
 impl Application {
     pub fn new(state: &mut engine::EngineState) -> Self {
         let mut this = Application {
             camera: default(),
+            movement_speed: DEFAULT_MOVEMENT_SPEED,
         };
         this.init(state).expect("Could not init");
         this
@@ -52,6 +58,50 @@ impl Application {
 
     fn init(&mut self, state: &mut engine::EngineState) -> Result<(), Box<dyn std::error::Error>> {
         println!("Loading scene...");
+
+        let mut default_map = maps::Map::default();
+
+        let height = 3i32;
+        let width = 3i32;
+
+        default_map.clear(
+            IVec3::new(0,     0,      0),
+            IVec3::new(width, height, width),
+            AxisDirection::BITS_ALL,
+            maps::MapCellMaterial::Metal,
+        );
+        default_map.set_air_cell_walls(
+            IVec3::new(0, 0, 0),
+            AxisDirection::BITS_ALL,
+            maps::MapCellMaterial::Concrete,
+        );
+        default_map.clear(
+            IVec3::new(0,     height-1,      0),
+            IVec3::new(width, height  , width),
+            AxisDirection::BITS_ALL,
+            maps::MapCellMaterial::Concrete,
+        );
+
+        default_map.clear(
+            IVec3::new(width/2, 0, -5),
+            IVec3::new(width/2, 0, -1),
+            AxisDirection::BITS_ALL,
+            maps::MapCellMaterial::Metal,
+        );
+        default_map.clear(
+            IVec3::new(width/2, 0, -5),
+            IVec3::new(width/2, 0, -1),
+            AxisDirection::PosY | AxisDirection::NegY,
+            maps::MapCellMaterial::Concrete,
+        );
+        
+        default_map.mesh().upload(state);
+
+        // state.insert_point_light(engine::PointLight {
+        //     position: Vec3::ZERO,
+        //     intensity: 999.,
+        //     color: Srgb::WHITE,
+        // });
 
         println!("Loaded: {} static meshes", state.meshes().len());
         println!("Loaded: {} directional lights", state.directional_lights().len());
@@ -85,7 +135,7 @@ impl engine::Application for Application {
             input_vector += Vec3A::Y;
         }
 
-        input_vector = input_vector.normalize_or_zero() * dt * MOVEMENT_SPEED;
+        input_vector = input_vector.normalize_or_zero() * dt * self.movement_speed;
         self.camera.transform.translation += input_vector;
 
         if state.input.just_pressed(MouseButton::Left) {
@@ -115,10 +165,12 @@ impl engine::Application for Application {
         }
 
         if state.input.just_pressed(InputButton::MouseWheelDown) {
-            self.camera.fov *= 1.1;
+            self.movement_speed /= MOVEMENT_SPEED_SCROLL_CHANGE;
+            println!("Movement speed: {}", self.movement_speed);
         }
         if state.input.just_pressed(InputButton::MouseWheelUp) {
-            self.camera.fov /= 1.1;
+            self.movement_speed *= MOVEMENT_SPEED_SCROLL_CHANGE;
+            println!("Movement speed: {}", self.movement_speed);
         }
 
         state.camera = Some(engine::Camera {

@@ -25,19 +25,21 @@ impl MaterialParameters for Parameters { }
 pub enum LightKind {
     Directional = 0,
     Spot = 1,
+    Point = 2,
 }
 
 impl AsStd140 for LightKind {
     type Output = u32;
 
     fn as_std140(&self) -> Self::Output {
-        *self as u8 as u32
+        *self as u32
     }
 
     fn from_std140(val: Self::Output) -> Self {
         match val {
             0 => Self::Directional,
             1 => Self::Spot,
+            2 => Self::Point,
             _ => panic!("Invalid light kind value"),
         }
     }
