@@ -7,7 +7,7 @@ use crate::upload_image_resource;
 use super::*;
 
 struct MeshCtx<'a> {
-    override_material: Option<MapMaterial>,
+    map: &'a Map,
     model: &'a mut MapModel,
 }
 
@@ -218,7 +218,7 @@ impl MapMesh {
         ]);
     }
 
-    fn upload(&self, state: &mut engine::EngineState) -> engine::MeshHandle {
+    fn upload(&self, mesher: &mut MapMesher, state: &mut engine::EngineState) -> engine::MeshHandle {
         let tangent_data = pgk::utils::compute_all_tangents(
             &self.positions, &self.texcoords, &self.indices
         );
@@ -242,7 +242,8 @@ impl MapMesh {
             .slice(&self.indices)
             .create();
 
-        let material_instance = self.material.upload(state);
+        let material_instance = *mesher.material_cache.entry(self.material)
+            .or_insert_with(|| self.material.upload(state));
 
         state.insert_mesh(engine::Mesh {
             transform: default(),
@@ -279,24 +280,30 @@ impl MapModel {
         }
     }
 
-    pub fn upload(&self, state: &mut engine::EngineState) -> Vec<engine::MeshHandle> {
+    pub fn upload(&self, mesher: &mut MapMesher, state: &mut engine::EngineState) -> Vec<engine::MeshHandle> {
         self.meshes.iter()
-            .map(|mesh| mesh.upload(state))
+            .map(|mesh| mesh.upload(mesher, state))
             .collect()
     }
 }
 
-impl Map {
+#[derive(Debug, Clone, Default)]
+pub struct MapMesher {
+    pub override_material: Option<MapMaterial>,
+    pub material_cache: HashMap<MapMaterial, engine::MaterialInstance>,
+}
+
+impl MapMesher {
     fn mesh_cell_direction(&self, ctx: &mut MeshCtx, cell_pos: IVec3, dir: AxisDirection) {
-        let MapCell::Filled { materials } = self.get_cell(cell_pos)
+        let MapCell::Filled { materials } = ctx.map.get_cell(cell_pos)
         else { return };
 
-        let neighbor = self.get_cell(cell_pos + dir.as_ivec3());
+        let neighbor = ctx.map.get_cell(cell_pos + dir.as_ivec3());
         if !matches!(neighbor, MapCell::Air) {
             return;
         }
 
-        let material = ctx.override_material
+        let material = self.override_material
             .unwrap_or_else(|| MapMaterial::from_cell_material(materials[dir.idx()], dir));
         let mesh = ctx.model.for_material(material);
 
@@ -321,19 +328,19 @@ impl Map {
         }
     }
 
-    pub fn mesh(&self, override_material: Option<MapMaterial>) -> MapModel {
+    pub fn mesh(&self, map: &Map) -> MapModel {
         let mut model = MapModel::default();
 
         let mut ctx = MeshCtx {
-            override_material,
+            map,
             model: &mut model,
         };
 
-        for &chunk_pos in self.chunks.keys() {
+        for &chunk_pos in map.chunks.keys() {
             self.mesh_chunk(&mut ctx, chunk_pos);
             for dir in AxisDirection::VARIANTS {
                 let neighbor_pos = chunk_pos + dir.as_ivec3();
-                if !self.chunks.contains_key(&neighbor_pos) {
+                if !map.chunks.contains_key(&neighbor_pos) {
                     self.mesh_chunk(&mut ctx, neighbor_pos);
                 }
             }

@@ -255,6 +255,12 @@ impl EngineState {
     ) -> Option<PointLight> {
         self.resources.point_lights_map.remove(handle.into()).map(|data| data.point_light)
     }
+
+    pub fn point_light_mut(
+        &mut self, handle: PointLightHandle,
+    ) -> Option<&mut PointLight> {
+        self.resources.point_lights_map.get_mut(handle.into()).map(|data| &mut data.point_light)
+    }
 }
 
 impl Deref for EngineState {

@@ -44,21 +44,13 @@ impl Default for Camera {
 pub struct Application {
     camera: Camera,
     movement_speed: f32,
+    map_mesher: maps::MapMesher,
+    current_map: maps::Map,
+    point_light: engine::PointLightHandle,
 }
 
 impl Application {
     pub fn new(state: &mut engine::EngineState) -> Self {
-        let mut this = Application {
-            camera: default(),
-            movement_speed: DEFAULT_MOVEMENT_SPEED,
-        };
-        this.init(state).expect("Could not init");
-        this
-    }
-
-    fn init(&mut self, state: &mut engine::EngineState) -> Result<(), Box<dyn std::error::Error>> {
-        println!("Loading scene...");
-
         let mut default_map = maps::Map::default();
 
         let height = 3i32;
@@ -94,12 +86,27 @@ impl Application {
             AxisDirection::PosY | AxisDirection::NegY,
             maps::MapCellMaterial::Concrete,
         );
-        
-        default_map.mesh(None).upload(state);
 
-        state.insert_point_light(engine::PointLight {
-            position: IVec3::new(width, height, width).as_vec3() / 2.,
-            intensity: 10.,
+        let mut this = Application {
+            camera: default(),
+            movement_speed: DEFAULT_MOVEMENT_SPEED,
+            map_mesher: default(),
+            current_map: default_map,
+            point_light: default(),
+        };
+        this.init(state).expect("Could not init");
+        this
+    }
+
+    fn init(&mut self, state: &mut engine::EngineState) -> Result<(), Box<dyn std::error::Error>> {
+        println!("Loading scene...");
+
+        let map_mesh = self.map_mesher.mesh(&self.current_map);
+        map_mesh.upload(&mut self.map_mesher, state);
+
+        self.point_light = state.insert_point_light(engine::PointLight {
+            position: default(),
+            intensity: 5.,
             color: Srgb::WHITE,
         });
 
@@ -185,6 +192,9 @@ impl engine::Application for Application {
             projection: self.camera.get_projection(state.kernel.aspect_ration()),
             clear_color: Srgba::BLACK,
         });
+
+        state.point_light_mut(self.point_light).expect("pl").position =
+            self.camera.transform.translation.into();
     }
 }
 
