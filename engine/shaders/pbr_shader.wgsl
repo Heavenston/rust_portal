@@ -37,6 +37,27 @@ fn fresnelSchlick(cos_theta: f32, surface_reflectivity: vec3<f32>) -> vec3<f32> 
     return surface_reflectivity + (vec3<f32>(1.0) - surface_reflectivity) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
 }
 
+fn calculatePBRAmbient(
+    normal_direction: vec3<f32>,
+    view_direction: vec3<f32>,
+    albedo_color: vec3<f32>,
+    metallic_value: f32,
+    roughness_value: f32
+) -> vec3<f32> {
+    let base_reflectivity = vec3<f32>(0.04);
+    let surface_reflectivity = mix(base_reflectivity, albedo_color, metallic_value);
+    
+    let normal_dot_view = max(dot(normal_direction, view_direction), 0.0);
+    let fresnel = fresnelSchlick(normal_dot_view, surface_reflectivity);
+    
+    // For metals: only specular ambient (no diffuse)
+    // For non-metals: mix of diffuse and specular ambient
+    let specular_ambient = fresnel * AMBIENT_LIGHT;
+    let diffuse_ambient = albedo_color * AMBIENT_LIGHT * (1.0 - metallic_value);
+    
+    return specular_ambient + diffuse_ambient * (vec3<f32>(1.0) - fresnel);
+}
+
 fn calculatePBRDirectLighting(
     world_position: vec3<f32>,
     normal_direction: vec3<f32>,
@@ -252,7 +273,13 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
         );
     }
 
-    total_radiance += albedo.xyz * AMBIENT_LIGHT;
+    total_radiance += calculatePBRAmbient(
+        normal,
+        view_dir,
+        albedo.xyz,
+        metallic,
+        roughness
+    );
     //! endif
 
     let color = total_radiance;
