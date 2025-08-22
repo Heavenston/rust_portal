@@ -105,8 +105,9 @@ impl PhysicsWorld {
 
         // Capsule aligned with Y axis
         let collider = ColliderBuilder::capsule_y(PLAYER_HALF_HEIGHT, PLAYER_RADIUS)
-            .friction(0.0)
+            .friction(0.8)
             .restitution(0.0)
+            .density(50.0)
             .build();
         self.colliders.insert_with_parent(collider, handle, &mut self.bodies);
 
@@ -185,6 +186,8 @@ impl PhysicsWorld {
             glam::Vec3::new(t.x, t.y, t.z)
         })
     }
+
+    pub fn bodies(&self) -> &RigidBodySet { &self.bodies }
 
     pub fn request_jump(&mut self) { self.pending_jump = true; }
 
