@@ -14,6 +14,7 @@ mod maps;
 const DEFAULT_MOVEMENT_SPEED: f32 = 5.;
 const MOVEMENT_SPEED_SCROLL_CHANGE: f32 = 1.3;
 const LOOK_SPEED: f32 = 0.0008;
+const FIXED_TIMESTEP: f32 = 1.0 / 20.0; // 20 Hz physics
 
 #[derive(Debug, Clone, Copy)]
 struct Camera {
@@ -52,6 +53,10 @@ pub struct Application {
     spot_light: engine::SpotLightHandle,
     physics: PhysicsWorld,
     player_body: rapier3d::prelude::RigidBodyHandle,
+    physics_accumulator: f32,
+    wish_vel: Vec3A,
+    player_prev_pos: Vec3,
+    player_curr_pos: Vec3,
 }
 
 impl Application {
@@ -117,8 +122,17 @@ impl Application {
             spot_light: default(),
             physics,
             player_body,
+            physics_accumulator: 0.0,
+            wish_vel: Vec3A::ZERO,
+            player_prev_pos: Vec3::ZERO,
+            player_curr_pos: Vec3::ZERO,
         };
         this.init(state).expect("Could not init");
+        // Initialize interpolation buffers from current physics position
+        if let Some(p) = this.physics.body_position(this.player_body) {
+            this.player_prev_pos = p;
+            this.player_curr_pos = p;
+        }
         this
     }
 
@@ -173,21 +187,25 @@ impl engine::Application for Application {
         // Normalize and scale by speed
         let wish_dir = input_vector.normalize_or_zero();
         let wish_vel = wish_dir * self.movement_speed;
+        self.wish_vel = wish_vel;
 
         // Jump when grounded
         if state.input.just_pressed(KeyCode::Space) {
             self.physics.request_jump();
         }
 
-        // Apply movement to character body and step physics
-        self.physics.drive_character(self.player_body, wish_vel, dt);
-        self.physics.step(dt);
-
-        // Update camera position to player head
-        if let Some(player_pos) = self.physics.body_position(self.player_body) {
-            let eye_height = physics::PLAYER_EYE_HEIGHT;
-            self.camera.transform.translation = (player_pos + glam::Vec3::Y * eye_height).into();
+        // Fixed-step physics at 20 Hz
+        self.physics_accumulator += dt;
+        while self.physics_accumulator >= FIXED_TIMESTEP {
+            self.fixed_step(FIXED_TIMESTEP);
+            self.physics_accumulator -= FIXED_TIMESTEP;
         }
+
+        // Interpolate camera position between physics frames
+        let alpha = (self.physics_accumulator / FIXED_TIMESTEP).clamp(0.0, 1.0);
+        let interp_pos = self.player_prev_pos.lerp(self.player_curr_pos, alpha);
+        let eye_height = physics::PLAYER_EYE_HEIGHT;
+        self.camera.transform.translation = (interp_pos + glam::Vec3::Y * eye_height).into();
 
         if state.input.just_pressed(MouseButton::Left) {
             if !state.input.cursor_grab_mode().captured {
@@ -240,5 +258,18 @@ impl engine::Application for Application {
         let spot_light = state.spot_light_mut(self.spot_light).expect("pl");
         spot_light.position = self.camera.transform.translation.into();
         spot_light.direction = forward_vector.into();
+    }
+}
+
+impl Application {
+    fn fixed_step(&mut self, dt: f32) {
+        // Drive character using the last computed desired velocity
+        self.physics.drive_character(self.player_body, self.wish_vel, dt);
+        self.physics.step(dt);
+        // Update interpolation state
+        if let Some(p) = self.physics.body_position(self.player_body) {
+            self.player_prev_pos = self.player_curr_pos;
+            self.player_curr_pos = p;
+        }
     }
 }
