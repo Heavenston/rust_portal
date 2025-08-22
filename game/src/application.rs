@@ -46,7 +46,7 @@ pub struct Application {
     movement_speed: f32,
     map_mesher: maps::MapMesher,
     current_map: maps::Map,
-    point_light: engine::PointLightHandle,
+    spot_light: engine::SpotLightHandle,
 }
 
 impl Application {
@@ -92,7 +92,7 @@ impl Application {
             movement_speed: DEFAULT_MOVEMENT_SPEED,
             map_mesher: default(),
             current_map: default_map,
-            point_light: default(),
+            spot_light: default(),
         };
         this.init(state).expect("Could not init");
         this
@@ -104,10 +104,13 @@ impl Application {
         let map_mesh = self.map_mesher.mesh(&self.current_map);
         map_mesh.upload(&mut self.map_mesher, state);
 
-        self.point_light = state.insert_point_light(engine::PointLight {
+        self.spot_light = state.insert_spot_light(engine::SpotLight {
             position: default(),
             intensity: 5.,
             color: Srgb::WHITE,
+            direction: Vec3::NEG_Z,
+            inner_cone_angle: self.camera.fov * 0.5,
+            outer_cone_angle: self.camera.fov * 0.6,
         });
 
         println!("Loaded: {} static meshes", state.meshes().len());
@@ -193,8 +196,9 @@ impl engine::Application for Application {
             clear_color: Srgba::BLACK,
         });
 
-        state.point_light_mut(self.point_light).expect("pl").position =
-            self.camera.transform.translation.into();
+        let spot_light = state.spot_light_mut(self.spot_light).expect("pl");
+        spot_light.position = self.camera.transform.translation.into();
+        spot_light.direction = forward_vector.into();
     }
 }
 

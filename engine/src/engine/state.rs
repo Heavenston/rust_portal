@@ -250,6 +250,12 @@ impl EngineState {
         })
     }
 
+    pub fn spot_light_mut(
+        &mut self, handle: SpotLightHandle,
+    ) -> Option<&mut SpotLight> {
+        self.resources.spot_lights_map.get_mut(handle.into()).map(|data| &mut data.spot_light)
+    }
+
     pub fn remove_point_light(
         &mut self, handle: PointLightHandle,
     ) -> Option<PointLight> {
