@@ -1,10 +1,6 @@
 // based on https://learnopengl.com/PBR/Theory
-// 
+//
 // useful list of equations: https://graphicrants.blogspot.com/2013/08/specular-brdf-reference.html
-
-// Old tests remnents
-//! define ENABLE_INPUT_LINEAR_CONVERSION false
-//! define ENABLE_OUTPUT_LINEAR_CONVERSION false
 
 override PI: f32 = 3.14159265359;
 override AMBIENT_LIGHT: f32 = 0.1;
@@ -78,7 +74,7 @@ fn calculatePBRDirectLighting(
     // 6. Calculate the final outgoing radiance for this light.
     let incoming_light_radiance = light_color.rgb * light_color.a;
     let lambertian_diffuse = albedo_color / PI;
-    
+
     // Combine diffuse and specular contributions, scaled by light and surface angle.
     let combined_brdf = (diffuse_ratio * lambertian_diffuse) + specular_contribution;
     let outgoing_radiance = combined_brdf * incoming_light_radiance * normal_dot_light;
@@ -132,11 +128,21 @@ var<uniform> material_uniforms: MaterialUniforms;
     @group(2) @binding(2)
     var s_diffuse: sampler;
 //! endif
+//! if ENABLE_NORMAL_MAP_TEXTURE
+    @group(2) @binding(3)
+    var t_normal_map: texture_2d<f32>;
+    @group(2) @binding(4)
+    var s_normal_map: sampler;
+//! endif
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) texcoords: vec2<f32>,
     @location(2) normal: vec3<f32>,
+    //! if ENABLE_NORMAL_MAP_TEXTURE
+        @location(3) tangent: vec3<f32>,
+        @location(4) bitangent: vec3<f32>,
+    //! endif
 }
 
 struct VertexOutput {
@@ -144,6 +150,10 @@ struct VertexOutput {
     @location(0) texcoords: vec2<f32>,
     @location(1) world_normal: vec3<f32>,
     @location(2) world_pos: vec3<f32>,
+    //! if ENABLE_NORMAL_MAP_TEXTURE
+        @location(3) world_tangent: vec3<f32>,
+        @location(4) world_bitangent: vec3<f32>,
+    //! endif
 }
 
 @vertex
@@ -160,6 +170,10 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     out.texcoords = input.texcoords;
     out.world_normal = normalize(normal_matrix * input.normal);
     out.world_pos = world_pos.xyz;
+    //! if ENABLE_NORMAL_MAP_TEXTURE
+        out.world_tangent = normalize(normal_matrix * input.tangent);
+        out.world_bitangent = normalize(normal_matrix * input.bitangent);
+    //! endif
     return out;
 }
 
@@ -169,15 +183,23 @@ struct FragmentOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOutput {
-    let normal = normalize(in.world_normal);
+    //! if ENABLE_NORMAL_MAP_TEXTURE
+        let tangent_normal = textureSample(t_normal_map, s_normal_map, in.texcoords).xyz * 2.0 - 1.0;
+        let T = normalize(in.world_tangent);
+        let B = normalize(in.world_bitangent);
+        let N = normalize(in.world_normal);
+        let TBN = mat3x3<f32>(T, B, N);
+        let normal = normalize(TBN * tangent_normal);
+    //! else
+        let normal = normalize(in.world_normal);
+    //! endif
+
     //! if ENABLE_BASE_COLOR_TEXTURE
         var albedo = textureSample(t_diffuse, s_diffuse, in.texcoords);
     //! else
         var albedo = material_uniforms.base_color;
     //! endif
-    //! if ENABLE_INPUT_LINEAR_CONVERSION
-    albedo = pow(albedo, vec4(2.2));
-    //! endif
+
     let metallic = material_uniforms.metallic;
     let roughness = material_uniforms.roughness;
 
@@ -205,7 +227,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
             let cosOuter = cos(light.outer_cone_angle);
             let cosTheta = dot(light.direction, -light_direction);
             let conning = smoothstep(cosOuter, cosInner, cosTheta);
-            
+
             let prop = (light.intensity * conning) / (0.001 + dist2);
             light_color = vec4<f32>(light.color, prop);
         }
@@ -213,7 +235,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
             let diff = light.position - in.world_pos;
             let dist2 = dot(diff, diff);
             light_direction = normalize(diff);
-            
+
             let prop = light.intensity / (0.001 + dist2);
             light_color = vec4<f32>(light.color, prop);
         }
@@ -233,10 +255,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
     total_radiance += albedo.xyz * AMBIENT_LIGHT;
     //! endif
 
-    var color = total_radiance;
-    //! if ENABLE_OUTPUT_LINEAR_CONVERSION
-    color = pow(color, vec3(1.0/2.2)); 
-    //! endif
+    let color = total_radiance;
 
     var out: FragmentOutput;
     out.color = vec4<f32>(color, 1.);

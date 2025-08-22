@@ -1,7 +1,7 @@
 use std::{collections::HashMap, ops::Range};
 
 use crate::{ color::Srgba, * };
-use utils::prelude::*;
+use ::utils::prelude::*;
 
 use super::GraphicsKernel;
 

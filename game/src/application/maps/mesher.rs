@@ -2,7 +2,7 @@ use crevice::std140::AsStd140;
 use glam::{Vec2, Vec3};
 use pgk::color::LinearRgba;
 
-use crate::Resources;
+use crate::upload_image_resource;
 
 use super::*;
 
@@ -47,56 +47,53 @@ impl MapMaterial {
             .data(&engine::pbr_material::MaterialUniforms {
                 base_color: LinearRgba::new(1., 1., 1., 1.),
                 metallic: match self.0 {
-                    Metal => 0.5,
-                    Concrete => 0.1,
+                    Metal => 1.,
+                    Concrete => 0.,
                     UVCheck => 0.01,
                 },
                 roughness: match self.0 {
-                    Metal => 0.8,
-                    Concrete => 0.8,
+                    Metal => 0.6,
+                    Concrete => 0.9,
                     UVCheck => 1.,
                 },
             }.as_std140())
             .create();
 
         let texture_path = match (self.0, self.1) {
-            (Metal, Wall) => "portal_1/metal/metalwall048b.png",
-            (Metal, Floor | Ceiling) => "portal_1/metal/metal_modular_floor001.png",
-            (Concrete, Wall) => "portal_1/concrete/concrete_modular_wall001a.png",
-            (Concrete, Floor) => "portal_1/concrete/concrete_modular_floor001a.png",
-            (Concrete, Ceiling) => "portal_1/concrete/concrete_modular_ceiling001a.png",
-            (UVCheck, _) => "UV_checker_Map_byValle.png",
+            (Metal, Wall) => "portal_1/metal/metalwall048b",
+            (Metal, Floor | Ceiling) => "portal_1/metal/metal_modular_floor001",
+            (Concrete, Wall) => "portal_1/concrete/concrete_modular_wall001a",
+            (Concrete, Floor) => "portal_1/concrete/concrete_modular_floor001a",
+            (Concrete, Ceiling) => "portal_1/concrete/concrete_modular_ceiling001a",
+            (UVCheck, _) => "UV_checker_Map_byValle",
         };
         println!("Loading texture '{texture_path}'...");
-        let texture_file = Resources::get(texture_path).expect("File exists");
-        let texture_data = &*texture_file.data;
-        let texture_image = image::load_from_memory(&texture_data).expect("Could not decode image")
-            .to_rgba8();
-
-        let texture_handle = state.kernel.create_texture()
-            .usages(pgk::TextureUsages {
-                copy_dst: true,
-                texture_binding: true,
-                ..default()
-            })
-            .format(pgk::TextureFormat::Rgba8UnormSrgb)
-            .width(texture_image.width()).height(texture_image.height())
-            .create();
-        state.kernel.write_texture(texture_handle, &texture_image.as_raw());
+        let color_texture_handle: Option<pgk::TextureHandle> = upload_image_resource(
+            state, &format!("{texture_path}.png"), true
+        );
+        let normal_texture_handle: Option<pgk::TextureHandle> = upload_image_resource(
+            state, &format!("{texture_path}_normal.png"), false
+        );
 
         let material = state.materials.get_handle(&mut state.kernel, &engine::pbr_material::Parameters {
-            enable_base_color_texture: true,
+            enable_base_color_texture: color_texture_handle.is_some(),
+            enable_normal_map_texture: normal_texture_handle.is_some(),
             unlit: self.0 == UVCheck,
         });
         let material_data = state.materials.get(material);
         let pipeline_data = state.kernel.get_pipeline_data(material_data.pipeline)
             .expect("Pipeline exists");
         let bind_group_layout = pipeline_data.bind_group_layouts[2];
-        let bind_group = state.kernel.create_bind_group()
+        let mut bind_group = state.kernel.create_bind_group()
             .layout(bind_group_layout)
-            .entry(0, material_uniform_buffer)
-            .entry(1, texture_handle).sampler(2)
-            .create();
+            .entry(0, material_uniform_buffer);
+        if let Some(color_texture_handle) = color_texture_handle {
+            bind_group = bind_group.entry(1, color_texture_handle).sampler(2);
+        }
+        if let Some(normal_texture_handle) = normal_texture_handle {
+            bind_group = bind_group.entry(3, normal_texture_handle).sampler(4);
+        }
+        let bind_group = bind_group.create();
 
         engine::MaterialInstance {
             material,
@@ -222,6 +219,10 @@ impl MapMesh {
     }
 
     fn upload(&self, state: &mut engine::EngineState) -> engine::MeshHandle {
+        let tangent_data = pgk::utils::compute_all_tangents(
+            &self.positions, &self.texcoords, &self.indices
+        );
+
         let positions_buffer = state.kernel.create_buffer()
             .slice(&self.positions)
             .create();
@@ -231,6 +232,12 @@ impl MapMesh {
         let normals_buffer = state.kernel.create_buffer()
             .slice(&self.normals)
             .create();
+        let tangents_buffer = state.kernel.create_buffer()
+            .slice(&tangent_data.tangents)
+            .create();
+        let bitangents_buffer = state.kernel.create_buffer()
+            .slice(&tangent_data.bitangents)
+            .create();
         let index_buffer = state.kernel.create_buffer()
             .slice(&self.indices)
             .create();
@@ -239,9 +246,13 @@ impl MapMesh {
 
         state.insert_mesh(engine::Mesh {
             transform: default(),
-            positions_buffer,
-            texcoords_buffer,
-            normals_buffer,
+            vertex_buffers: vec![
+                (0, positions_buffer),
+                (1, texcoords_buffer),
+                (2, normals_buffer),
+                (3, tangents_buffer),
+                (4, bitangents_buffer),
+            ].into_boxed_slice(),
             index_buffer,
             vertex_count: self.indices.len().try_into().expect("no overflow"),
             material_instance,

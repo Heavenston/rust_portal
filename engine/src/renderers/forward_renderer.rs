@@ -204,9 +204,9 @@ impl Renderer for ForwardRenderer {
                     state.materials.get(mesh.material_instance.material).pipeline
                 );
                 render_pass.set_index_buffer(mesh.index_buffer);
-                render_pass.set_vertex_buffer(0, mesh.positions_buffer);
-                render_pass.set_vertex_buffer(1, mesh.texcoords_buffer);
-                render_pass.set_vertex_buffer(2, mesh.normals_buffer);
+                for &(idx, buf) in &mesh.vertex_buffers {
+                    render_pass.set_vertex_buffer(idx, buf);
+                }
                 render_pass.set_bind_group(0, self.world_bind_group);
                 render_pass.set_bind_group(1, *object_bind_group);
                 render_pass.set_bind_group(2, mesh.material_instance.bind_group);

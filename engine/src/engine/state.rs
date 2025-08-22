@@ -19,15 +19,10 @@ pub struct Camera {
     pub clear_color: Srgba,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Mesh {
     pub transform: Affine3A,
-    /// list of vec3
-    pub positions_buffer: BufferHandle,
-    /// list of vec2
-    pub texcoords_buffer: BufferHandle,
-    /// list of vec2
-    pub normals_buffer: BufferHandle,
+    pub vertex_buffers: Box<[(u32, BufferHandle)]>,
     /// list of u32
     pub index_buffer: BufferHandle,
     /// At most the size of the indices buffer
@@ -38,9 +33,9 @@ pub struct Mesh {
 
 impl Mesh {
     pub fn delete_buffers(&self, kernel: &mut GraphicsKernel) {
-        kernel.delete_buffer(self.positions_buffer);
-        kernel.delete_buffer(self.texcoords_buffer);
-        kernel.delete_buffer(self.normals_buffer);
+        for &(_, buf) in &self.vertex_buffers {
+            kernel.delete_buffer(buf);
+        }
         kernel.delete_buffer(self.index_buffer);
     }
 }

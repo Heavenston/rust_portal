@@ -1,3 +1,5 @@
+#![expect(dead_code)]
+
 use glam::Affine3A;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

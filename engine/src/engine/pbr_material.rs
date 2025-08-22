@@ -1,3 +1,7 @@
+// TODO: Find a way to make the parameters <-> bind groups and vertex buffers
+// ensured here so that magic indices from here do not need to be spread around
+// the codebase
+
 use crate::{
     builtin_shaders, embedded_shader_factory_helper, EngineState, MaterialData, MaterialFactory, MaterialParameters, DEPTH_TEXTURE_FORMAT, RENDER_TARGET_FORMAT
 };
@@ -16,6 +20,7 @@ pub static MAX_LIGHTS: u32 = 8;
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Parameters {
     pub enable_base_color_texture: bool,
+    pub enable_normal_map_texture: bool,
     pub unlit: bool,
 }
 impl MaterialParameters for Parameters { }
@@ -94,9 +99,16 @@ pub(super) fn create_factory(
             ;
         }
 
+        if parameters.enable_normal_map_texture {
+            material_bind_group_layout = material_bind_group_layout
+                .entry().binding(3).texture().add()
+                .entry().binding(4).sampler().add()
+            ;
+        }
+
         let material_bind_group_layout = material_bind_group_layout.create();
     
-        let pipeline = kernel.create_pipeline()
+        let mut pipeline = kernel.create_pipeline()
             .label(format!("PBR Material pipeline ({parameters:?})"))
             .shader_source(shader_source)
             .bind_group_layouts([
@@ -106,6 +118,7 @@ pub(super) fn create_factory(
             ])
             .shader_defs([
                 ("ENABLE_BASE_COLOR_TEXTURE".to_string(), parameters.enable_base_color_texture.into()),
+                ("ENABLE_NORMAL_MAP_TEXTURE".to_string(), parameters.enable_normal_map_texture.into()),
                 ("MAX_LIGHTS".to_string(), MAX_LIGHTS.into()),
                 ("UNLIT".to_string(), parameters.unlit.into()),
             ])
@@ -119,7 +132,18 @@ pub(super) fn create_factory(
             .vertex_buffer().shader_location(1).vec2().add()
             // Normals
             .vertex_buffer().shader_location(2).vec3().add()
-        .create();
+        ;
+
+        if parameters.enable_normal_map_texture {
+            pipeline = pipeline
+                // Tangents
+                .vertex_buffer().shader_location(3).vec3().add()
+                // Bitangents
+                .vertex_buffer().shader_location(4).vec3().add()
+            ;
+        }
+
+        let pipeline = pipeline.create();
 
         MaterialData {
             created_at: SystemTime::now(),

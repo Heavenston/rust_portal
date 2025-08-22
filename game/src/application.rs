@@ -2,7 +2,7 @@ use engine::input::{CursorGrabMode, InputButton, KeyCode};
 use pgk::color::{Srgb, Srgba};
 use utils::prelude::*;
 
-use glam::{ Affine3A, IVec3, Mat4, UVec3, Vec3, Vec3A };
+use glam::{ Affine3A, IVec3, Mat4, Vec3, Vec3A };
 use winit::event::MouseButton;
 
 mod maps;
