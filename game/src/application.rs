@@ -5,10 +5,13 @@ use utils::prelude::*;
 use glam::{ Affine3A, IVec3, Mat4, Vec3, Vec3A };
 use winit::event::MouseButton;
 
+mod physics;
+use physics::*;
+
 mod maps;
 
 // const MOVEMENT_SPEED: f32 = 150.;
-const DEFAULT_MOVEMENT_SPEED: f32 = 25.;
+const DEFAULT_MOVEMENT_SPEED: f32 = 1.;
 const MOVEMENT_SPEED_SCROLL_CHANGE: f32 = 1.3;
 const LOOK_SPEED: f32 = 0.0008;
 
@@ -47,6 +50,8 @@ pub struct Application {
     map_mesher: maps::MapMesher,
     current_map: maps::Map,
     spot_light: engine::SpotLightHandle,
+    physics: PhysicsWorld,
+    player_body: rapier3d::prelude::RigidBodyHandle,
 }
 
 impl Application {
@@ -87,12 +92,33 @@ impl Application {
             maps::MapCellMaterial::Concrete,
         );
 
+        let mut physics = PhysicsWorld::new();
+
+        // Build static world colliders from the current map
+        physics.rebuild_map_colliders(&default_map);
+
+        // Spawn player dynamic capsule body
+        let player_body = physics.spawn_player(glam::Vec3::new(1.5, 1.8, 1.5));
+
+        // Spawn a 2x2x3 cube stack near the player that can be pushed
+        physics.spawn_cube_stack(
+            glam::Vec3::new(2.5, 0.0, 1.5), // base center on floor
+            2, // grid_x
+            2, // grid_z
+            3, // layers
+            glam::Vec3::splat(0.3), // half extents (0.6m cubes)
+            0.04, // spacing
+            250.0, // density
+        );
+
         let mut this = Application {
             camera: default(),
             movement_speed: DEFAULT_MOVEMENT_SPEED,
             map_mesher: default(),
             current_map: default_map,
             spot_light: default(),
+            physics,
+            player_body,
         };
         this.init(state).expect("Could not init");
         this
@@ -141,12 +167,27 @@ impl engine::Application for Application {
         if state.input.pressed(KeyCode::KeyD) {
             input_vector -= left_vector;
         }
-        if state.input.pressed(KeyCode::Space) {
-            input_vector += Vec3A::Y;
+        // Only move on the XZ plane; Y handled by physics (gravity/jump)
+        input_vector.y = 0.0;
+
+        // Normalize and scale by speed
+        let wish_dir = input_vector.normalize_or_zero();
+        let wish_vel = wish_dir * self.movement_speed;
+
+        // Jump when grounded
+        if state.input.just_pressed(KeyCode::Space) {
+            self.physics.request_jump();
         }
 
-        input_vector = input_vector.normalize_or_zero() * dt * self.movement_speed;
-        self.camera.transform.translation += input_vector;
+        // Apply movement to character body and step physics
+        self.physics.drive_character(self.player_body, wish_vel, dt);
+        self.physics.step(dt);
+
+        // Update camera position to player head
+        if let Some(player_pos) = self.physics.body_position(self.player_body) {
+            let eye_height = physics::PLAYER_EYE_HEIGHT;
+            self.camera.transform.translation = (player_pos + glam::Vec3::Y * eye_height).into();
+        }
 
         if state.input.just_pressed(MouseButton::Left) {
             if !state.input.cursor_grab_mode().captured {
@@ -201,4 +242,3 @@ impl engine::Application for Application {
         spot_light.direction = forward_vector.into();
     }
 }
-
