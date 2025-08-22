@@ -116,6 +116,8 @@ impl MapMesh {
     /// its normal)
     fn create_plane(&mut self, pos: Vec3, size: Vec3, dir: AxisDirection) {
         let base_index = self.positions.len() as u32;
+        // Keep texture tiling independent of world scale
+        let uv = size / WORLD_SCALE;
     
         match dir {
             AxisDirection::PosX => {
@@ -127,10 +129,10 @@ impl MapMesh {
                     Vec3::new(x, pos.y,          pos.z + size.z),
                 ]);
                 self.texcoords.extend([
-                    Vec2::new(size.z, size.y),
-                    Vec2::new(size.z, 0.),
-                    Vec2::new(0.,     0.),
-                    Vec2::new(0.,     size.y),
+                    Vec2::new(uv.z, uv.y),
+                    Vec2::new(uv.z, 0.),
+                    Vec2::new(0.,   0.),
+                    Vec2::new(0.,   uv.y),
                 ]);
             },
             AxisDirection::NegX => {
@@ -142,10 +144,10 @@ impl MapMesh {
                     Vec3::new(x, pos.y + size.y, pos.z + size.z),
                 ]);
                 self.texcoords.extend([
-                    Vec2::new(0.,     0.),
-                    Vec2::new(0.,     size.y),
-                    Vec2::new(size.z, size.y),
-                    Vec2::new(size.z, 0.),
+                    Vec2::new(0.,   0.),
+                    Vec2::new(0.,   uv.y),
+                    Vec2::new(uv.z, uv.y),
+                    Vec2::new(uv.z, 0.),
                 ]);
             },
             AxisDirection::PosY => {
@@ -157,10 +159,10 @@ impl MapMesh {
                     Vec3::new(pos.x + size.x, y, pos.z),
                 ]);
                 self.texcoords.extend([
-                    Vec2::new(0.,     0.    ),
-                    Vec2::new(0.,     size.z),
-                    Vec2::new(size.x, size.z),
-                    Vec2::new(size.x, 0.    ),
+                    Vec2::new(0.,   0.    ),
+                    Vec2::new(0.,   uv.z),
+                    Vec2::new(uv.x, uv.z),
+                    Vec2::new(uv.x, 0.    ),
                 ]);
             },
             AxisDirection::NegY => {
@@ -172,10 +174,10 @@ impl MapMesh {
                     Vec3::new(pos.x,          y, pos.z + size.z),
                 ]);
                 self.texcoords.extend([
-                    Vec2::new(0.,     0.),
-                    Vec2::new(size.x, 0.),
-                    Vec2::new(size.x, size.z),
-                    Vec2::new(0.,     size.z),
+                    Vec2::new(0.,   0.),
+                    Vec2::new(uv.x, 0.),
+                    Vec2::new(uv.x, uv.z),
+                    Vec2::new(0.,   uv.z),
                 ]);
             },
             AxisDirection::PosZ => {
@@ -187,10 +189,10 @@ impl MapMesh {
                     Vec3::new(pos.x,          pos.y + size.y, z),
                 ]);
                 self.texcoords.extend([
-                    Vec2::new(0.,     size.y),
-                    Vec2::new(size.x, size.y),
-                    Vec2::new(size.x, 0.),
-                    Vec2::new(0.,     0.),
+                    Vec2::new(0.,   uv.y),
+                    Vec2::new(uv.x, uv.y),
+                    Vec2::new(uv.x, 0.),
+                    Vec2::new(0.,   0.),
                 ]);
             },
             AxisDirection::NegZ => {
@@ -202,10 +204,10 @@ impl MapMesh {
                     Vec3::new(pos.x,          pos.y,          z),
                 ]);
                 self.texcoords.extend([
-                    Vec2::new(size.x, 0.),
-                    Vec2::new(0.,     0.),
-                    Vec2::new(0.,     size.y),
-                    Vec2::new(size.x, size.y),
+                    Vec2::new(uv.x, 0.),
+                    Vec2::new(0.,   0.),
+                    Vec2::new(0.,   uv.y),
+                    Vec2::new(uv.x, uv.y),
                 ]);
             },
         }
@@ -307,7 +309,9 @@ impl MapMesher {
             .unwrap_or_else(|| MapMaterial::from_cell_material(materials[dir.idx()], dir));
         let mesh = ctx.model.for_material(material);
 
-        mesh.create_plane(cell_pos.as_vec3(), Vec3::splat(1.), dir);
+        let pos = cell_pos.as_vec3() * WORLD_SCALE;
+        let size = Vec3::splat(WORLD_SCALE);
+        mesh.create_plane(pos, size, dir);
     }
 
     fn mesh_cell(&self, ctx: &mut MeshCtx, cell_pos: IVec3) {

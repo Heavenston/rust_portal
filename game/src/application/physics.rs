@@ -1,11 +1,12 @@
 use rapier3d::prelude::*;
 
-use crate::application::maps::{Map, MapCell, CHUNK_SIZE, cell_idx_inside_chunk};
+use crate::application::maps::Map;
+use crate::application::maps::MapModel;
 
 pub const PLAYER_RADIUS: f32 = 0.3;
 pub const PLAYER_HALF_HEIGHT: f32 = 0.5;
 pub const PLAYER_EYE_HEIGHT: f32 = PLAYER_HALF_HEIGHT + PLAYER_RADIUS - 0.1;
-const JUMP_VELOCITY: f32 = 3.;
+const JUMP_VELOCITY: f32 = 3.0;
 const GROUND_CHECK_DIST: f32 = 0.08;
 
 pub struct PhysicsWorld {
@@ -69,38 +70,28 @@ impl PhysicsWorld {
         // No query pipeline kept; queries avoided for now.
     }
 
-    pub fn rebuild_map_colliders(&mut self, map: &Map) {
-        // Clear any existing static bodies/colliders (simple approach: recreate everything)
-        // Note: For now we just append; call this only once at init.
-        for (&chunk_pos, chunk) in &map.chunks {
-            for dz in 0..CHUNK_SIZE.z {
-                for dy in 0..CHUNK_SIZE.y {
-                    for dx in 0..CHUNK_SIZE.x {
-                        let local = glam::UVec3::new(dx, dy, dz);
-                        let idx = cell_idx_inside_chunk(local);
-                        if let MapCell::Filled { .. } = chunk.cells[idx] {
-                            let wp = chunk_pos * CHUNK_SIZE.as_ivec3() + local.as_ivec3();
-                            let center = glam::Vec3::new(
-                                wp.x as f32 + 0.5,
-                                wp.y as f32 + 0.5,
-                                wp.z as f32 + 0.5,
-                            );
-                            let rb = RigidBodyBuilder::fixed()
-                                .translation(vector![center.x, center.y, center.z])
-                                .build();
-                            let rb_handle = self.bodies.insert(rb);
-                            let co = ColliderBuilder::cuboid(0.5, 0.5, 0.5)
-                                .friction(0.8)
-                                .restitution(0.0)
-                                .build();
-                            self.colliders.insert_with_parent(co, rb_handle, &mut self.bodies);
-                        }
-                    }
-                }
+    pub fn rebuild_map_collider_from_model(&mut self, model: &MapModel) {
+        let mut vertices: Vec<Point<Real>> = Vec::new();
+        let mut indices: Vec<[u32; 3]> = Vec::new();
+
+        for mesh in &model.meshes {
+            let base = vertices.len() as u32;
+            vertices.extend(mesh.positions.iter().map(|p| point![p.x, p.y, p.z]));
+            for tri in mesh.indices.chunks(3) {
+                if let [a, b, c] = *tri { indices.push([base + a, base + b, base + c]); }
             }
         }
 
-        // Queries would be updated here if used.
+        if vertices.is_empty() || indices.is_empty() { return; }
+
+        let rb = RigidBodyBuilder::fixed().build();
+        let rb_handle = self.bodies.insert(rb);
+        let co = ColliderBuilder::trimesh(vertices, indices)
+            .expect("valid trimesh from mesher model")
+            .friction(0.8)
+            .restitution(0.0)
+            .build();
+        self.colliders.insert_with_parent(co, rb_handle, &mut self.bodies);
     }
 
     pub fn spawn_player(&mut self, start: glam::Vec3) -> RigidBodyHandle {

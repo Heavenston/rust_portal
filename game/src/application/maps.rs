@@ -9,6 +9,8 @@ use std::collections::HashMap;
 
 use glam::{IVec3, UVec3};
 
+pub const WORLD_SCALE: f32 = 2.0;
+
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MapCellMaterial {
     #[default]

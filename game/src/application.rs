@@ -11,7 +11,7 @@ use physics::*;
 mod maps;
 
 // const MOVEMENT_SPEED: f32 = 150.;
-const DEFAULT_MOVEMENT_SPEED: f32 = 1.;
+const DEFAULT_MOVEMENT_SPEED: f32 = 5.;
 const MOVEMENT_SPEED_SCROLL_CHANGE: f32 = 1.3;
 const LOOK_SPEED: f32 = 0.0008;
 
@@ -79,6 +79,7 @@ impl Application {
             maps::MapCellMaterial::Concrete,
         );
 
+        // Add a tunnel
         default_map.clear(
             IVec3::new(width/2, 0, -5),
             IVec3::new(width/2, 0, -1),
@@ -93,9 +94,6 @@ impl Application {
         );
 
         let mut physics = PhysicsWorld::new();
-
-        // Build static world colliders from the current map
-        physics.rebuild_map_colliders(&default_map);
 
         // Spawn player dynamic capsule body
         let player_body = physics.spawn_player(glam::Vec3::new(1.5, 1.8, 1.5));
@@ -129,10 +127,12 @@ impl Application {
 
         let map_mesh = self.map_mesher.mesh(&self.current_map);
         map_mesh.upload(&mut self.map_mesher, state);
+        // Build physics collider from the already-generated render mesh
+        self.physics.rebuild_map_collider_from_model(&map_mesh);
 
         self.spot_light = state.insert_spot_light(engine::SpotLight {
             position: default(),
-            intensity: 5.,
+            intensity: 15.,
             color: Srgb::WHITE,
             direction: Vec3::NEG_Z,
             inner_cone_angle: self.camera.fov * 0.5,
