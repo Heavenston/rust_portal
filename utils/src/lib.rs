@@ -1,6 +1,8 @@
 #![feature(generic_const_exprs)]
 #![feature(never_type)]
+#![feature(nonzero_internals)]
 
+#![expect(internal_features)]
 #![expect(incomplete_features)]
 
 pub mod prelude {
@@ -13,6 +15,7 @@ pub mod prelude {
         sign::{ Sign, Signed },
         axis::{ Axis, AxisVecHelper },
         axis_direction::AxisDirection,
+        mapped_nonzero::{ MappedNonZero, PlusOneNonZeroUsize },
     };
 }
 
@@ -25,6 +28,7 @@ pub mod strict_sign;
 pub mod sign;
 pub mod axis;
 pub mod axis_direction;
+pub mod mapped_nonzero;
 
 use std::hash::{ DefaultHasher, Hasher, Hash };
 

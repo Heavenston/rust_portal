@@ -2144,6 +2144,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "portal-ecs"
+version = "0.1.0"
+dependencies = [
+ "derive-where",
+ "portal-utils",
+]
+
+[[package]]
 name = "portal-engine"
 version = "0.0.0"
 dependencies = [
