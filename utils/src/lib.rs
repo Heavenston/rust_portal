@@ -7,6 +7,7 @@
 
 pub mod prelude {
     pub use crate::{
+        ix,
         uid::Uid,
         default, concat_arrays, flatten_array, hash_value,
         itertools::Itertools as _,
@@ -65,4 +66,11 @@ pub fn hash_value<T: Hash>(val: &T) -> u64 {
     let mut state = DefaultHasher::new();
     val.hash(&mut state);
     state.finish()
+}
+
+#[macro_export]
+macro_rules! ix {
+    ($val: expr) => {
+        usize::try_from($val).expect("no overflow")
+    };
 }
