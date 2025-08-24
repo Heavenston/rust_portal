@@ -24,6 +24,30 @@ impl NonZeroMapper<usize, usize> for PlusOneMapper<usize> {
     }
 }
 
+impl NonZeroMapper<u32, u32> for PlusOneMapper<u32> {
+    #[inline]
+    fn into_nonzero(&self, val: u32) -> NonZero<u32> {
+        NonZero::new(val.saturating_add(1)).expect("Just added one")
+    }
+
+    #[inline]
+    fn from_nonzero(&self, val: NonZero<u32>) -> u32 {
+        val.get().saturating_sub(1)
+    }
+}
+
+impl NonZeroMapper<u64, u64> for PlusOneMapper<u64> {
+    #[inline]
+    fn into_nonzero(&self, val: u64) -> NonZero<u64> {
+        NonZero::new(val.saturating_add(1)).expect("Just added one")
+    }
+
+    #[inline]
+    fn from_nonzero(&self, val: NonZero<u64>) -> u64 {
+        val.get().saturating_sub(1)
+    }
+}
+
 #[derive_where::derive_where(PartialEq, Eq, Hash, Ord, PartialOrd; T)]
 #[derive_where(Debug, Clone, Copy; T, M)]
 pub struct MappedNonZero<T: ZeroablePrimitive, O, M> {
@@ -79,4 +103,6 @@ impl<T, O, M> Default for MappedNonZero<T, O, M>
     }
 }
 
-pub type PlusOneNonZeroUsize = MappedNonZero<usize, usize, PlusOneMapper<usize>>;
+pub type PlusOneNonZero<T> = MappedNonZero<T, T, PlusOneMapper<T>>;
+pub type PlusOneNonZeroUsize = PlusOneNonZero<usize>;
+pub type PlusOneNonZeroU32 = PlusOneNonZero<u32>;

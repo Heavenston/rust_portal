@@ -1,6 +1,9 @@
 use std::{marker::PhantomData, ops::{Index, IndexMut}};
 
 use utils::prelude::*;
+use utils::mapped_nonzero::PlusOneNonZero;
+
+type SparseIdx = u32;
 
 pub trait SparseSetDenseStorage<T>: Index<usize, Output = T> + IndexMut<usize, Output = T> {
     fn len(&self) -> usize;
@@ -37,11 +40,11 @@ impl<T> SparseSetDenseStorage<T> for Vec<T> {
     }
 }
 
-/// Basically a Map<usize, T>, where the 'usize' is the sparse idx
+/// Basically a Map<SparseIdx, T>, where the 'SparseIdx' is the sparse idx
 #[derive(Default, Debug, Clone)]
 pub struct SparseSet<T, S: SparseSetDenseStorage<T> = Vec<T>> {
-    sparse_to_dense_indices: Vec<Option<PlusOneNonZeroUsize>>,
-    dense_to_sparse_indices: Vec<usize>,
+    sparse_to_dense_indices: Vec<Option<PlusOneNonZero<SparseIdx>>>,
+    dense_to_sparse_indices: Vec<SparseIdx>,
     dense_values: S,
 
     _value: PhantomData<*const T>,
@@ -50,36 +53,40 @@ pub struct SparseSet<T, S: SparseSetDenseStorage<T> = Vec<T>> {
 impl<T, S> SparseSet<T, S>
     where S: SparseSetDenseStorage<T>,
 {
-    pub fn has(&self, sparse_idx: usize) -> bool {
-        self.sparse_to_dense_indices.get(sparse_idx).copied().flatten().is_some()
+    pub fn has(&self, sparse_idx: SparseIdx) -> bool {
+        let sparse = ix!(sparse_idx);
+        self.sparse_to_dense_indices.get(sparse).copied().flatten().is_some()
     }
 
-    pub fn get(&self, sparse_idx: usize) -> Option<&T> {
-        let dense_idx = self.sparse_to_dense_indices.get(sparse_idx)
+    pub fn get(&self, sparse_idx: SparseIdx) -> Option<&T> {
+        let sparse = ix!(sparse_idx);
+        let dense_idx = self.sparse_to_dense_indices.get(sparse)
             .copied().flatten()?.get();
-
-        Some(&self.dense_values[dense_idx])
+        Some(&self.dense_values[ix!(dense_idx)])
     }
 
-    pub fn get_mut(&mut self, sparse_idx: usize) -> Option<&mut T> {
-        let dense_idx = self.sparse_to_dense_indices.get(sparse_idx)
+    pub fn get_mut(&mut self, sparse_idx: SparseIdx) -> Option<&mut T> {
+        let sparse = ix!(sparse_idx);
+        let dense_idx = self.sparse_to_dense_indices.get(sparse)
             .copied().flatten()?.get();
-
-        Some(&mut self.dense_values[dense_idx])
+        Some(&mut self.dense_values[ix!(dense_idx)])
     }
 
-    pub fn insert(&mut self, sparse_idx: usize, value: T) {
-        if self.sparse_to_dense_indices.len() <= sparse_idx {
-            self.sparse_to_dense_indices.resize_with(sparse_idx + 1, || None);
+    pub fn insert(&mut self, sparse_idx: SparseIdx, value: T) {
+        let sparse = ix!(sparse_idx);
+        if self.sparse_to_dense_indices.len() <= sparse {
+            self.sparse_to_dense_indices.resize_with(sparse + 1, || None);
         }
 
-        match &mut self.sparse_to_dense_indices[sparse_idx] {
+        match &mut self.sparse_to_dense_indices[sparse] {
             &mut Some(dense_idx) => {
-                self.dense_values[dense_idx.get()] = value;
-                self.dense_to_sparse_indices[dense_idx.get()] = sparse_idx;
+                let d = ix!(dense_idx.get());
+                self.dense_values[d] = value;
+                self.dense_to_sparse_indices[d] = sparse_idx;
             },
             val => {
-                *val = Some(PlusOneNonZeroUsize::new(self.dense_values.len()));
+                let new_dense: SparseIdx = SparseIdx::try_from(self.dense_values.len()).expect("no overflow");
+                *val = Some(PlusOneNonZero::<SparseIdx>::new(new_dense));
                 self.dense_values.push(value);
                 self.dense_to_sparse_indices.push(sparse_idx);
                 debug_assert_eq!(
@@ -89,44 +96,46 @@ impl<T, S> SparseSet<T, S>
         }
     }
 
-    pub fn remove(&mut self, sparse_idx: usize) -> Option<T> {
-        let dense_idx = self.sparse_to_dense_indices.get(sparse_idx)
+    pub fn remove(&mut self, sparse_idx: SparseIdx) -> Option<T> {
+        let sparse = ix!(sparse_idx);
+        let dense_idx = self.sparse_to_dense_indices.get(sparse)
             .copied().flatten()?.get();
-        debug_assert!(dense_idx < self.sparse_to_dense_indices.len());
+        let d = ix!(dense_idx);
+        debug_assert!(d < self.sparse_to_dense_indices.len());
 
-        self.sparse_to_dense_indices[sparse_idx] = None;
+        self.sparse_to_dense_indices[sparse] = None;
 
         let moved_sparse_idx = self.dense_to_sparse_indices.last().copied()
             .expect("Cannot be empty here");
 
-        let value = self.dense_values.swap_remove(dense_idx);
+        let value = self.dense_values.swap_remove(d);
         debug_assert_eq!(
-            self.dense_to_sparse_indices.swap_remove(dense_idx),
+            self.dense_to_sparse_indices.swap_remove(d),
             sparse_idx
         );
 
         if moved_sparse_idx != sparse_idx {
             debug_assert_ne!(moved_sparse_idx, sparse_idx);
             debug_assert_eq!(
-                self.sparse_to_dense_indices[moved_sparse_idx],
-                Some(PlusOneNonZeroUsize::new(
-                    self.dense_values.len()
+                self.sparse_to_dense_indices[ix!(moved_sparse_idx)],
+                Some(PlusOneNonZero::<SparseIdx>::new(
+                    SparseIdx::try_from(self.dense_values.len()).expect("no overflow")
                 )),
             );
-            self.sparse_to_dense_indices[moved_sparse_idx] =
-                Some(PlusOneNonZeroUsize::new(dense_idx));
+            self.sparse_to_dense_indices[ix!(moved_sparse_idx)] =
+                Some(PlusOneNonZero::<SparseIdx>::new(dense_idx));
         }
 
         Some(value)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (usize, &T)> + DoubleEndedIterator + Clone + ExactSizeIterator {
+    pub fn iter(&self) -> impl Iterator<Item = (SparseIdx, &T)> + DoubleEndedIterator + Clone + ExactSizeIterator {
         self.dense_to_sparse_indices.iter().copied().zip(
             self.dense_values.iter()
         )
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (usize, &mut T)> + DoubleEndedIterator + ExactSizeIterator {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (SparseIdx, &mut T)> + DoubleEndedIterator + ExactSizeIterator {
         self.dense_to_sparse_indices.iter().copied().zip(
             self.dense_values.iter_mut()
         )
@@ -255,14 +264,14 @@ mod tests {
 
     #[test]
     fn iter_mut_allows_in_place_updates() {
-        let mut set = SparseSet::<i32>::default();
+        let mut set = SparseSet::<i64>::default();
         set.insert(4, 10);
         set.insert(7, 20);
         set.insert(9, 30);
 
         for (idx, v) in set.iter_mut() {
             // simple transform using sparse index
-            *v += idx as i32;
+            *v += i64::from(idx);
         }
 
         assert_eq!(set.get(4), Some(&(10 + 4)));
