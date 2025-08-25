@@ -15,36 +15,42 @@ pub struct PlusOneMapper<T> {
 impl NonZeroMapper<usize, usize> for PlusOneMapper<usize> {
     #[inline]
     fn into_nonzero(&self, val: usize) -> NonZero<usize> {
-        NonZero::new(val.saturating_add(1)).expect("Just added one")
+        val.checked_add(1)
+            .and_then(|added| NonZero::new(added))
+            .expect("Max usize given")
     }
 
     #[inline]
     fn from_nonzero(&self, val: NonZero<usize>) -> usize {
-        val.get().saturating_sub(1)
+        val.get().checked_sub(1).expect("impossible, non-zero")
     }
 }
 
 impl NonZeroMapper<u32, u32> for PlusOneMapper<u32> {
     #[inline]
     fn into_nonzero(&self, val: u32) -> NonZero<u32> {
-        NonZero::new(val.saturating_add(1)).expect("Just added one")
+        val.checked_add(1)
+            .and_then(|added| NonZero::new(added))
+            .expect("Max u32 given")
     }
 
     #[inline]
     fn from_nonzero(&self, val: NonZero<u32>) -> u32 {
-        val.get().saturating_sub(1)
+        val.get().checked_sub(1).expect("impossible, non-zero")
     }
 }
 
 impl NonZeroMapper<u64, u64> for PlusOneMapper<u64> {
     #[inline]
     fn into_nonzero(&self, val: u64) -> NonZero<u64> {
-        NonZero::new(val.saturating_add(1)).expect("Just added one")
+        val.checked_add(1)
+            .and_then(|added| NonZero::new(added))
+            .expect("Max u64 given")
     }
 
     #[inline]
     fn from_nonzero(&self, val: NonZero<u64>) -> u64 {
-        val.get().saturating_sub(1)
+        val.get().checked_sub(1).expect("impossible, non-zero")
     }
 }
 
