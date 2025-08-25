@@ -158,12 +158,14 @@ impl SparseSetDenseStorage for ComponentDenseStorage {
     }
 
     fn push(&mut self, val: Self::OwnedItem) {
+        self.len += 1;
         for (storage, comp) in zip(self.storages.iter_mut(), val) {
             storage.dyn_push(comp);
         }
     }
 
     fn swap_remove(&mut self, idx: usize) -> Self::OwnedItem {
+        self.len -= 1;
         self.storages.iter_mut()
             .map(|storage| storage.dyn_swap_remove(idx))
             .collect_vec()
@@ -178,7 +180,7 @@ impl SparseSetDenseStorage for ComponentDenseStorage {
     }
 
     fn get(&self, idx: usize) -> Option<Self::RefItem<'_>> {
-        (idx >= self.len)
+        (idx < self.len)
             .then(|| StorageComponentsRef {
                 idx,
                 storage: self,
@@ -186,7 +188,7 @@ impl SparseSetDenseStorage for ComponentDenseStorage {
     }
 
     fn get_mut(&mut self, idx: usize) -> Option<Self::RefMutItem<'_>> {
-        (idx >= self.len)
+        (idx < self.len)
             .then(|| StorageComponentsRefMut {
                 idx,
                 storage: self,
@@ -250,10 +252,47 @@ impl World {
         };
 
         // make sure all reserved entities will immediately be valid
-        let empty_archtyp = this.archtyp_for(Cow::Owned(EntitySet::default()));
+        let empty_archetyp = this.archtyp_for(Cow::Owned(EntitySet::default()));
         for reserved in this.entity_storage.reserved_entities() {
-            this.entities_archetypes.set_or_push(reserved.index(), empty_archtyp);
+            this.entities_archetypes.set_or_push(reserved.index(), empty_archetyp);
+            this.tables[this.archetypes[empty_archetyp].table_id]
+                .sparse_set.insert(reserved.index(), vec![].into_boxed_slice());
         }
+
+        // Hard-code the first table for the ComponentComponent's component entity
+        let cc_entity = this.entity_storage.take_next_reserved()
+            .unwrap_or_else(|| this.entity_storage.spawn());
+        this.components_typeid_to_entity.insert(TypeId::of::<ComponentComponent>(), cc_entity);
+
+        let cc_set = EntitySet::from(&[cc_entity][..]);
+        let cc_table_id = this.tables.push(Table {
+            table_components: cc_set.clone(),
+            sparse_set: SparseSet::new(ComponentDenseStorage {
+                len: 0,
+                storages: vec![Box::new(Vec::<ComponentComponent>::new()) as Box<dyn ComponentVec>]
+                    .into_boxed_slice(),
+            }),
+        });
+        this.components_set_to_table.insert(cc_set.clone(), cc_table_id);
+
+        let cc_archetype_id = this.archetypes.push(Archetyp {
+            components: cc_set.clone(),
+            table_id: cc_table_id,
+        });
+        this.components_set_to_archetyp.insert(cc_set.clone(), cc_archetype_id);
+
+        // Move the entity from the empty table to the ComponentComponent table and seed its own ComponentComponent
+        let empty_table_id = this.archetypes[empty_archetyp].table_id;
+        let _ = this.tables[empty_table_id].sparse_set.remove(cc_entity.index());
+        this.entities_archetypes.set_or_push(cc_entity.index(), cc_archetype_id);
+        let row: Box<[Box<dyn Component>]> = vec![
+            Box::new(ComponentComponent {
+                type_id: TypeId::of::<ComponentComponent>(),
+                layout: Layout::new::<ComponentComponent>(),
+                componentvec_factory: Box::new(|| -> Box<dyn ComponentVec> { Box::new(Vec::<ComponentComponent>::new()) }) as Box<_>,
+            }) as Box<dyn Component>
+        ].into_boxed_slice();
+        this.tables[cc_table_id].sparse_set.insert(cc_entity.index(), row);
 
         this
     }
@@ -263,9 +302,11 @@ impl World {
     }
 
     pub fn spawn(&mut self) -> Entity {
-        let empty_archetype = self.archtyp_for(Cow::Owned(EntitySet::default()));
+        let empty_archetyp = self.archtyp_for(Cow::Owned(EntitySet::default()));
         let entity = self.entity_storage.spawn();
-        self.entities_archetypes.set_or_push(entity.index(), empty_archetype);
+        self.entities_archetypes.set_or_push(entity.index(), empty_archetyp);
+        self.tables[self.archetypes[empty_archetyp].table_id]
+            .sparse_set.insert(entity.index(), vec![].into_boxed_slice());
         entity
     }
 
@@ -316,7 +357,16 @@ impl World {
                 let comp_set = table_components.into_owned();
                 let table_id = self.tables.push(Table {
                     table_components: comp_set.clone(),
-                    sparse_set: SparseSet::new(ComponentDenseStorage::default()),
+                    sparse_set: SparseSet::new(ComponentDenseStorage {
+                        len: 0,
+                        storages: comp_set.iter()
+                            .map(|component| self.get::<ComponentComponent>(component)
+                                .expect("Entity is component")
+                                .componentvec_factory.create()
+                            )
+                            .collect::<Vec<_>>()
+                            .into_boxed_slice(),
+                    }),
                 });
 
                 self.components_set_to_table.insert(comp_set, table_id);
@@ -441,6 +491,8 @@ impl World {
         let r#ref = new_table.sparse_set.get_mut(entity.index()).expect("Entity just inserted")
             .typed(new_component_idx);
 
+        self.entities_archetypes[entity.index()] = new_archtyp_id;
+
         AddComponent {
             r#ref,
             was_added: true,
@@ -525,7 +577,7 @@ mod tests {
     #[test]
     fn component_registration_creates_entity_with_componentcomponent() {
         #[derive(Debug)]
-        struct Foo(i32);
+        struct Foo;
 
         let mut w = World::new();
         let comp_entity = w.component::<Foo>();

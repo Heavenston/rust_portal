@@ -4,6 +4,8 @@ use utils::prelude::*;
 
 // FIXME: Could (should) be a bit set (as it is mainly used as a ComponentSet
 // which are all (supposedly) contiguous)
+// But this doesn't really work with non zero generation :( so dont know whats
+// best
 /// Stores a 'set' of entities
 #[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EntitySet {

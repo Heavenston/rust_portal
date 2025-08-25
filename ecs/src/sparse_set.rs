@@ -116,9 +116,9 @@ impl<S> SparseSet<S>
                 self.dense_values.set(d, value);
                 self.dense_to_sparse_indices[d] = sparse_idx;
             },
-            val => {
+            stored_dense => {
                 let new_dense: SparseIdx = SparseIdx::try_from(self.dense_values.len()).expect("no overflow");
-                *val = Some(PlusOneNonZero::<SparseIdx>::new(new_dense));
+                *stored_dense = Some(PlusOneNonZero::<SparseIdx>::new(new_dense));
                 self.dense_values.push(value);
                 self.dense_to_sparse_indices.push(sparse_idx);
                 debug_assert_eq!(
@@ -141,10 +141,8 @@ impl<S> SparseSet<S>
             .expect("Cannot be empty here");
 
         let value = self.dense_values.swap_remove(d);
-        debug_assert_eq!(
-            self.dense_to_sparse_indices.swap_remove(d),
-            sparse_idx
-        );
+        let removed_sparse_idx = self.dense_to_sparse_indices.swap_remove(d);
+        debug_assert_eq!(removed_sparse_idx, sparse_idx);
 
         if moved_sparse_idx != sparse_idx {
             debug_assert_ne!(moved_sparse_idx, sparse_idx);
