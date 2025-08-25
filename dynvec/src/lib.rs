@@ -15,7 +15,7 @@
 //! ## Example
 //!
 //! ```
-//! use portal_dynvec::DynVec;
+//! extern crate portal_dynvec; use portal_dynvec::DynVec;
 //!
 //! // Choose the element type at runtime
 //! let mut v = DynVec::new::<i32>();
@@ -97,7 +97,7 @@ impl DynVec {
     ///
     /// Example
     /// ```
-    /// use portal_dynvec::DynVec;
+    /// extern crate portal_dynvec; use portal_dynvec::DynVec;
     /// let mut v = DynVec::new::<i32>();
     /// v.push(Box::new(1_i32));
     /// assert_eq!(v.len(), 1);
@@ -363,6 +363,29 @@ impl DynVec {
     /// The element is logically owned by the returned guard. The backing vector is actually
     /// updated (swap in the last element and decrement `len`) when the guard is dropped.
     /// Panics if out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// Move a value into another `DynVec` with no allocation:
+    /// ```
+    /// extern crate portal_dynvec; use portal_dynvec::DynVec;
+    /// let mut a = DynVec::new::<i32>();
+    /// let mut b = DynVec::new::<i32>();
+    /// a.typed_mut::<i32>().extend([1, 2, 3]);
+    /// a.swap_remove(1).push_into(&mut b);
+    /// assert_eq!(a.typed::<i32>().as_slice(), &[1, 3]);
+    /// assert_eq!(b.typed::<i32>().as_slice(), &[2]);
+    /// ```
+    ///
+    /// Extract the removed value by type:
+    /// ```
+    /// extern crate portal_dynvec; use portal_dynvec::DynVec;
+    /// let mut v = DynVec::new::<u64>();
+    /// v.typed_mut::<u64>().extend([10, 20]);
+    /// let x: u64 = v.swap_remove(0).into_typed();
+    /// assert_eq!(x, 10);
+    /// assert_eq!(v.typed::<u64>().as_slice(), &[20]);
+    /// ```
     pub fn swap_remove(&mut self, idx: usize) -> OwnedDynVecValue<'_> {
         assert!(idx < self.len, "index out of bounds");
         let last = self.len - 1;
@@ -390,6 +413,12 @@ impl Drop for DynVec {
 ///
 /// The value can be consumed via typed extraction or moved into another `DynVec`.
 /// The source vector is actually updated on `Drop` of this guard.
+///
+/// Typical ways to consume the guard:
+/// - Move into another `DynVec` of the same type using [`OwnedDynVecValue::push_into`]
+/// - Insert at a position using [`OwnedDynVecValue::insert_into`]
+/// - Extract the concrete value with [`OwnedDynVecValue::into_typed`]
+/// - Box as `dyn Any` with [`OwnedDynVecValue::into_boxed_any`]
 pub struct OwnedDynVecValue<'a> {
     vec: &'a mut DynVec,
     idx: usize,
@@ -401,6 +430,16 @@ impl<'a> OwnedDynVecValue<'a> {
     /// Consumes the guard and returns the value boxed as `dyn Any`.
     ///
     /// Allocates a new box and copies the bytes (ZST is handled without copying).
+    ///
+    /// # Example
+    /// ```
+    /// extern crate portal_dynvec; use portal_dynvec::DynVec;
+    /// let mut v = DynVec::new::<String>();
+    /// v.typed_mut::<String>().extend(["a".to_string(), "b".to_string()]);
+    /// let any = v.swap_remove(0).into_boxed_any();
+    /// assert!(any.downcast::<String>().is_ok());
+    /// assert_eq!(v.typed::<String>().as_slice(), &["b".to_string()]);
+    /// ```
     pub fn into_boxed_any(mut self) -> Box<dyn Any> {
         let size = self.vec.meta.layout.size();
         if size == 0 {
@@ -427,6 +466,16 @@ impl<'a> OwnedDynVecValue<'a> {
     /// Consumes the guard and returns the value as `T`.
     ///
     /// Panics if `T` does not match the vector's element type.
+    ///
+    /// # Example
+    /// ```
+    /// extern crate portal_dynvec; use portal_dynvec::DynVec;
+    /// let mut v = DynVec::new::<i32>();
+    /// v.typed_mut::<i32>().extend([1, 2]);
+    /// let val: i32 = v.swap_remove(1).into_typed();
+    /// assert_eq!(val, 2);
+    /// assert_eq!(v.typed::<i32>().as_slice(), &[1]);
+    /// ```
     pub fn into_typed<T: 'static>(mut self) -> T {
         assert!(TypeId::of::<T>() == self.vec.meta.type_id, "OwnedDynVecValue::into_typed: type mismatch");
         let out = unsafe { self.vec.read_t::<T>(self.idx) };
@@ -437,6 +486,17 @@ impl<'a> OwnedDynVecValue<'a> {
     /// Moves the value into another `DynVec` with the same element type.
     ///
     /// Panics if the destination's element type differs.
+    ///
+    /// # Example
+    /// ```
+    /// extern crate portal_dynvec; use portal_dynvec::DynVec;
+    /// let mut a = DynVec::new::<u32>();
+    /// let mut b = DynVec::new::<u32>();
+    /// a.typed_mut::<u32>().extend([1, 2, 3]);
+    /// a.swap_remove(0).push_into(&mut b);
+    /// assert_eq!(a.typed::<u32>().as_slice(), &[3, 2]);
+    /// assert_eq!(b.typed::<u32>().as_slice(), &[1]);
+    /// ```
     pub fn push_into(mut self, dst: &mut DynVec) {
         assert!(self.vec.meta.type_id == dst.meta.type_id, "push_into: TypeId mismatch");
         let size = self.vec.meta.layout.size();
@@ -457,6 +517,18 @@ impl<'a> OwnedDynVecValue<'a> {
     /// Inserts the value into another `DynVec` at position `at`, shifting elements to the right.
     ///
     /// Panics if `at > dst.len()` or the destination's element type differs.
+    ///
+    /// # Example
+    /// ```
+    /// extern crate portal_dynvec; use portal_dynvec::DynVec;
+    /// let mut a = DynVec::new::<i32>();
+    /// let mut b = DynVec::new::<i32>();
+    /// a.typed_mut::<i32>().extend([10, 20, 30]);
+    /// b.typed_mut::<i32>().extend([1, 2, 3]);
+    /// a.swap_remove(1).insert_into(&mut b, 1);
+    /// assert_eq!(a.typed::<i32>().as_slice(), &[10, 30]);
+    /// assert_eq!(b.typed::<i32>().as_slice(), &[1, 20, 2, 3]);
+    /// ```
     pub fn insert_into(mut self, dst: &mut DynVec, at: usize) {
         assert!(self.vec.meta.type_id == dst.meta.type_id, "insert_into: TypeId mismatch");
         assert!(at <= dst.len, "insert_into: index out of bounds");
