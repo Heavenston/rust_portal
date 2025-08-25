@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 utils = { workspace = true }
 derive-where = { version = "1.5.0", features = ["nightly"] }
+derive_more = { version = "2.0.1", features = ["from", "into"] }

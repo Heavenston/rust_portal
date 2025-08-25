@@ -17,11 +17,15 @@ pub mod prelude {
         axis::{ Axis, AxisVecHelper },
         axis_direction::AxisDirection,
         mapped_nonzero::{ MappedNonZero, PlusOneNonZeroUsize },
+        sorted_vec::{ SortedVec, SortedSet },
+        dyn_clone,
     };
 }
 
 pub use readonly;
 pub use itertools;
+pub use sorted_vec;
+pub use dyn_clone;
 
 pub mod handle_map;
 pub mod uid;
@@ -31,7 +35,7 @@ pub mod axis;
 pub mod axis_direction;
 pub mod mapped_nonzero;
 
-use std::hash::{ DefaultHasher, Hasher, Hash };
+use std::hash::{ DefaultHasher, Hash, Hasher };
 
 pub fn default<T: Default>() -> T {
     T::default()

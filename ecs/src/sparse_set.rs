@@ -1,78 +1,110 @@
-use std::{marker::PhantomData, ops::{Index, IndexMut}};
-
 use utils::prelude::*;
 use utils::mapped_nonzero::PlusOneNonZero;
 
 type SparseIdx = u32;
 
-pub trait SparseSetDenseStorage<T>: Index<usize, Output = T> + IndexMut<usize, Output = T> {
-    fn len(&self) -> usize;
-    fn push(&mut self, val: T);
-    fn swap_remove(&mut self, idx: usize) -> T;
+pub trait SparseSetDenseStorage {
+    type OwnedItem;
+    type RefItem<'a>
+        where Self: 'a;
+    type RefMutItem<'a>
+        where Self: 'a;
 
-    fn iter<'a>(&'a self) -> impl Iterator<Item = &'a T> + DoubleEndedIterator + ExactSizeIterator + Clone
-        where T: 'a;
-    fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = &'a mut T> + DoubleEndedIterator + ExactSizeIterator
-        where T: 'a;
+    fn len(&self) -> usize;
+    fn push(&mut self, val: Self::OwnedItem);
+    fn swap_remove(&mut self, idx: usize) -> Self::OwnedItem;
+    fn set(&mut self, idx: usize, value: Self::OwnedItem);
+
+    fn get(&self, idx: usize) -> Option<Self::RefItem<'_>>;
+    fn get_mut(&mut self, idx: usize) -> Option<Self::RefMutItem<'_>>;
+
+    fn iter<'a>(&'a self) -> impl Iterator<Item = Self::RefItem<'a>> + DoubleEndedIterator + ExactSizeIterator + Clone;
+    fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = Self::RefMutItem<'a>> + DoubleEndedIterator + ExactSizeIterator;
 }
 
-impl<T> SparseSetDenseStorage<T> for Vec<T> {
+impl<T> SparseSetDenseStorage for Vec<T> {
+    type OwnedItem = T;
+    type RefItem<'a> = &'a T
+        where T: 'a;
+    type RefMutItem<'a> = &'a mut T
+        where T: 'a;
+
     fn len(&self) -> usize {
-        Vec::len(self)
+        self.len()
     }
 
-    fn push(&mut self, val: T) {
-        Vec::push(self, val)
+    fn push(&mut self, val: Self::OwnedItem) {
+        self.push(val)
     }
 
-    fn swap_remove(&mut self, idx: usize) -> T {
-        Vec::swap_remove(self, idx)
+    fn swap_remove(&mut self, idx: usize) -> Self::OwnedItem {
+        self.swap_remove(idx)
     }
 
-    fn iter<'a>(&'a self) -> impl Iterator<Item = &'a T> + DoubleEndedIterator + ExactSizeIterator + Clone
-        where T: 'a {
+    fn set(&mut self, idx: usize, value: T) {
+        self.as_mut_slice()[idx] = value;
+    }
+
+    fn get(&self, idx: usize) -> Option<&T> {
+        self.as_slice().get(idx)
+    }
+
+    fn get_mut(&mut self, idx: usize) -> Option<&mut T> {
+        self.as_mut_slice().get_mut(idx)
+    }
+
+    fn iter<'a>(&'a self) -> impl Iterator<Item = &'a T> + DoubleEndedIterator + ExactSizeIterator + Clone {
         self.as_slice().iter()
     }
 
-    fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = &'a mut T> + DoubleEndedIterator + ExactSizeIterator
-        where T: 'a {
+    fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = &'a mut T> + DoubleEndedIterator + ExactSizeIterator {
         self.as_mut_slice().iter_mut()
     }
 }
 
 /// Basically a Map<SparseIdx, T>, where the 'SparseIdx' is the sparse idx
 #[derive(Default, Debug, Clone)]
-pub struct SparseSet<T, S: SparseSetDenseStorage<T> = Vec<T>> {
+pub struct SparseSet<S: SparseSetDenseStorage> {
     sparse_to_dense_indices: Vec<Option<PlusOneNonZero<SparseIdx>>>,
     dense_to_sparse_indices: Vec<SparseIdx>,
     dense_values: S,
-
-    _value: PhantomData<*const T>,
 }
 
-impl<T, S> SparseSet<T, S>
-    where S: SparseSetDenseStorage<T>,
+impl<S> SparseSet<S>
+    where S: SparseSetDenseStorage,
 {
+    pub fn new(dense_values: S) -> Self {
+        Self {
+            sparse_to_dense_indices: default(),
+            dense_to_sparse_indices: default(),
+            dense_values,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.dense_values.len()
+    }
+
     pub fn has(&self, sparse_idx: SparseIdx) -> bool {
         let sparse = ix!(sparse_idx);
         self.sparse_to_dense_indices.get(sparse).copied().flatten().is_some()
     }
 
-    pub fn get(&self, sparse_idx: SparseIdx) -> Option<&T> {
+    pub fn get(&self, sparse_idx: SparseIdx) -> Option<S::RefItem<'_>> {
         let sparse = ix!(sparse_idx);
         let dense_idx = self.sparse_to_dense_indices.get(sparse)
             .copied().flatten()?.get();
-        Some(&self.dense_values[ix!(dense_idx)])
+        self.dense_values.get(ix!(dense_idx))
     }
 
-    pub fn get_mut(&mut self, sparse_idx: SparseIdx) -> Option<&mut T> {
+    pub fn get_mut(&mut self, sparse_idx: SparseIdx) -> Option<S::RefMutItem<'_>> {
         let sparse = ix!(sparse_idx);
         let dense_idx = self.sparse_to_dense_indices.get(sparse)
             .copied().flatten()?.get();
-        Some(&mut self.dense_values[ix!(dense_idx)])
+        self.dense_values.get_mut(ix!(dense_idx))
     }
 
-    pub fn insert(&mut self, sparse_idx: SparseIdx, value: T) {
+    pub fn insert(&mut self, sparse_idx: SparseIdx, value: S::OwnedItem) {
         let sparse = ix!(sparse_idx);
         if self.sparse_to_dense_indices.len() <= sparse {
             self.sparse_to_dense_indices.resize_with(sparse + 1, || None);
@@ -81,7 +113,7 @@ impl<T, S> SparseSet<T, S>
         match &mut self.sparse_to_dense_indices[sparse] {
             &mut Some(dense_idx) => {
                 let d = ix!(dense_idx.get());
-                self.dense_values[d] = value;
+                self.dense_values.set(d, value);
                 self.dense_to_sparse_indices[d] = sparse_idx;
             },
             val => {
@@ -96,7 +128,7 @@ impl<T, S> SparseSet<T, S>
         }
     }
 
-    pub fn remove(&mut self, sparse_idx: SparseIdx) -> Option<T> {
+    pub fn remove(&mut self, sparse_idx: SparseIdx) -> Option<S::OwnedItem> {
         let sparse = ix!(sparse_idx);
         let dense_idx = self.sparse_to_dense_indices.get(sparse)
             .copied().flatten()?.get();
@@ -129,13 +161,17 @@ impl<T, S> SparseSet<T, S>
         Some(value)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (SparseIdx, &T)> + DoubleEndedIterator + Clone + ExactSizeIterator {
+    pub fn sparse_indices(&self) -> impl Iterator<Item = SparseIdx> + DoubleEndedIterator + Clone + ExactSizeIterator {
+        self.dense_to_sparse_indices.iter().copied()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (SparseIdx, S::RefItem<'_>)> + DoubleEndedIterator + Clone + ExactSizeIterator {
         self.dense_to_sparse_indices.iter().copied().zip(
             self.dense_values.iter()
         )
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (SparseIdx, &mut T)> + DoubleEndedIterator + ExactSizeIterator {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (SparseIdx, S::RefMutItem<'_>)> + DoubleEndedIterator + ExactSizeIterator {
         self.dense_to_sparse_indices.iter().copied().zip(
             self.dense_values.iter_mut()
         )
@@ -148,7 +184,7 @@ mod tests {
 
     #[test]
     fn insert_and_get_and_mutate() {
-        let mut set = SparseSet::<i32>::default();
+        let mut set = SparseSet::<Vec<i32>>::default();
 
         assert!(!set.has(3));
         assert_eq!(set.get(3), None);
@@ -163,7 +199,7 @@ mod tests {
 
     #[test]
     fn insert_overwrite_same_sparse_index() {
-        let mut set = SparseSet::<&'static str>::default();
+        let mut set = SparseSet::<Vec<&'static str>>::default();
 
         set.insert(1, "first");
         // Overwrite value at the same sparse index should not grow dense storage
@@ -175,7 +211,7 @@ mod tests {
 
     #[test]
     fn remove_last_element_updates_state() {
-        let mut set = SparseSet::<i32>::default();
+        let mut set = SparseSet::<Vec<i32>>::default();
 
         set.insert(1, 100);
         set.insert(7, 200); // this is last in dense order
@@ -190,7 +226,7 @@ mod tests {
 
     #[test]
     fn remove_middle_element_swaps_with_last_and_clears_mapping() {
-        let mut set = SparseSet::<&'static str>::default();
+        let mut set = SparseSet::<Vec<&'static str>>::default();
 
         set.insert(10, "a"); // dense 0
         set.insert(20, "b"); // dense 1 (middle)
@@ -214,7 +250,7 @@ mod tests {
 
     #[test]
     fn remove_nonexistent_returns_none_and_noop() {
-        let mut set = SparseSet::<i32>::default();
+        let mut set = SparseSet::<Vec<i32>>::default();
         set.insert(2, 5);
         assert_eq!(set.remove(999), None);
         assert!(set.has(2));
@@ -223,7 +259,7 @@ mod tests {
 
     #[test]
     fn iter_yields_pairs_in_dense_order_and_rev() {
-        let mut set = SparseSet::<&'static str>::default();
+        let mut set = SparseSet::<Vec<&'static str>>::default();
         set.insert(10, "a");
         set.insert(20, "b");
         set.insert(30, "c");
@@ -242,7 +278,7 @@ mod tests {
 
     #[test]
     fn iter_exact_size_and_clone_and_double_ended() {
-        let mut set = SparseSet::<i32>::default();
+        let mut set = SparseSet::<Vec<i32>>::default();
         set.insert(1, 1);
         set.insert(2, 2);
         set.insert(3, 3);
@@ -264,7 +300,7 @@ mod tests {
 
     #[test]
     fn iter_mut_allows_in_place_updates() {
-        let mut set = SparseSet::<i64>::default();
+        let mut set = SparseSet::<Vec<i64>>::default();
         set.insert(4, 10);
         set.insert(7, 20);
         set.insert(9, 30);
