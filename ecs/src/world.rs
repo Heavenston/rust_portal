@@ -453,3 +453,169 @@ impl Default for World {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ World, Entity, ComponentComponent };
+    use super::RESERVED_ENTITY_COUNT;
+    use std::{alloc::Layout, any::TypeId};
+
+    #[test]
+    fn spawn_produces_sequential_indices_after_reserved_and_alive() {
+        let mut w = World::new();
+
+        let e0 = w.spawn();
+        let e1 = w.spawn();
+        let e2 = w.spawn();
+
+        assert_eq!(e0.index(), RESERVED_ENTITY_COUNT);
+        assert_eq!(e1.index(), RESERVED_ENTITY_COUNT + 1);
+        assert_eq!(e2.index(), RESERVED_ENTITY_COUNT + 2);
+
+        assert_eq!(e0.generation(), 0);
+        assert_eq!(e1.generation(), 0);
+        assert_eq!(e2.generation(), 0);
+
+        assert!(w.alive(e0));
+        assert!(w.alive(e1));
+        assert!(w.alive(e2));
+    }
+
+    #[test]
+    fn dispawn_makes_entity_dead_and_double_despawn_false() {
+        let mut w = World::new();
+        let e = w.spawn();
+        assert!(w.alive(e));
+
+        assert!(w.dispawn(e));
+        assert!(!w.alive(e));
+
+        // Double-despawn should return false
+        assert!(!w.dispawn(e));
+    }
+
+    #[test]
+    fn dispawn_of_invalid_or_stale_entity_returns_false() {
+        let mut w = World::new();
+        // Invalid index well beyond allocated range
+        let invalid = Entity::new(42, 0);
+        assert!(!w.dispawn(invalid));
+
+        // Stale entity after despawn
+        let e = w.spawn();
+        assert!(w.dispawn(e));
+        // Old handle should now be stale
+        assert!(!w.dispawn(e));
+    }
+
+    #[test]
+    fn spawn_many_returns_correct_amount_and_alive() {
+        let mut w = World::new();
+        let count = 5;
+        let entities: Vec<_> = w.spawn_many(count).collect();
+        assert_eq!(entities.len() as u32, count);
+
+        // Indices should be contiguous after reserved block
+        for (i, e) in entities.iter().enumerate() {
+            assert_eq!(e.index(), RESERVED_ENTITY_COUNT + i as u32);
+            assert!(w.alive(*e));
+        }
+    }
+
+    #[test]
+    fn component_registration_creates_entity_with_componentcomponent() {
+        #[derive(Debug)]
+        struct Foo(i32);
+
+        let mut w = World::new();
+        let comp_entity = w.component::<Foo>();
+        assert!(w.alive(comp_entity));
+
+        // Same call returns the same entity
+        let comp_entity2 = w.component::<Foo>();
+        assert_eq!(comp_entity.index(), comp_entity2.index());
+
+        // The component entity must carry ComponentComponent describing Foo
+        let meta = w.get::<ComponentComponent>(comp_entity).expect("has meta");
+        assert_eq!(meta.type_id, TypeId::of::<Foo>());
+        assert_eq!(meta.layout, Layout::new::<Foo>());
+    }
+
+    #[test]
+    fn archetypes_and_tables_created_and_reused_on_moves() {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        struct A(u32);
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        struct B(u32);
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        struct C(u32);
+
+        let mut w = World::new();
+        let e1 = w.spawn();
+        let e2 = w.spawn();
+
+        // Start from empty archetype for each entity
+        assert!(!w.has::<A>(e1));
+        assert!(!w.has::<B>(e1));
+        assert!(!w.has::<A>(e2));
+        assert!(!w.has::<B>(e2));
+
+        // Move e1 to archetype {A}
+        let add_a_e1 = w.add(e1, A(1));
+        assert!(add_a_e1.was_added);
+        assert!(w.has::<A>(e1));
+        assert_eq!(w.get::<A>(e1).map(|r| r.0), Some(1));
+
+        // Move e2 to archetype {B}
+        let add_b_e2 = w.add(e2, B(2));
+        assert!(add_b_e2.was_added);
+        assert!(w.has::<B>(e2));
+        assert_eq!(w.get::<B>(e2).map(|r| r.0), Some(2));
+
+        // Move e1 to a not-yet-existing archetype {A,B}
+        let add_b_e1 = w.add(e1, B(20));
+        assert!(add_b_e1.was_added, "inserting new component should mark was_added");
+        assert!(w.has::<A>(e1) && w.has::<B>(e1));
+        assert_eq!(w.get::<A>(e1).map(|r| r.0), Some(1));
+        assert_eq!(w.get::<B>(e1).map(|r| r.0), Some(20));
+
+        // Move e2 to an already existing archetype {A,B}
+        let add_a_e2 = w.add(e2, A(10));
+        assert!(add_a_e2.was_added);
+        assert!(w.has::<A>(e2) && w.has::<B>(e2));
+        assert_eq!(w.get::<A>(e2).map(|r| r.0), Some(10));
+        assert_eq!(w.get::<B>(e2).map(|r| r.0), Some(2));
+
+        // Move e2 further to a new archetype {A,B,C}
+        let add_c_e2 = w.add(e2, C(7));
+        assert!(add_c_e2.was_added);
+        assert!(w.has::<C>(e2));
+        assert!(!w.has::<C>(e1));
+
+        // Ensure add again does not mark was_added and we can mutate via get_mut
+        let add_again = w.add(e1, A(999)); // already had A
+        assert!(!add_again.was_added);
+        let before = w.get::<A>(e1).map(|r| r.0).unwrap();
+        w.get_mut::<A>(e1).unwrap().0 = before + 1;
+        assert_eq!(w.get::<A>(e1).map(|r| r.0), Some(before + 1));
+    }
+
+    #[test]
+    fn get_or_default_inserts_once_then_reuses() {
+        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+        struct D(i32);
+
+        let mut w = World::new();
+        let e = w.spawn();
+
+        // First call inserts default
+        let add1 = w.get_or_default::<D>(e);
+        assert!(add1.was_added);
+        assert_eq!(add1.r#ref.0, 0);
+
+        // Second call should not insert again
+        let add2 = w.get_or_default::<D>(e);
+        assert!(!add2.was_added);
+        assert_eq!(add2.r#ref.0, 0);
+    }
+}

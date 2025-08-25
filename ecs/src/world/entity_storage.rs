@@ -12,6 +12,13 @@ pub struct Entity {
 }
 
 impl Entity {
+    pub fn new(index: EntityIndexType, generation: EntityGenerationType) -> Self {
+        Self {
+            index,
+            generation,
+        }
+    }
+
     pub fn index(self) -> EntityIndexType {
         self.index
     }
