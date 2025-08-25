@@ -2150,6 +2150,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "portal-dynvec"
+version = "0.1.0"
+
+[[package]]
 name = "portal-ecs"
 version = "0.1.0"
 dependencies = [
