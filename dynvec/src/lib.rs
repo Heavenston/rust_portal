@@ -518,6 +518,49 @@ impl<'a, T: 'static> DerefMut for TypedDynVecRefMut<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target { self.as_mut_slice() }
 }
 
+impl Extend<Box<dyn Any>> for DynVec {
+    fn extend<I: IntoIterator<Item = Box<dyn Any>>>(&mut self, iter: I) {
+        let it = iter.into_iter();
+        let (lower, _) = it.size_hint();
+        if lower > 0 { self.reserve(lower); }
+        for item in it { DynVec::push(self, item); }
+    }
+}
+
+impl<'a, T: 'static> Extend<T> for TypedDynVecRefMut<'a, T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        let it = iter.into_iter();
+        let (lower, _) = it.size_hint();
+        if lower > 0 { self.vec.reserve(lower); }
+        for item in it { self.push(item); }
+    }
+}
+
+impl<'a, 'b, T> Extend<&'a T> for TypedDynVecRefMut<'b, T>
+where
+    T: 'static + Clone,
+{
+    fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
+        let it = iter.into_iter();
+        let (lower, _) = it.size_hint();
+        if lower > 0 { self.vec.reserve(lower); }
+        for item in it { self.push(item.clone()); }
+    }
+}
+
+impl<T: 'static> std::iter::FromIterator<T> for DynVec {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let it = iter.into_iter();
+        let (lower, _) = it.size_hint();
+        let mut v = DynVec::new::<T>();
+        if lower > 0 { v.reserve(lower); }
+        {
+            let mut tv = v.typed_mut::<T>();
+            for item in it { tv.push(item); }
+        }
+        v
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -715,5 +758,44 @@ mod tests {
         // Untyped operations work too
         v.push(Box::new(Z));
         assert!(v.get(0).unwrap().is::<Z>());
+    }
+
+    #[test]
+    fn test_extend_typed_and_untyped() {
+        // Typed view extend
+        let mut v = DynVec::new::<i32>();
+        {
+            let mut tv = v.typed_mut::<i32>();
+            // trait method (in scope via prelude)
+            tv.extend([1, 2, 3]);
+            // trait method
+            std::iter::Extend::extend(&mut tv, [4, 5]);
+            // extend from references requires Clone
+            let buf = vec![6_i32, 7_i32];
+            tv.extend(buf.iter());
+        }
+        let tv = v.typed::<i32>();
+        assert_eq!(tv.as_slice(), &[1, 2, 3, 4, 5, 6, 7]);
+
+        // Untyped extend via Box<dyn Any>
+        let mut u = DynVec::new::<String>();
+        let items = ["a", "bb", "ccc"].into_iter().map(|s| Box::new(s.to_string()) as Box<dyn Any>);
+        u.extend(items);
+        // trait method
+        let items2 = ["dddd", "eeeee"].into_iter().map(|s| Box::new(s.to_string()) as Box<dyn Any>);
+        std::iter::Extend::extend(&mut u, items2);
+        let uv = u.typed::<String>();
+        assert_eq!(
+            uv.as_slice(),
+            &["a".to_string(), "bb".to_string(), "ccc".to_string(), "dddd".to_string(), "eeeee".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_collect_into_dynvec() {
+        let v: DynVec = [10_i64, 20, 30].into_iter().collect();
+        assert_eq!(v.metadata().type_id, TypeId::of::<i64>());
+        let t = v.typed::<i64>();
+        assert_eq!(t.as_slice(), &[10, 20, 30]);
     }
 }
