@@ -43,6 +43,12 @@ use std::ptr::{ self, from_raw_parts, from_raw_parts_mut, NonNull };
 use std::slice;
 use std::ptr::Alignment;
 
+#[inline]
+fn dangling_with_layout(layout: Layout) -> NonNull<u8> {
+    // layout.align() is guaranteed > 0 and a power of two.
+    unsafe { NonNull::without_provenance(Alignment::new_unchecked(layout.align()).as_nonzero()) }
+}
+
 /// Metadata describing the element type stored in a `DynVec`.
 ///
 /// Prefer constructing via [`DynVecMetadata::new`]. All fields are public for
@@ -106,7 +112,7 @@ impl DynVec {
     pub fn new_with_meta(meta: DynVecMetadata) -> Self {
         Self {
             // keep base pointer aligned to element type even with capacity == 0
-            ptr: unsafe { NonNull::without_provenance(Alignment::new_unchecked(meta.layout.align()).as_nonzero()) },
+            ptr: dangling_with_layout(meta.layout),
             len: 0,
             capacity: 0,
             meta,
@@ -134,6 +140,33 @@ impl DynVec {
     unsafe fn idx_ptr(&self, idx: usize) -> *mut u8 {
         debug_assert!(idx < self.len || idx == self.len && self.len <= self.capacity);
         unsafe { self.ptr.as_ptr().add(idx * self.elem_size()) }
+    }
+
+    #[inline]
+    unsafe fn write_t<T: 'static>(&mut self, idx: usize, val: T) {
+        debug_assert!(TypeId::of::<T>() == self.meta.type_id);
+        debug_assert!(idx <= self.len && self.len <= self.capacity);
+        unsafe { (self.idx_ptr(idx) as *mut T).write(val) };
+    }
+
+    #[inline]
+    unsafe fn read_t<T: 'static>(&mut self, idx: usize) -> T {
+        debug_assert!(TypeId::of::<T>() == self.meta.type_id);
+        debug_assert!(idx < self.len);
+        unsafe { (self.idx_ptr(idx) as *mut T).read() }
+    }
+
+    #[inline]
+    unsafe fn copy_t<T: 'static>(&mut self, from: usize, to: usize, count: usize) {
+        debug_assert!(TypeId::of::<T>() == self.meta.type_id);
+        debug_assert!(from < self.len && to <= self.len && count <= self.len);
+        if std::mem::size_of::<T>() == 0 || count == 0 || from == to {
+            return;
+        }
+        unsafe {
+            (self.idx_ptr(from) as *mut T)
+                .copy_to_nonoverlapping(self.idx_ptr(to) as *mut T, count);
+        }
     }
 
     #[inline]
@@ -184,30 +217,7 @@ impl DynVec {
         if needed <= self.capacity { return; }
         // Choose next power of two for growth; minimum capacity of 4.
         let new_cap = needed.next_power_of_two().max(4);
-        let elem_size = self.elem_size();
-        let align = self.elem_align();
-        unsafe {
-            if self.capacity == 0 {
-                let size_bytes = new_cap.checked_mul(elem_size).expect("capacity overflow");
-                let layout = Layout::from_size_align(size_bytes, align).expect("invalid layout");
-                let new_ptr = alloc(layout);
-                if new_ptr.is_null() { std::alloc::handle_alloc_error(layout); }
-                self.ptr = NonNull::new_unchecked(new_ptr);
-                self.capacity = new_cap;
-            } else {
-                let old_size = self.capacity.checked_mul(elem_size).expect("overflow");
-                let old_layout = Layout::from_size_align(old_size, align).expect("invalid layout");
-                let new_size = new_cap.checked_mul(elem_size).expect("overflow");
-                let new_ptr = realloc(self.ptr.as_ptr(), old_layout, new_size);
-                if new_ptr.is_null() {
-                    std::alloc::handle_alloc_error(
-                        Layout::from_size_align(new_size, align).expect("invalid layout"),
-                    );
-                }
-                self.ptr = NonNull::new_unchecked(new_ptr);
-                self.capacity = new_cap;
-            }
-        }
+        self.realloc_capacity(new_cap);
     }
 
     /// Shrinks the capacity as much as possible.
@@ -215,30 +225,53 @@ impl DynVec {
     /// If `len == 0`, frees the allocation. Otherwise, shrinks to exactly `len`.
     pub fn shrink_to_fit(&mut self) {
         if self.capacity == self.len { return; }
+        self.realloc_capacity(self.len);
+    }
+
+    #[inline]
+    fn realloc_capacity(&mut self, new_cap: usize) {
+        debug_assert!(new_cap >= self.len, "new capacity cannot be less than len");
         let elem_size = self.elem_size();
         let align = self.elem_align();
+        // ZST: no allocation required; just bump the logical capacity and keep aligned base.
+        if elem_size == 0 {
+            self.capacity = new_cap;
+            self.ptr = dangling_with_layout(self.meta.layout);
+            return;
+        }
         unsafe {
-            if self.len == 0 {
-                if self.capacity > 0 {
-                    let total_size = self.capacity * elem_size;
-                    let layout = Layout::from_size_align(total_size, align).expect("invalid layout");
-                    dealloc(self.ptr.as_ptr(), layout);
-                    // Reset to aligned dangling pointer for the element type
-                    self.ptr = NonNull::without_provenance(Alignment::new_unchecked(self.meta.layout.align()).as_nonzero());
+            if self.capacity == new_cap { return; }
+            if self.capacity == 0 {
+                if new_cap == 0 {
+                    // Keep aligned base pointer for empty allocation
+                    self.ptr = dangling_with_layout(self.meta.layout);
                     self.capacity = 0;
+                } else {
+                    let size_bytes = new_cap.checked_mul(elem_size).expect("capacity overflow");
+                    let layout = Layout::from_size_align(size_bytes, align).expect("invalid layout");
+                    let new_ptr = alloc(layout);
+                    if new_ptr.is_null() { std::alloc::handle_alloc_error(layout); }
+                    self.ptr = NonNull::new_unchecked(new_ptr);
+                    self.capacity = new_cap;
                 }
             } else {
-                let old_size = self.capacity * elem_size;
+                let old_size = self.capacity.checked_mul(elem_size).expect("capacity overflow");
                 let old_layout = Layout::from_size_align(old_size, align).expect("invalid layout");
-                let new_size = self.len * elem_size;
-                let new_ptr = realloc(self.ptr.as_ptr(), old_layout, new_size);
-                if new_ptr.is_null() {
-                    std::alloc::handle_alloc_error(
-                        Layout::from_size_align(new_size, align).expect("invalid layout"),
-                    );
+                if new_cap == 0 {
+                    dealloc(self.ptr.as_ptr(), old_layout);
+                    self.ptr = dangling_with_layout(self.meta.layout);
+                    self.capacity = 0;
+                } else {
+                    let new_size = new_cap.checked_mul(elem_size).expect("capacity overflow");
+                    let new_ptr = realloc(self.ptr.as_ptr(), old_layout, new_size);
+                    if new_ptr.is_null() {
+                        std::alloc::handle_alloc_error(
+                            Layout::from_size_align(new_size, align).expect("invalid layout"),
+                        );
+                    }
+                    self.ptr = NonNull::new_unchecked(new_ptr);
+                    self.capacity = new_cap;
                 }
-                self.ptr = NonNull::new_unchecked(new_ptr);
-                self.capacity = self.len;
             }
         }
     }
@@ -284,6 +317,13 @@ impl DynVec {
     /// Panics if the boxed value's `TypeId` does not match the vector's element type.
     pub fn push(&mut self, val: Box<dyn Any>) {
         self.assert_type(val.as_ref());
+        if self.elem_size() == 0 {
+            // ZST: no bytes to move; forget the box to defer drop to vector's lifecycle.
+            core::mem::forget(val);
+            self.reserve(1);
+            self.len += 1;
+            return;
+        }
         let data_ptr = Box::into_raw(val) as *mut u8;
         self.reserve(1);
         // Safety: destination is within allocation; `data_ptr` points to a valid T value.
@@ -306,6 +346,12 @@ impl DynVec {
     pub fn set(&mut self, idx: usize, val: Box<dyn Any>) {
         assert!(idx < self.len, "index out of bounds");
         self.assert_type(val.as_ref());
+        if self.elem_size() == 0 {
+            // ZST: drop the previous value's drop glue now; forget the new one to drop later.
+            unsafe { self.drop_at(idx) };
+            core::mem::forget(val);
+            return;
+        }
         let data_ptr = Box::into_raw(val) as *mut u8;
         unsafe { self.drop_at(idx) };
         unsafe { ptr::copy_nonoverlapping(data_ptr, self.idx_ptr(idx), self.elem_size()) };
@@ -318,6 +364,18 @@ impl DynVec {
     pub fn swap_remove(&mut self, idx: usize) -> Box<dyn Any> {
         assert!(idx < self.len, "index out of bounds");
         unsafe {
+            if self.elem_size() == 0 {
+                // ZST: fabricate a Box<dyn Any> using a proper fat pointer to an aligned dangling address.
+                let data_ptr = dangling_with_layout(self.meta.layout).as_ptr();
+                let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr as *mut (), self.meta.meta);
+                let boxed: Box<dyn Any> = Box::from_raw(fat);
+                let last_idx = self.len - 1;
+                if idx != last_idx {
+                    // nothing to copy
+                }
+                self.len -= 1;
+                return boxed;
+            }
             let data_ptr = alloc(self.meta.layout);
             if data_ptr.is_null() { std::alloc::handle_alloc_error(self.meta.layout); }
             let src = self.idx_ptr(idx);
@@ -342,8 +400,8 @@ impl Drop for DynVec {
             for i in 0..self.len {
                 self.drop_at(i);
             }
-            if self.capacity > 0 {
-                let total_size = self.capacity * self.elem_size();
+            if self.capacity > 0 && self.elem_size() > 0 {
+                let total_size = self.capacity.checked_mul(self.elem_size()).expect("capacity overflow");
                 let layout = Layout::from_size_align(total_size, self.elem_align())
                     .expect("invalid layout");
                 dealloc(self.ptr.as_ptr(), layout);
@@ -411,31 +469,22 @@ impl<'a, T: 'static> TypedDynVecRefMut<'a, T> {
     /// Pushes a value without boxing or virtual dispatch.
     pub fn push(&mut self, val: T) {
         self.vec.reserve(1);
-        unsafe {
-            let dst = self.vec.idx_ptr(self.vec.len) as *mut T;
-            std::ptr::write(dst, val);
-        }
+        unsafe { self.vec.write_t::<T>(self.vec.len, val); }
         self.vec.len += 1;
     }
     /// Sets index to value, dropping the old, without boxing.
     pub fn set(&mut self, idx: usize, val: T) {
         assert!(idx < self.vec.len, "index out of bounds");
-        unsafe {
-            self.vec.drop_at(idx);
-            let dst = self.vec.idx_ptr(idx) as *mut T;
-            std::ptr::write(dst, val);
-        }
+        unsafe { self.vec.drop_at(idx); }
+        unsafe { self.vec.write_t::<T>(idx, val); }
     }
     /// Removes at index and returns the removed value, swapping in the last.
     pub fn swap_remove(&mut self, idx: usize) -> T {
         assert!(idx < self.vec.len, "index out of bounds");
         let last_idx = self.vec.len - 1;
-        let out = unsafe { (self.vec.idx_ptr(idx) as *mut T).read() };
+        let out = unsafe { self.vec.read_t::<T>(idx) };
         if idx != last_idx {
-            unsafe {
-                (self.vec.idx_ptr(last_idx) as *mut T)
-                    .copy_to_nonoverlapping(self.vec.idx_ptr(idx) as *mut T, 1);
-            }
+            unsafe { self.vec.copy_t::<T>(last_idx, idx, 1); }
         }
         self.vec.len -= 1;
         out
@@ -608,5 +657,63 @@ mod tests {
         for x in view_mut.iter_mut() { *x *= 2; }
         let view2 = v.typed::<i32>();
         assert_eq!(view2.as_slice(), &[8, 40]);
+    }
+
+    #[test]
+    fn test_zst_unit_typed() {
+        let mut v = DynVec::new::<()>();
+        {
+            let mut tv = v.typed_mut::<()>();
+            for _ in 0..10 { tv.push(()); }
+            assert_eq!(tv.len(), 10);
+            // Indexing and iteration should work
+            assert_eq!(tv.as_slice().len(), 10);
+            // swap_remove should not panic and keep len consistent
+            tv.swap_remove(3);
+            assert_eq!(tv.len(), 9);
+            // pop returns Some(()) until empty
+            assert!(tv.pop().is_some());
+        }
+        // After scope, v still valid
+        assert!(v.len() <= 9);
+    }
+
+    #[test]
+    fn test_zst_unit_untyped() {
+        let mut v = DynVec::new::<()>();
+        for _ in 0..5 { v.push(Box::new(())); }
+        assert_eq!(v.len(), 5);
+        // get returns &dyn Any; downcast_ref::<()>() works
+        assert!(v.get(0).unwrap().is::<()>());
+        // set with ZST keeps len
+        v.set(2, Box::new(()));
+        assert_eq!(v.len(), 5);
+        // swap_remove returns Box<dyn Any> that downcasts to ()
+        let b = v.swap_remove(1);
+        assert!(b.downcast::<()>().is_ok());
+        assert_eq!(v.len(), 4);
+        // pop to empty
+        while v.pop().is_some() {}
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn test_zst_custom() {
+        #[derive(Copy, Clone, Debug)]
+        struct Z;
+        let mut v = DynVec::new::<Z>();
+        {
+            let mut tv = v.typed_mut::<Z>();
+            for _ in 0..16 { tv.push(Z); }
+            assert_eq!(tv.len(), 16);
+            // swap remove a few
+            tv.swap_remove(0);
+            tv.swap_remove(5.min(tv.len()-1));
+            assert!(tv.pop().is_some());
+        }
+        assert!(v.len() <= 14);
+        // Untyped operations work too
+        v.push(Box::new(Z));
+        assert!(v.get(0).unwrap().is::<Z>());
     }
 }
