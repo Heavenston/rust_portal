@@ -10,7 +10,12 @@
 //! - Untyped access: `get`/`get_mut` yield `&dyn Any`/`&mut dyn Any`.
 //! - Typed views: `typed::<T>()`/`typed_mut::<T>()` provide fast typed methods without
 //!   re-checking the type on every call.
-//! - Mutation: `push`, `set`, `swap_remove`, `pop` operate on `Box<dyn Any>` or via typed views.
+//! - Mutation:
+//!   - Untyped: `push`/`set` take `Box<dyn Any>`; removals `swap_remove`/`pop` return an owning
+//!     guard (OwnedDynVecValue) that can be consumed (e.g., `into_typed`, `push_into`, `insert_into`).
+//!   - Typed: use the typed views for `push`/`set`/`swap_remove`/`pop` with concrete types.
+//! - Iteration/collection: supports `Extend` and `FromIterator` so you can
+//!   `collect::<DynVec>()` from an iterator of `T` and `extend` typed views.
 //!
 //! ## Example
 //!
@@ -51,9 +56,11 @@ fn dangling_with_layout(layout: Layout) -> NonNull<u8> {
 
 /// Metadata describing the element type stored in a `DynVec`.
 ///
-/// Prefer constructing via [`DynVecMetadata::new`]. All fields are public for
-/// transparency and potential interop. The struct cannot be constructed from
-/// outside this crate to prevent inconsistent values; use `new::<T>()`.
+/// Construct using [`DynVecMetadata::new`] and pass it to APIs like
+/// [`DynVec::new_with_meta`] or [`DynVec::with_capacity`].
+///
+/// All fields are public for transparency and potential interop, but the private
+/// marker field prevents external construction to keep values consistent.
 pub struct DynVecMetadata {
     /// The `TypeId` of the element type.
     pub type_id: TypeId,
