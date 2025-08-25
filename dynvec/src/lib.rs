@@ -1,4 +1,4 @@
-#![feature(ptr_metadata)]
+#![feature(ptr_metadata, ptr_alignment_type)]
 #![warn(missing_docs)]
 //! Type-erased, single-type vector.
 //!
@@ -41,6 +41,7 @@ use std::any::{ Any, TypeId };
 use std::ops::{ Deref, DerefMut, Index, IndexMut };
 use std::ptr::{ self, from_raw_parts, from_raw_parts_mut, NonNull };
 use std::slice;
+use std::ptr::Alignment;
 
 /// Metadata describing the element type stored in a `DynVec`.
 ///
@@ -104,8 +105,8 @@ impl DynVec {
     /// Prefer `DynVec::new::<T>()` unless you need to pass metadata around.
     pub fn new_with_meta(meta: DynVecMetadata) -> Self {
         Self {
-            // dangling is fine when capacity == 0; never dereferenced
-            ptr: NonNull::dangling(),
+            // keep base pointer aligned to element type even with capacity == 0
+            ptr: unsafe { NonNull::without_provenance(Alignment::new_unchecked(meta.layout.align()).as_nonzero()) },
             len: 0,
             capacity: 0,
             meta,
@@ -223,7 +224,8 @@ impl DynVec {
                     let total_size = self.capacity * elem_size;
                     let layout = Layout::from_size_align(total_size, align).expect("invalid layout");
                     dealloc(self.ptr.as_ptr(), layout);
-                    self.ptr = NonNull::dangling();
+                    // Reset to aligned dangling pointer for the element type
+                    self.ptr = NonNull::without_provenance(Alignment::new_unchecked(self.meta.layout.align()).as_nonzero());
                     self.capacity = 0;
                 }
             } else {
@@ -402,12 +404,7 @@ impl<'a, T: 'static> TypedDynVecRef<'a, T> {
     /// Returns a shared slice over all elements.
     pub fn as_slice(&self) -> &[T] {
         let len = self.vec.len;
-        let ptr: *const T = if len == 0 {
-            // Use a properly aligned dangling pointer for T
-            NonNull::<T>::dangling().as_ptr()
-        } else {
-            unsafe { self.vec.idx_ptr(0) as *const T }
-        };
+        let ptr = self.vec.ptr.as_ptr() as *const T;
         unsafe { slice::from_raw_parts(ptr, len) }
     }
 }
@@ -491,21 +488,13 @@ impl<'a, T: 'static> TypedDynVecRefMut<'a, T> {
     /// Returns a shared slice over all elements.
     pub fn as_slice(&self) -> &[T] {
         let len = self.vec.len;
-        let ptr: *const T = if len == 0 {
-            NonNull::<T>::dangling().as_ptr()
-        } else {
-            unsafe { self.vec.idx_ptr(0) as *const T }
-        };
+        let ptr = self.vec.ptr.as_ptr() as *const T;
         unsafe { slice::from_raw_parts(ptr, len) }
     }
     /// Returns a mutable slice over all elements.
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         let len = self.vec.len;
-        let ptr: *mut T = if len == 0 {
-            NonNull::<T>::dangling().as_ptr()
-        } else {
-            unsafe { self.vec.idx_ptr(0) as *mut T }
-        };
+        let ptr = self.vec.ptr.as_ptr() as *mut T;
         unsafe { slice::from_raw_parts_mut(ptr, len) }
     }
 }
