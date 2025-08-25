@@ -130,16 +130,16 @@ impl DynVec {
         v
     }
 
-    #[inline]
-    fn elem_size(&self) -> usize { self.meta.layout.size() }
+    // #[inline]
+    // fn elem_size(&self) -> usize { self.meta.layout.size() }
 
-    #[inline]
-    fn elem_align(&self) -> usize { self.meta.layout.align() }
+    // #[inline]
+    // fn elem_align(&self) -> usize { self.meta.layout.align() }
 
     #[inline]
     unsafe fn idx_ptr(&self, idx: usize) -> *mut u8 {
         debug_assert!(idx < self.len || idx == self.len && self.len <= self.capacity);
-        unsafe { self.ptr.as_ptr().add(idx * self.elem_size()) }
+        unsafe { self.ptr.as_ptr().add(idx * self.meta.layout.size()) }
     }
 
     #[inline]
@@ -231,8 +231,8 @@ impl DynVec {
     #[inline]
     fn realloc_capacity(&mut self, new_cap: usize) {
         debug_assert!(new_cap >= self.len, "new capacity cannot be less than len");
-        let elem_size = self.elem_size();
-        let align = self.elem_align();
+        let elem_size = self.meta.layout.size();
+        let align = self.meta.layout.align();
         // ZST: no allocation required; just bump the logical capacity and keep aligned base.
         if elem_size == 0 {
             self.capacity = new_cap;
@@ -317,7 +317,7 @@ impl DynVec {
     /// Panics if the boxed value's `TypeId` does not match the vector's element type.
     pub fn push(&mut self, val: Box<dyn Any>) {
         self.assert_type(val.as_ref());
-        if self.elem_size() == 0 {
+        if self.meta.layout.size() == 0 {
             // ZST: no bytes to move; forget the box to defer drop to vector's lifecycle.
             core::mem::forget(val);
             self.reserve(1);
@@ -327,7 +327,7 @@ impl DynVec {
         let data_ptr = Box::into_raw(val) as *mut u8;
         self.reserve(1);
         // Safety: destination is within allocation; `data_ptr` points to a valid T value.
-        unsafe { ptr::copy_nonoverlapping(data_ptr, self.idx_ptr(self.len), self.elem_size()) };
+        unsafe { ptr::copy_nonoverlapping(data_ptr, self.idx_ptr(self.len), self.meta.layout.size()) };
         unsafe { dealloc(data_ptr, self.meta.layout) };
         self.len += 1;
     }
@@ -346,7 +346,7 @@ impl DynVec {
     pub fn set(&mut self, idx: usize, val: Box<dyn Any>) {
         assert!(idx < self.len, "index out of bounds");
         self.assert_type(val.as_ref());
-        if self.elem_size() == 0 {
+        if self.meta.layout.size() == 0 {
             // ZST: drop the previous value's drop glue now; forget the new one to drop later.
             unsafe { self.drop_at(idx) };
             core::mem::forget(val);
@@ -354,7 +354,7 @@ impl DynVec {
         }
         let data_ptr = Box::into_raw(val) as *mut u8;
         unsafe { self.drop_at(idx) };
-        unsafe { ptr::copy_nonoverlapping(data_ptr, self.idx_ptr(idx), self.elem_size()) };
+        unsafe { ptr::copy_nonoverlapping(data_ptr, self.idx_ptr(idx), self.meta.layout.size()) };
         unsafe { dealloc(data_ptr, self.meta.layout) };
     }
 
@@ -364,7 +364,7 @@ impl DynVec {
     pub fn swap_remove(&mut self, idx: usize) -> Box<dyn Any> {
         assert!(idx < self.len, "index out of bounds");
         unsafe {
-            if self.elem_size() == 0 {
+            if self.meta.layout.size() == 0 {
                 // ZST: fabricate a Box<dyn Any> using a proper fat pointer to an aligned dangling address.
                 let data_ptr = dangling_with_layout(self.meta.layout).as_ptr();
                 let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr as *mut (), self.meta.meta);
@@ -379,14 +379,14 @@ impl DynVec {
             let data_ptr = alloc(self.meta.layout);
             if data_ptr.is_null() { std::alloc::handle_alloc_error(self.meta.layout); }
             let src = self.idx_ptr(idx);
-            ptr::copy_nonoverlapping(src, data_ptr, self.elem_size());
+            ptr::copy_nonoverlapping(src, data_ptr, self.meta.layout.size());
             let meta = self.meta.meta;
             let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr as *mut (), meta);
             let boxed: Box<dyn Any> = Box::from_raw(fat);
             let last_idx = self.len - 1;
             if idx != last_idx {
                 let last_ptr = self.idx_ptr(last_idx);
-                ptr::copy_nonoverlapping(last_ptr, src, self.elem_size());
+                ptr::copy_nonoverlapping(last_ptr, src, self.meta.layout.size());
             }
             self.len -= 1;
             boxed
@@ -400,9 +400,9 @@ impl Drop for DynVec {
             for i in 0..self.len {
                 self.drop_at(i);
             }
-            if self.capacity > 0 && self.elem_size() > 0 {
-                let total_size = self.capacity.checked_mul(self.elem_size()).expect("capacity overflow");
-                let layout = Layout::from_size_align(total_size, self.elem_align())
+            if self.capacity > 0 && self.meta.layout.size() > 0 {
+                let total_size = self.capacity.checked_mul(self.meta.layout.size()).expect("capacity overflow");
+                let layout = Layout::from_size_align(total_size, self.meta.layout.align())
                     .expect("invalid layout");
                 dealloc(self.ptr.as_ptr(), layout);
             }
