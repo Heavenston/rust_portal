@@ -38,7 +38,7 @@
 
 use std::alloc::{ alloc, dealloc, realloc, Layout };
 use std::any::{ Any, TypeId };
-use std::ops::{ Deref, DerefMut, Index, IndexMut };
+use std::ops::{ Deref, DerefMut };
 use std::ptr::{ self, from_raw_parts, from_raw_parts_mut, NonNull };
 use std::slice;
 use std::ptr::Alignment;
@@ -166,7 +166,6 @@ impl DynVec {
         unsafe { &mut *fat }
     }
 
-    // Vec-like API
     /// Returns the number of elements currently stored.
     pub fn len(&self) -> usize { self.len }
     /// Returns `true` if the vector contains no elements.
@@ -183,8 +182,8 @@ impl DynVec {
     pub fn reserve(&mut self, additional: usize) {
         let needed = self.len.saturating_add(additional);
         if needed <= self.capacity { return; }
-        let mut new_cap = self.capacity.max(4);
-        while new_cap < needed { new_cap = new_cap.saturating_mul(2); }
+        // Choose next power of two for growth; minimum capacity of 4.
+        let new_cap = needed.next_power_of_two().max(4);
         let elem_size = self.elem_size();
         let align = self.elem_align();
         unsafe {
@@ -285,14 +284,11 @@ impl DynVec {
     /// Panics if the boxed value's `TypeId` does not match the vector's element type.
     pub fn push(&mut self, val: Box<dyn Any>) {
         self.assert_type(val.as_ref());
-        let raw: *mut dyn Any = Box::into_raw(val);
-        let data_ptr = raw as *mut u8;
+        let data_ptr = Box::into_raw(val) as *mut u8;
         self.reserve(1);
-        unsafe {
-            let dst = self.idx_ptr(self.len);
-            ptr::copy_nonoverlapping(data_ptr, dst, self.elem_size());
-            dealloc(data_ptr, self.meta.layout);
-        }
+        // Safety: destination is within allocation; `data_ptr` points to a valid T value.
+        unsafe { ptr::copy_nonoverlapping(data_ptr, self.idx_ptr(self.len), self.elem_size()) };
+        unsafe { dealloc(data_ptr, self.meta.layout) };
         self.len += 1;
     }
 
@@ -310,14 +306,10 @@ impl DynVec {
     pub fn set(&mut self, idx: usize, val: Box<dyn Any>) {
         assert!(idx < self.len, "index out of bounds");
         self.assert_type(val.as_ref());
-        let raw: *mut dyn Any = Box::into_raw(val);
-        let data_ptr = raw as *mut u8;
-        unsafe {
-            self.drop_at(idx);
-            let dst = self.idx_ptr(idx);
-            ptr::copy_nonoverlapping(data_ptr, dst, self.elem_size());
-            dealloc(data_ptr, self.meta.layout);
-        }
+        let data_ptr = Box::into_raw(val) as *mut u8;
+        unsafe { self.drop_at(idx) };
+        unsafe { ptr::copy_nonoverlapping(data_ptr, self.idx_ptr(idx), self.elem_size()) };
+        unsafe { dealloc(data_ptr, self.meta.layout) };
     }
 
     /// Removes and returns the element at `idx` as `Box<dyn Any>`.
@@ -341,21 +333,6 @@ impl DynVec {
             self.len -= 1;
             boxed
         }
-    }
-}
-
-impl Index<usize> for DynVec {
-    type Output = dyn Any;
-    fn index(&self, index: usize) -> &Self::Output {
-        assert!(index < self.len, "index out of bounds");
-        unsafe { self.as_dyn_ref_at(index) }
-    }
-}
-
-impl IndexMut<usize> for DynVec {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        assert!(index < self.len, "index out of bounds");
-        unsafe { self.as_dyn_mut_at(index) }
     }
 }
 
@@ -395,11 +372,6 @@ impl<'a, T: 'static> TypedDynVecRef<'a, T> {
     pub fn len(&self) -> usize { self.vec.len }
     /// Returns `true` if empty.
     pub fn is_empty(&self) -> bool { self.vec.len == 0 }
-    /// Gets `&T` at `idx`.
-    pub fn get(&self, idx: usize) -> Option<&T> {
-        if idx >= self.vec.len { return None; }
-        unsafe { Some(&*(self.vec.idx_ptr(idx) as *const T)) }
-    }
 
     /// Returns a shared slice over all elements.
     pub fn as_slice(&self) -> &[T] {
@@ -434,16 +406,6 @@ impl<'a, T: 'static> TypedDynVecRefMut<'a, T> {
     pub fn len(&self) -> usize { self.vec.len }
     /// Returns `true` if empty.
     pub fn is_empty(&self) -> bool { self.vec.len == 0 }
-    /// Gets `&T` at `idx`.
-    pub fn get(&self, idx: usize) -> Option<&T> {
-        if idx >= self.vec.len { return None; }
-        unsafe { Some(&*(self.vec.idx_ptr(idx) as *const T)) }
-    }
-    /// Gets `&mut T` at `idx`.
-    pub fn get_mut(&mut self, idx: usize) -> Option<&mut T> {
-        if idx >= self.vec.len { return None; }
-        unsafe { Some(&mut *(self.vec.idx_ptr(idx) as *mut T)) }
-    }
     /// Clears all elements from the underlying vector.
     pub fn clear(&mut self) { self.vec.clear() }
     /// Pushes a value without boxing or virtual dispatch.
@@ -467,17 +429,16 @@ impl<'a, T: 'static> TypedDynVecRefMut<'a, T> {
     /// Removes at index and returns the removed value, swapping in the last.
     pub fn swap_remove(&mut self, idx: usize) -> T {
         assert!(idx < self.vec.len, "index out of bounds");
-        unsafe {
-            let src = self.vec.idx_ptr(idx) as *mut T;
-            let out = std::ptr::read(src);
-            let last_idx = self.vec.len - 1;
-            if idx != last_idx {
-                let last_ptr = self.vec.idx_ptr(last_idx) as *mut T;
-                std::ptr::copy_nonoverlapping(last_ptr, src, 1);
+        let last_idx = self.vec.len - 1;
+        let out = unsafe { (self.vec.idx_ptr(idx) as *mut T).read() };
+        if idx != last_idx {
+            unsafe {
+                (self.vec.idx_ptr(last_idx) as *mut T)
+                    .copy_to_nonoverlapping(self.vec.idx_ptr(idx) as *mut T, 1);
             }
-            self.vec.len -= 1;
-            out
         }
+        self.vec.len -= 1;
+        out
     }
     /// Pops the last element, if any.
     pub fn pop(&mut self) -> Option<T> {
@@ -508,24 +469,10 @@ impl<'a, T: 'static> DerefMut for TypedDynVecRefMut<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target { self.as_mut_slice() }
 }
 
-impl<'a, T: 'static> Index<usize> for TypedDynVecRef<'a, T> {
-    type Output = T;
-    fn index(&self, index: usize) -> &Self::Output { &self.as_slice()[index] }
-}
-
-impl<'a, T: 'static> Index<usize> for TypedDynVecRefMut<'a, T> {
-    type Output = T;
-    fn index(&self, index: usize) -> &Self::Output { &self.as_slice()[index] }
-}
-
-impl<'a, T: 'static> IndexMut<usize> for TypedDynVecRefMut<'a, T> {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output { &mut self.as_mut_slice()[index] }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    // no extra imports
     use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
     #[test]
@@ -533,32 +480,25 @@ mod tests {
         let mut dyn_vec = DynVec::new::<i32>();
         assert_eq!(dyn_vec.metadata().type_id, std::any::TypeId::of::<i32>());
 
-        // Use typed() helper for typed API
         let mut view = dyn_vec.typed_mut::<i32>();
 
-        // Test push and len
         view.push(10_i32);
         view.push(20_i32);
         view.push(30_i32);
         assert_eq!(view.len(), 3);
 
-        // Test get
         let val = view.get(1).unwrap();
         assert_eq!(*val, 20);
 
-        // Test get_mut
         let mut_val = view.get_mut(1).unwrap();
         *mut_val = 25;
         let val_after_mut = view.get(1).unwrap();
         assert_eq!(*val_after_mut, 25);
 
-        // Test set
         view.set(0, 5);
         assert_eq!(*view.get(0).unwrap(), 5);
-        assert_eq!(view.len(), 3); // Length should not change
-
-        // Test swap_remove
-        let removed = view.swap_remove(0); // Removes 5, swaps in 30
+        assert_eq!(view.len(), 3);
+        let removed = view.swap_remove(0);
         assert_eq!(removed, 5);
         assert_eq!(view.len(), 2);
         assert_eq!(*view.get(0).unwrap(), 30);
@@ -569,7 +509,7 @@ mod tests {
     #[should_panic]
     fn test_type_mismatch_push() {
         let mut dyn_vec = DynVec::new::<i32>();
-        dyn_vec.push(Box::new("hello".to_string())); // Panic!
+        dyn_vec.push(Box::new("hello".to_string()));
     }
 
     #[test]
@@ -590,7 +530,6 @@ mod tests {
         let tv = v.typed::<u64>();
         assert!(tv.get(999).is_none());
 
-        // Vec-like helpers
         assert!(!v.is_empty());
     }
 
@@ -614,7 +553,6 @@ mod tests {
         assert_eq!(v.len(), 2);
         v.clear();
         assert!(v.is_empty());
-        // capacity unchanged after clear
         let cap = v.capacity();
         {
             let mut tv = v.typed_mut::<i32>();
@@ -637,16 +575,12 @@ mod tests {
         {
             let mut tv = v.typed_mut::<DropProbe>();
             for _ in 0..5 { tv.push(DropProbe { hits: hits.clone() }); }
-            // set should drop the old element
             tv.set(2, DropProbe { hits: hits.clone() });
-            // swap_remove should move last into idx and return removed value
             let _r: DropProbe = tv.swap_remove(1);
             drop(_r);
-            // clear should drop all remaining
             tv.clear();
         }
-        assert_eq!(hits.load(Ordering::SeqCst), 6); // 5 initial + 1 replaced
-        // drop of v after clear should drop nothing more
+        assert_eq!(hits.load(Ordering::SeqCst), 6);
         drop(v);
         assert_eq!(hits.load(Ordering::SeqCst), 6);
     }
@@ -663,11 +597,16 @@ mod tests {
         let view = v.typed::<i32>();
         assert_eq!(view.len(), 3);
         assert_eq!(*view.get(1).unwrap(), 2);
+        assert_eq!(view[0], 1);
+        assert_eq!(view.iter().copied().sum::<i32>(), 1 + 2 + 3);
         let mut view_mut = v.typed_mut::<i32>();
         assert_eq!(*view_mut.get_mut(2).unwrap(), 3);
         view_mut.set(1, 20);
         view_mut.push(4);
         assert_eq!(view_mut.swap_remove(0), 1);
         assert_eq!(view_mut.pop().unwrap(), 3);
+        for x in view_mut.iter_mut() { *x *= 2; }
+        let view2 = v.typed::<i32>();
+        assert_eq!(view2.as_slice(), &[8, 40]);
     }
 }
