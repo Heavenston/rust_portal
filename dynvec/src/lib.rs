@@ -332,10 +332,10 @@ impl DynVec {
         self.len += 1;
     }
 
-    /// Pops the last element, if any, returning it boxed as `dyn Any`.
+    /// Pops the last element, if any, returning an owning guard over that value.
     ///
-    /// Downcast the returned box with `Box::<dyn Any>::downcast::<T>()`.
-    pub fn pop(&mut self) -> Option<Box<dyn Any>> {
+    /// The element is actually removed from the vector when the returned guard is dropped.
+    pub fn pop(&mut self) -> Option<OwnedDynVecValue<'_>> {
         if self.len == 0 { return None; }
         Some(self.swap_remove(self.len - 1))
     }
@@ -358,39 +358,15 @@ impl DynVec {
         unsafe { dealloc(data_ptr, self.meta.layout) };
     }
 
-    /// Removes and returns the element at `idx` as `Box<dyn Any>`.
+    /// Removes and returns an owning guard for the element at `idx`.
     ///
-    /// The last element is moved into `idx` (swap-remove). Panics if out of bounds.
-    pub fn swap_remove(&mut self, idx: usize) -> Box<dyn Any> {
+    /// The element is logically owned by the returned guard. The backing vector is actually
+    /// updated (swap in the last element and decrement `len`) when the guard is dropped.
+    /// Panics if out of bounds.
+    pub fn swap_remove(&mut self, idx: usize) -> OwnedDynVecValue<'_> {
         assert!(idx < self.len, "index out of bounds");
-        unsafe {
-            if self.meta.layout.size() == 0 {
-                // ZST: fabricate a Box<dyn Any> using a proper fat pointer to an aligned dangling address.
-                let data_ptr = dangling_with_layout(self.meta.layout).as_ptr();
-                let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr as *mut (), self.meta.meta);
-                let boxed: Box<dyn Any> = Box::from_raw(fat);
-                let last_idx = self.len - 1;
-                if idx != last_idx {
-                    // nothing to copy
-                }
-                self.len -= 1;
-                return boxed;
-            }
-            let data_ptr = alloc(self.meta.layout);
-            if data_ptr.is_null() { std::alloc::handle_alloc_error(self.meta.layout); }
-            let src = self.idx_ptr(idx);
-            ptr::copy_nonoverlapping(src, data_ptr, self.meta.layout.size());
-            let meta = self.meta.meta;
-            let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr as *mut (), meta);
-            let boxed: Box<dyn Any> = Box::from_raw(fat);
-            let last_idx = self.len - 1;
-            if idx != last_idx {
-                let last_ptr = self.idx_ptr(last_idx);
-                ptr::copy_nonoverlapping(last_ptr, src, self.meta.layout.size());
-            }
-            self.len -= 1;
-            boxed
-        }
+        let last = self.len - 1;
+        OwnedDynVecValue { vec: self, idx, last, consumed: false }
     }
 }
 
@@ -406,6 +382,131 @@ impl Drop for DynVec {
                     .expect("invalid layout");
                 dealloc(self.ptr.as_ptr(), layout);
             }
+        }
+    }
+}
+
+/// Owning guard for an element removed from a `DynVec`.
+///
+/// The value can be consumed via typed extraction or moved into another `DynVec`.
+/// The source vector is actually updated on `Drop` of this guard.
+pub struct OwnedDynVecValue<'a> {
+    vec: &'a mut DynVec,
+    idx: usize,
+    last: usize,
+    consumed: bool,
+}
+
+impl<'a> OwnedDynVecValue<'a> {
+    /// Consumes the guard and returns the value boxed as `dyn Any`.
+    ///
+    /// Allocates a new box and copies the bytes (ZST is handled without copying).
+    pub fn into_boxed_any(mut self) -> Box<dyn Any> {
+        let size = self.vec.meta.layout.size();
+        if size == 0 {
+            // Fabricate a Box<dyn Any> for ZST using a proper fat pointer.
+            let data_ptr = dangling_with_layout(self.vec.meta.layout).as_ptr();
+            let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr as *mut (), self.vec.meta.meta);
+            self.consumed = true;
+            let boxed: Box<dyn Any> = unsafe { Box::from_raw(fat) };
+            // Drop will handle len adjustment.
+            boxed
+        } else {
+            unsafe {
+                let data_ptr = alloc(self.vec.meta.layout);
+                if data_ptr.is_null() { std::alloc::handle_alloc_error(self.vec.meta.layout); }
+                let src = self.vec.idx_ptr(self.idx);
+                ptr::copy_nonoverlapping(src, data_ptr, size);
+                let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr as *mut (), self.vec.meta.meta);
+                self.consumed = true;
+                Box::from_raw(fat)
+            }
+        }
+    }
+
+    /// Consumes the guard and returns the value as `T`.
+    ///
+    /// Panics if `T` does not match the vector's element type.
+    pub fn into_typed<T: 'static>(mut self) -> T {
+        assert!(TypeId::of::<T>() == self.vec.meta.type_id, "OwnedDynVecValue::into_typed: type mismatch");
+        let out = unsafe { self.vec.read_t::<T>(self.idx) };
+        self.consumed = true;
+        out
+    }
+
+    /// Moves the value into another `DynVec` with the same element type.
+    ///
+    /// Panics if the destination's element type differs.
+    pub fn push_into(mut self, dst: &mut DynVec) {
+        assert!(self.vec.meta.type_id == dst.meta.type_id, "push_into: TypeId mismatch");
+        let size = self.vec.meta.layout.size();
+        if size == 0 {
+            dst.reserve(1);
+            dst.len += 1;
+            self.consumed = true;
+        } else {
+            dst.reserve(1);
+            unsafe {
+                ptr::copy_nonoverlapping(self.vec.idx_ptr(self.idx), dst.idx_ptr(dst.len), size);
+            }
+            dst.len += 1;
+            self.consumed = true;
+        }
+    }
+
+    /// Inserts the value into another `DynVec` at position `at`, shifting elements to the right.
+    ///
+    /// Panics if `at > dst.len()` or the destination's element type differs.
+    pub fn insert_into(mut self, dst: &mut DynVec, at: usize) {
+        assert!(self.vec.meta.type_id == dst.meta.type_id, "insert_into: TypeId mismatch");
+        assert!(at <= dst.len, "insert_into: index out of bounds");
+        let size = self.vec.meta.layout.size();
+        dst.reserve(1);
+        if size == 0 {
+            // ZST: no bytes to move, only grow logically
+            // Shifting is a no-op for ZST.
+            dst.len += 1;
+            self.consumed = true;
+            return;
+        }
+        unsafe {
+            if at < dst.len {
+                // Shift tail to make room: memmove [at..len) -> [at+1..len+1)
+                let count = dst.len - at;
+                let bytes = count * size;
+                ptr::copy(
+                    dst.idx_ptr(at),
+                    dst.idx_ptr(at + 1),
+                    bytes,
+                );
+            }
+            // Copy the value bytes into the hole at `at`
+            ptr::copy_nonoverlapping(self.vec.idx_ptr(self.idx), dst.idx_ptr(at), size);
+            dst.len += 1;
+        }
+        self.consumed = true;
+    }
+}
+
+impl<'a> Drop for OwnedDynVecValue<'a> {
+    fn drop(&mut self) {
+        // Finalize removal from the source vector.
+        // We must drop the value at idx if not consumed, then swap in last and decrement len.
+        let size = self.vec.meta.layout.size();
+        unsafe {
+            if !self.consumed {
+                // Drop the value in place using dyn Any vtable
+                self.vec.drop_at(self.idx);
+            }
+            if self.idx != self.last {
+                if size != 0 {
+                    let last_ptr = self.vec.idx_ptr(self.last);
+                    let dst = self.vec.idx_ptr(self.idx);
+                    ptr::copy_nonoverlapping(last_ptr, dst, size);
+                }
+            }
+            // Adjust length
+            self.vec.len -= 1;
         }
     }
 }
@@ -731,8 +832,8 @@ mod tests {
         // set with ZST keeps len
         v.set(2, Box::new(()));
         assert_eq!(v.len(), 5);
-        // swap_remove returns Box<dyn Any> that downcasts to ()
-        let b = v.swap_remove(1);
+        // swap_remove returns OwnedDynVecValue; convert to Box<dyn Any>
+        let b = v.swap_remove(1).into_boxed_any();
         assert!(b.downcast::<()>().is_ok());
         assert_eq!(v.len(), 4);
         // pop to empty
@@ -758,6 +859,140 @@ mod tests {
         // Untyped operations work too
         v.push(Box::new(Z));
         assert!(v.get(0).unwrap().is::<Z>());
+    }
+
+    #[test]
+    fn test_owned_guard_push_into_basic() {
+        let mut src = DynVec::new::<i32>();
+        let mut dst = DynVec::new::<i32>();
+        {
+            let mut tv = src.typed_mut::<i32>();
+            tv.extend([1, 2, 3]);
+        }
+        // remove middle element and push into dst
+        src.swap_remove(1).push_into(&mut dst);
+        // After guard drop, src should have [1, 3] in some order (swap removal brings last into idx)
+        let s = src.typed::<i32>();
+        assert_eq!(s.as_slice(), &[1, 3]);
+        let d = dst.typed::<i32>();
+        assert_eq!(d.as_slice(), &[2]);
+    }
+
+    #[test]
+    fn test_owned_guard_insert_into_positions() {
+        let mut src = DynVec::new::<i32>();
+        let mut dst = DynVec::new::<i32>();
+        {
+            let mut tv = src.typed_mut::<i32>();
+            tv.extend([10, 20, 30]);
+        }
+        {
+            let mut dv = dst.typed_mut::<i32>();
+            dv.extend([100, 200]);
+        }
+        // Move first element (10) and insert into middle of dst
+        src.swap_remove(0).insert_into(&mut dst, 1);
+        let s = src.typed::<i32>();
+        assert_eq!(s.as_slice(), &[30, 20]);
+        {
+            let d = dst.typed::<i32>();
+            assert_eq!(d.as_slice(), &[100, 10, 200]);
+        }
+
+        // Insert at end
+        let end = dst.len();
+        src.swap_remove(0).insert_into(&mut dst, end);
+        {
+            let s2 = src.typed::<i32>();
+            assert_eq!(s2.as_slice(), &[20]);
+        }
+        {
+            let d2 = dst.typed::<i32>();
+            assert_eq!(d2.as_slice(), &[100, 10, 200, 30]);
+        }
+
+        // Insert at beginning
+        src.swap_remove(0).insert_into(&mut dst, 0);
+        let d3 = dst.typed::<i32>();
+        assert_eq!(d3.as_slice(), &[20, 100, 10, 200, 30]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_push_into_type_mismatch_panics() {
+        let mut a = DynVec::new::<i32>();
+        let mut b = DynVec::new::<u64>();
+        {
+            let mut tv = a.typed_mut::<i32>();
+            tv.push(42);
+        }
+        a.swap_remove(0).push_into(&mut b);
+    }
+
+    #[test]
+    fn test_into_typed_and_drop_semantics() {
+        use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+        struct DropProbe { hits: Arc<AtomicUsize> }
+        impl Drop for DropProbe { fn drop(&mut self) { self.hits.fetch_add(1, Ordering::SeqCst); } }
+
+        // Consumed path (into_typed): element should NOT be dropped by guard, only by dropping returned value
+        let hits = Arc::new(AtomicUsize::new(0));
+        let mut v = DynVec::new::<DropProbe>();
+        {
+            let mut tv = v.typed_mut::<DropProbe>();
+            tv.push(DropProbe { hits: hits.clone() });
+        }
+        let p: DropProbe = v.swap_remove(0).into_typed::<DropProbe>();
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+        drop(p);
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert_eq!(v.len(), 0);
+
+        // Not consumed path: dropping guard should drop the element
+        let mut v2 = DynVec::new::<DropProbe>();
+        {
+            let mut tv = v2.typed_mut::<DropProbe>();
+            tv.push(DropProbe { hits: hits.clone() });
+        }
+        let _guard = v2.swap_remove(0);
+        drop(_guard);
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        assert_eq!(v2.len(), 0);
+    }
+
+    #[test]
+    fn test_zst_insert_and_push_into() {
+        #[derive(Copy, Clone, Debug)]
+        struct Z;
+        let mut a = DynVec::new::<Z>();
+        let mut b = DynVec::new::<Z>();
+        {
+            let mut tv = a.typed_mut::<Z>();
+            for _ in 0..3 { tv.push(Z); }
+        }
+        a.swap_remove(1).push_into(&mut b);
+        assert_eq!(a.len(), 2);
+        assert_eq!(b.len(), 1);
+        a.swap_remove(0).insert_into(&mut b, 0);
+        assert_eq!(a.len(), 1);
+        assert_eq!(b.len(), 2);
+        let end = b.len();
+        a.swap_remove(0).insert_into(&mut b, end);
+        assert_eq!(a.len(), 0);
+        assert_eq!(b.len(), 3);
+    }
+
+    #[test]
+    fn test_pop_returns_guard() {
+        let mut v = DynVec::new::<i32>();
+        v.typed_mut::<i32>().extend([7, 8]);
+        let g = v.pop().unwrap();
+        // Move into another vec
+        let mut dst = DynVec::new::<i32>();
+        g.push_into(&mut dst);
+        // src len decremented on drop
+        assert_eq!(v.len(), 1);
+        assert_eq!(dst.typed::<i32>().as_slice(), &[8]);
     }
 
     #[test]
