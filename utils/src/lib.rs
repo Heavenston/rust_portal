@@ -11,6 +11,7 @@ pub mod prelude {
         uid::Uid,
         default, concat_arrays, flatten_array, hash_value,
         itertools::Itertools as _,
+        either::{ self, Either },
         readonly, handle_map::{ self, HandleMap },
         strict_sign::{ StrictSign, StrictlySigned },
         sign::{ Sign, Signed },
@@ -19,11 +20,13 @@ pub mod prelude {
         mapped_nonzero::{ MappedNonZero, PlusOneNonZeroUsize },
         sorted_vec::{ SortedVec, SortedSet },
         dyn_clone,
+        consume_on_drop::{ ConsumeOnDropExt as _ },
     };
 }
 
 pub use readonly;
 pub use itertools;
+pub use either;
 pub use sorted_vec;
 pub use dyn_clone;
 
@@ -34,6 +37,7 @@ pub mod sign;
 pub mod axis;
 pub mod axis_direction;
 pub mod mapped_nonzero;
+pub mod consume_on_drop;
 
 use std::hash::{ DefaultHasher, Hash, Hasher };
 
