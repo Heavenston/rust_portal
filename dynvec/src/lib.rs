@@ -115,10 +115,8 @@ pub struct DynVecMetadata {
     pub type_id: TypeId,
     /// The type_name of the element type.
     pub type_name: &'static str,
-    /// The `Layout` of the element type.
-    pub layout: Layout,
     /// The vtable metadata for `dyn Any` corresponding to the element type.
-    pub meta: std::ptr::DynMetadata<dyn Any>,
+    pub dyn_meta: std::ptr::DynMetadata<dyn Any>,
     // Private dummy field to prevent external construction while keeping field reads possible.
     _priv: (),
 }
@@ -135,8 +133,7 @@ impl DynVecMetadata {
         Self {
             type_id: TypeId::of::<T>(),
             type_name: type_name::<T>(),
-            layout: Layout::new::<T>(),
-            meta,
+            dyn_meta: meta,
             _priv: ()
         }
     }
@@ -176,7 +173,7 @@ impl DynVec {
     pub fn new_with_meta(meta: DynVecMetadata) -> Self {
         Self {
             // keep base pointer aligned to element type even with capacity == 0
-            ptr: dangling_with_layout(meta.layout),
+            ptr: dangling_with_layout(meta.dyn_meta.layout()),
             len: 0,
             capacity: 0,
             meta,
@@ -194,16 +191,10 @@ impl DynVec {
         v
     }
 
-    // #[inline]
-    // fn elem_size(&self) -> usize { self.meta.layout.size() }
-
-    // #[inline]
-    // fn elem_align(&self) -> usize { self.meta.layout.align() }
-
     #[inline]
     unsafe fn idx_ptr(&self, idx: usize) -> *mut u8 {
         debug_assert!(idx < self.len || idx == self.len && self.len <= self.capacity);
-        unsafe { self.ptr.as_ptr().add(idx * self.meta.layout.size()) }
+        unsafe { self.ptr.as_ptr().add(idx * self.meta.dyn_meta.layout().size()) }
     }
 
     #[inline]
@@ -305,7 +296,7 @@ impl DynVec {
     #[inline]
     unsafe fn drop_at(&mut self, idx: usize) {
         debug_assert!(idx < self.len);
-        let meta = self.meta.meta;
+        let meta = self.meta.dyn_meta;
         let data_ptr = unsafe { self.idx_ptr(idx) as *mut () };
         let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr, meta);
         unsafe { ptr::drop_in_place(fat) };
@@ -313,7 +304,7 @@ impl DynVec {
 
     #[inline]
     unsafe fn as_dyn_ref_at<'a>(&self, idx: usize) -> &'a dyn Any {
-        let meta = self.meta.meta;
+        let meta = self.meta.dyn_meta;
         let data_ptr = unsafe { self.idx_ptr(idx) as *const () };
         let fat: *const dyn Any = from_raw_parts::<dyn Any>(data_ptr, meta);
         unsafe { &*fat }
@@ -321,7 +312,7 @@ impl DynVec {
 
     #[inline]
     unsafe fn as_dyn_mut_at<'a>(&mut self, idx: usize) -> &'a mut dyn Any {
-        let meta = self.meta.meta;
+        let meta = self.meta.dyn_meta;
         let data_ptr = unsafe { self.idx_ptr(idx) as *mut () };
         let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr, meta);
         unsafe { &mut *fat }
@@ -359,12 +350,12 @@ impl DynVec {
     #[inline]
     fn realloc_capacity(&mut self, new_cap: usize) {
         debug_assert!(new_cap >= self.len, "new capacity cannot be less than len");
-        let elem_size = self.meta.layout.size();
-        let align = self.meta.layout.align();
+        let elem_size = self.meta.dyn_meta.layout().size();
+        let align = self.meta.dyn_meta.layout().align();
         // ZST: no allocation required; just bump the logical capacity and keep aligned base.
         if elem_size == 0 {
             self.capacity = new_cap;
-            self.ptr = dangling_with_layout(self.meta.layout);
+            self.ptr = dangling_with_layout(self.meta.dyn_meta.layout());
             return;
         }
         unsafe {
@@ -372,7 +363,7 @@ impl DynVec {
             if self.capacity == 0 {
                 if new_cap == 0 {
                     // Keep aligned base pointer for empty allocation
-                    self.ptr = dangling_with_layout(self.meta.layout);
+                    self.ptr = dangling_with_layout(self.meta.dyn_meta.layout());
                     self.capacity = 0;
                 } else {
                     let size_bytes = new_cap.checked_mul(elem_size).expect("capacity overflow");
@@ -387,7 +378,7 @@ impl DynVec {
                 let old_layout = Layout::from_size_align(old_size, align).expect("invalid layout");
                 if new_cap == 0 {
                     dealloc(self.ptr.as_ptr(), old_layout);
-                    self.ptr = dangling_with_layout(self.meta.layout);
+                    self.ptr = dangling_with_layout(self.meta.dyn_meta.layout());
                     self.capacity = 0;
                 } else {
                     let new_size = new_cap.checked_mul(elem_size).expect("capacity overflow");
@@ -449,7 +440,7 @@ impl DynVec {
     pub fn push(&mut self, val: Box<dyn Any>) -> Result<(), IncorrectTypeError> {
         self.assert_type(val.as_ref())?;
 
-        if self.meta.layout.size() == 0 {
+        if self.meta.dyn_meta.layout().size() == 0 {
             // ZST: no bytes to move; forget the box to defer drop to vector's lifecycle.
             core::mem::forget(val);
             self.reserve(1);
@@ -460,8 +451,8 @@ impl DynVec {
         let data_ptr = Box::into_raw(val) as *mut u8;
         self.reserve(1);
         // Safety: destination is within allocation; `data_ptr` points to a valid T value.
-        unsafe { ptr::copy_nonoverlapping(data_ptr, self.idx_ptr(self.len), self.meta.layout.size()) };
-        unsafe { dealloc(data_ptr, self.meta.layout) };
+        unsafe { ptr::copy_nonoverlapping(data_ptr, self.idx_ptr(self.len), self.meta.dyn_meta.layout().size()) };
+        unsafe { dealloc(data_ptr, self.meta.dyn_meta.layout()) };
         self.len += 1;
 
         Ok(())
@@ -482,7 +473,7 @@ impl DynVec {
         self.assert_index(idx)?;
         self.assert_type(val.as_ref())?;
 
-        if self.meta.layout.size() == 0 {
+        if self.meta.dyn_meta.layout().size() == 0 {
             // ZST: drop the previous value's drop glue now; forget the new one to drop later.
             unsafe { self.drop_at(idx) };
             core::mem::forget(val);
@@ -491,8 +482,8 @@ impl DynVec {
 
         let data_ptr = Box::into_raw(val) as *mut u8;
         unsafe { self.drop_at(idx) };
-        unsafe { ptr::copy_nonoverlapping(data_ptr, self.idx_ptr(idx), self.meta.layout.size()) };
-        unsafe { dealloc(data_ptr, self.meta.layout) };
+        unsafe { ptr::copy_nonoverlapping(data_ptr, self.idx_ptr(idx), self.meta.dyn_meta.layout().size()) };
+        unsafe { dealloc(data_ptr, self.meta.dyn_meta.layout()) };
 
         Ok(())
     }
@@ -538,9 +529,9 @@ impl Drop for DynVec {
             for i in 0..self.len {
                 self.drop_at(i);
             }
-            if self.capacity > 0 && self.meta.layout.size() > 0 {
-                let total_size = self.capacity.checked_mul(self.meta.layout.size()).expect("capacity overflow");
-                let layout = Layout::from_size_align(total_size, self.meta.layout.align())
+            if self.capacity > 0 && self.meta.dyn_meta.layout().size() > 0 {
+                let total_size = self.capacity.checked_mul(self.meta.dyn_meta.layout().size()).expect("capacity overflow");
+                let layout = Layout::from_size_align(total_size, self.meta.dyn_meta.layout().align())
                     .expect("invalid layout");
                 dealloc(self.ptr.as_ptr(), layout);
             }
@@ -580,22 +571,22 @@ impl<'a> OwnedDynVecValue<'a> {
     /// assert_eq!(v.typed::<String>().unwrap().as_slice(), &["b".to_string()]);
     /// ```
     pub fn into_boxed_any(mut self) -> Box<dyn Any> {
-        let size = self.vec.meta.layout.size();
+        let size = self.vec.meta.dyn_meta.layout().size();
         if size == 0 {
             // Fabricate a Box<dyn Any> for ZST using a proper fat pointer.
-            let data_ptr = dangling_with_layout(self.vec.meta.layout).as_ptr();
-            let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr as *mut (), self.vec.meta.meta);
+            let data_ptr = dangling_with_layout(self.vec.meta.dyn_meta.layout()).as_ptr();
+            let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr as *mut (), self.vec.meta.dyn_meta);
             self.consumed = true;
             let boxed: Box<dyn Any> = unsafe { Box::from_raw(fat) };
             // Drop will handle len adjustment.
             boxed
         } else {
             unsafe {
-                let data_ptr = alloc(self.vec.meta.layout);
-                if data_ptr.is_null() { std::alloc::handle_alloc_error(self.vec.meta.layout); }
+                let data_ptr = alloc(self.vec.meta.dyn_meta.layout());
+                if data_ptr.is_null() { std::alloc::handle_alloc_error(self.vec.meta.dyn_meta.layout()); }
                 let src = self.vec.idx_ptr(self.idx);
                 ptr::copy_nonoverlapping(src, data_ptr, size);
-                let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr as *mut (), self.vec.meta.meta);
+                let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr as *mut (), self.vec.meta.dyn_meta);
                 self.consumed = true;
                 Box::from_raw(fat)
             }
@@ -639,7 +630,7 @@ impl<'a> OwnedDynVecValue<'a> {
     pub fn push_into(mut self, dst: &mut DynVec) -> Result<(), IncorrectTypeError> {
         dst.assert_type_meta(&self.vec.meta)?;
 
-        let size = self.vec.meta.layout.size();
+        let size = self.vec.meta.dyn_meta.layout().size();
         if size == 0 {
             dst.reserve(1);
             dst.len += 1;
@@ -675,7 +666,7 @@ impl<'a> OwnedDynVecValue<'a> {
         dst.assert_type_meta(&self.vec.meta)?;
         dst.assert_index_inclusive(at)?;
 
-        let size = self.vec.meta.layout.size();
+        let size = self.vec.meta.dyn_meta.layout().size();
         dst.reserve(1);
 
         if size == 0 {
@@ -711,7 +702,7 @@ impl<'a> Drop for OwnedDynVecValue<'a> {
     fn drop(&mut self) {
         // Finalize removal from the source vector.
         // We must drop the value at idx if not consumed, then swap in last and decrement len.
-        let size = self.vec.meta.layout.size();
+        let size = self.vec.meta.dyn_meta.layout().size();
         unsafe {
             if !self.consumed {
                 // Drop the value in place using dyn Any vtable
