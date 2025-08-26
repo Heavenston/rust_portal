@@ -2159,6 +2159,7 @@ version = "0.1.0"
 dependencies = [
  "derive-where",
  "derive_more",
+ "portal-dynvec",
  "portal-utils",
 ]
 

@@ -61,6 +61,7 @@ fn dangling_with_layout(layout: Layout) -> NonNull<u8> {
 ///
 /// All fields are public for transparency and potential interop, but the private
 /// marker field prevents external construction to keep values consistent.
+#[derive(Debug, Clone)]
 pub struct DynVecMetadata {
     /// The `TypeId` of the element type.
     pub type_id: TypeId,
@@ -87,7 +88,6 @@ impl DynVecMetadata {
 /// Type-erased vector storing a single runtime-selected element type.
 ///
 /// See the crate-level docs for overview and safety guarantees.
-
 pub struct DynVec {
     ptr: NonNull<u8>,
     len: usize,
@@ -612,7 +612,7 @@ impl<'a, T: 'static> TypedDynVecRef<'a, T> {
     pub fn is_empty(&self) -> bool { self.vec.len == 0 }
 
     /// Returns a shared slice over all elements.
-    pub fn as_slice(&self) -> &[T] {
+    pub fn as_slice(&self) -> &'a [T] {
         let len = self.vec.len;
         let ptr = self.vec.ptr.as_ptr() as *const T;
         unsafe { slice::from_raw_parts(ptr, len) }
@@ -676,13 +676,13 @@ impl<'a, T: 'static> TypedDynVecRefMut<'a, T> {
     }
 
     /// Returns a shared slice over all elements.
-    pub fn as_slice(&self) -> &[T] {
+    pub fn as_slice(&self) -> &'a [T] {
         let len = self.vec.len;
         let ptr = self.vec.ptr.as_ptr() as *const T;
         unsafe { slice::from_raw_parts(ptr, len) }
     }
     /// Returns a mutable slice over all elements.
-    pub fn as_mut_slice(&mut self) -> &mut [T] {
+    pub fn as_mut_slice(&mut self) -> &'a mut [T] {
         let len = self.vec.len;
         let ptr = self.vec.ptr.as_ptr() as *mut T;
         unsafe { slice::from_raw_parts_mut(ptr, len) }

@@ -8,3 +8,4 @@ ecs = { path = "./ecs", package = "portal-ecs" }
 pgk = { path = "./graphics-kernel", package = "portal-graphics-kernel" }
 engine = { path = "./engine", package = "portal-engine" }
 shader-preprocessor = { path = "./shader-preprocessor", package = "portal-shader-preprocessor" }
+dynvec = { path = "./dynvec", package = "portal-dynvec" }

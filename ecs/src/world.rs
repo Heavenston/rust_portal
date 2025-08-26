@@ -2,17 +2,23 @@ mod entity_storage;
 pub use entity_storage::{ Entity, EntityIndexType, EntityGenerationType };
 mod entity_set;
 pub use entity_set::{ EntitySet };
-mod component_vec;
-pub use component_vec::{ ComponentVec };
 
-use std::{ alloc::Layout, any::{Any, TypeId}, borrow::Cow, collections::HashMap, iter::{empty, once, zip}, marker::PhantomData, ops::{Deref, DerefMut} };
+use std::{
+    any::{ Any, TypeId },
+    borrow::Cow,
+    collections::HashMap,
+    iter::{ empty, once, zip },
+    marker::PhantomData,
+    ops::{ Deref, DerefMut }
+};
 use derive_more::{ From, Into };
+use dynvec::{ DynVec, DynVecMetadata };
 
 use utils::{ itertools::chain, prelude::* };
 
 use crate::{
     index_map::{ IndexMap, IndexMapIndex },
-    sparse_set::{ SparseSet, SparseSetDenseStorage }, world::component_vec::ComponentVecFactory
+    sparse_set::{ SparseSet, SparseSetDenseStorage },
 };
 
 pub trait Component: 'static + Any { }
@@ -48,9 +54,7 @@ macro_rules! create_id {
 /// Component given to all entities of components
 #[derive(Clone)]
 pub struct ComponentComponent {
-    pub type_id: TypeId,
-    pub layout: Layout,
-    pub componentvec_factory: Box<dyn ComponentVecFactory>,
+    pub dynvec_meta: DynVecMetadata,
 }
 
 create_id!(ArchetypId(u32));
@@ -89,9 +93,9 @@ impl<'a, C: Component> Deref for TypedComponentRef<'a, C> {
     type Target = C;
 
     fn deref(&self) -> &C {
-        let dyn_ref = self.storage_ref.storage.storages[self.component_idx]
-            .dyn_get(self.storage_ref.idx).expect("Valid idx");
-        (dyn_ref as &dyn Any).downcast_ref().expect("Correct type")
+        self.storage_ref.storage.storages[self.component_idx]
+            .typed::<C>().as_slice().get(self.storage_ref.idx)
+            .expect("Valid index")
     }
 }
 
@@ -120,17 +124,17 @@ impl<'a, C: Component> Deref for TypedComponentRefMut<'a, C> {
     type Target = C;
 
     fn deref(&self) -> &C {
-        let dyn_ref = self.storage_ref.storage.storages[self.component_idx]
-            .dyn_get(self.storage_ref.idx).expect("Valid idx");
-        (dyn_ref as &dyn Any).downcast_ref().expect("Correct type")
+        self.storage_ref.storage.storages[self.component_idx]
+            .typed::<C>().as_slice().get(self.storage_ref.idx)
+            .expect("Valid index")
     }
 }
 
 impl<'a, C: Component> DerefMut for TypedComponentRefMut<'a, C> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        let dyn_ref = self.storage_ref.storage.storages[self.component_idx]
-            .dyn_get_mut(self.storage_ref.idx).expect("Valid idx");
-        (dyn_ref as &mut dyn Any).downcast_mut().expect("Correct type")
+        self.storage_ref.storage.storages[self.component_idx]
+            .typed_mut::<C>().as_mut_slice().get_mut(self.storage_ref.idx)
+            .expect("Valid index")
     }
 }
 
@@ -139,11 +143,11 @@ impl<'a, C: Component> DerefMut for TypedComponentRefMut<'a, C> {
 struct ComponentDenseStorage {
     len: usize,
     #[derive_where(skip)]
-    storages: Box<[Box<dyn ComponentVec>]>,
+    storages: Box<[DynVec]>,
 }
 
 impl SparseSetDenseStorage for ComponentDenseStorage {
-    type OwnedItem = Box<[Box<dyn Component>]>;
+    type OwnedItem = Box<[Box<dyn Any>]>;
     type RefItem<'a> = StorageComponentsRef<'a>
         where Self: 'a;
     type RefMutItem<'a> = StorageComponentsRefMut<'a>
@@ -151,23 +155,23 @@ impl SparseSetDenseStorage for ComponentDenseStorage {
 
     fn len(&self) -> usize {
         debug_assert!(
-            chain(once(self.len), self.storages.iter().map(|storage| storage.dyn_len()))
+            chain(once(self.len), self.storages.iter().map(|storage| storage.len()))
                 .all_equal()
         );
         self.len
     }
 
-    fn push(&mut self, val: Self::OwnedItem) {
+    fn push(&mut self, comps: Self::OwnedItem) {
         self.len += 1;
-        for (storage, comp) in zip(self.storages.iter_mut(), val) {
-            storage.dyn_push(comp);
+        for (storage, comp) in zip(self.storages.iter_mut(), comps) {
+            storage.push(comp);
         }
     }
 
     fn swap_remove(&mut self, idx: usize) -> Self::OwnedItem {
         self.len -= 1;
         self.storages.iter_mut()
-            .map(|storage| storage.dyn_swap_remove(idx))
+            .map(|storage| storage.swap_remove(idx).into_boxed_any())
             .collect_vec()
             .into_boxed_slice()
     }
@@ -175,7 +179,7 @@ impl SparseSetDenseStorage for ComponentDenseStorage {
     fn set(&mut self, idx: usize, value: Self::OwnedItem) {
         assert!(idx < self.len);
         for (storage, comp) in zip(self.storages.iter_mut(), value) {
-            storage.dyn_set(idx, comp);
+            storage.set(idx, comp);
         }
     }
 
@@ -269,7 +273,7 @@ impl World {
             table_components: cc_set.clone(),
             sparse_set: SparseSet::new(ComponentDenseStorage {
                 len: 0,
-                storages: vec![Box::new(Vec::<ComponentComponent>::new()) as Box<dyn ComponentVec>]
+                storages: vec![DynVec::new::<ComponentComponent>()]
                     .into_boxed_slice(),
             }),
         });
@@ -285,12 +289,10 @@ impl World {
         let empty_table_id = this.archetypes[empty_archetyp].table_id;
         let _ = this.tables[empty_table_id].sparse_set.remove(cc_entity.index());
         this.entities_archetypes.set_or_push(cc_entity.index(), cc_archetype_id);
-        let row: Box<[Box<dyn Component>]> = vec![
+        let row: Box<[Box<dyn Any>]> = vec![
             Box::new(ComponentComponent {
-                type_id: TypeId::of::<ComponentComponent>(),
-                layout: Layout::new::<ComponentComponent>(),
-                componentvec_factory: Box::new(|| -> Box<dyn ComponentVec> { Box::new(Vec::<ComponentComponent>::new()) }) as Box<_>,
-            }) as Box<dyn Component>
+                dynvec_meta: DynVecMetadata::new::<DynVecMetadata>(),
+            }) as Box<dyn Any>
         ].into_boxed_slice();
         this.tables[cc_table_id].sparse_set.insert(cc_entity.index(), row);
 
@@ -342,9 +344,7 @@ impl World {
         };
 
         self.add(created_entity, ComponentComponent {
-            type_id,
-            layout: Layout::new::<C>(),
-            componentvec_factory: Box::new(|| -> Box<dyn ComponentVec> { Box::new(Vec::<C>::new()) }) as Box<_>,
+            dynvec_meta: DynVecMetadata::new::<C>(),
         });
 
         created_entity
@@ -360,10 +360,12 @@ impl World {
                     sparse_set: SparseSet::new(ComponentDenseStorage {
                         len: 0,
                         storages: comp_set.iter()
-                            .map(|component| self.get::<ComponentComponent>(component)
-                                .expect("Entity is component")
-                                .componentvec_factory.create()
-                            )
+                            .map(|component| {
+                                let component_metadata = self.get::<ComponentComponent>(component)
+                                    .expect("Entity is component");
+
+                                DynVec::new_with_meta(component_metadata.dynvec_meta.clone())
+                            })
                             .collect::<Vec<_>>()
                             .into_boxed_slice(),
                     }),
@@ -589,8 +591,8 @@ mod tests {
 
         // The component entity must carry ComponentComponent describing Foo
         let meta = w.get::<ComponentComponent>(comp_entity).expect("has meta");
-        assert_eq!(meta.type_id, TypeId::of::<Foo>());
-        assert_eq!(meta.layout, Layout::new::<Foo>());
+        assert_eq!(meta.dynvec_meta.type_id, TypeId::of::<Foo>());
+        assert_eq!(meta.dynvec_meta.layout, Layout::new::<Foo>());
     }
 
     #[test]
