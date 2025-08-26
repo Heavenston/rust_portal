@@ -12,7 +12,7 @@
 //!   and provide fast typed methods without re-checking the type on every call.
 //! - Mutation:
 //!   - Untyped: `push`/`set` take `Box<dyn Any>`; removals `swap_remove`/`pop` return an owning
-//!     guard (OwnedDynVecValue) that can be consumed (e.g., `into_typed`, `push_into`, `insert_into`).
+//!     guard (OwnedDynVecValue) that can be consumed (e.g., `into_typed`, `push_into`, `set_into`).
 //!   - Typed: use the typed views for `push`/`set`/`swap_remove`/`pop` with concrete types.
 //! - Iteration/collection: supports `Extend` and `FromIterator` so you can
 //!   `collect::<DynVec>()` from an iterator of `T` and `extend` typed views.
@@ -285,15 +285,6 @@ impl DynVec {
     }
 
     #[inline]
-    fn assert_index_inclusive(&self, idx: usize) -> Result<(), IndexOutOfBoundError> {
-        if idx <= self.len() {
-            Ok(())
-        } else {
-            Err(IndexOutOfBoundError { index: idx, len: self.len() })
-        }
-    }
-
-    #[inline]
     unsafe fn drop_at(&mut self, idx: usize) {
         debug_assert!(idx < self.len);
         let meta = self.meta.dyn_meta;
@@ -546,7 +537,7 @@ impl Drop for DynVec {
 ///
 /// Typical ways to consume the guard:
 /// - Move into another `DynVec` of the same type using [`OwnedDynVecValue::push_into`]
-/// - Insert at a position using [`OwnedDynVecValue::insert_into`]
+/// - Overwrite a position in another `DynVec` using [`OwnedDynVecValue::set_into`]
 /// - Extract the concrete value with [`OwnedDynVecValue::into_typed`]
 /// - Box as `dyn Any` with [`OwnedDynVecValue::into_boxed_any`]
 pub struct OwnedDynVecValue<'a> {
@@ -647,9 +638,11 @@ impl<'a> OwnedDynVecValue<'a> {
         Ok(())
     }
 
-    /// Inserts the value into another `DynVec` at position `at`, shifting elements to the right.
+    /// Overwrites the element at `idx` in another `DynVec` with this value.
     ///
-    /// Returns an error if `at > dst.len()` or the destination's element type differs.
+    /// Same semantics as [`DynVec::set`]: drops the previous value in `dst` at `idx`
+    /// and writes the new one in-place. Length is unchanged. Returns an error if
+    /// `idx` is out of bounds or `dst` has a different element type.
     ///
     /// # Example
     /// ```
@@ -658,42 +651,31 @@ impl<'a> OwnedDynVecValue<'a> {
     /// let mut b = DynVec::new::<i32>();
     /// a.typed_mut::<i32>().unwrap().extend([10, 20, 30]);
     /// b.typed_mut::<i32>().unwrap().extend([1, 2, 3]);
-    /// a.swap_remove(1).unwrap().insert_into(&mut b, 1).unwrap();
+    /// // Move 20 from `a` and overwrite index 1 in `b`
+    /// a.swap_remove(1).unwrap().set_into(&mut b, 1).unwrap();
     /// assert_eq!(a.typed::<i32>().unwrap().as_slice(), &[10, 30]);
-    /// assert_eq!(b.typed::<i32>().unwrap().as_slice(), &[1, 20, 2, 3]);
+    /// assert_eq!(b.typed::<i32>().unwrap().as_slice(), &[1, 20, 3]);
     /// ```
-    pub fn insert_into(mut self, dst: &mut DynVec, at: usize) -> Result<(), InsertionError> {
+    pub fn set_into(mut self, dst: &mut DynVec, idx: usize) -> Result<(), InsertionError> {
         dst.assert_type_meta(&self.vec.meta)?;
-        dst.assert_index_inclusive(at)?;
+        dst.assert_index(idx)?;
 
         let size = self.vec.meta.dyn_meta.layout().size();
-        dst.reserve(1);
 
         if size == 0 {
-            // ZST: no bytes to move, only grow logically
-            // Shifting is a no-op for ZST.
-            dst.len += 1;
+            // ZST: drop previous value's drop glue; nothing to copy.
+            unsafe { dst.drop_at(idx) };
             self.consumed = true;
             return Ok(());
         }
 
         unsafe {
-            if at < dst.len {
-                // Shift tail to make room: memmove [at..len) -> [at+1..len+1)
-                let count = dst.len - at;
-                let bytes = count * size;
-                ptr::copy(
-                    dst.idx_ptr(at),
-                    dst.idx_ptr(at + 1),
-                    bytes,
-                );
-            }
-            // Copy the value bytes into the hole at `at`
-            ptr::copy_nonoverlapping(self.vec.idx_ptr(self.idx), dst.idx_ptr(at), size);
-            dst.len += 1;
+            // Drop the previous value at destination index
+            dst.drop_at(idx);
+            // Copy bytes from source element into destination slot
+            ptr::copy_nonoverlapping(self.vec.idx_ptr(self.idx), dst.idx_ptr(idx), size);
         }
         self.consumed = true;
-
         Ok(())
     }
 }
@@ -1095,7 +1077,7 @@ mod tests {
     }
 
     #[test]
-    fn test_owned_guard_insert_into_positions() {
+    fn test_owned_guard_set_into_overwrite() {
         let mut src = DynVec::new::<i32>();
         let mut dst = DynVec::new::<i32>();
         {
@@ -1106,31 +1088,29 @@ mod tests {
             let mut dv = dst.typed_mut::<i32>().unwrap();
             dv.extend([100, 200]);
         }
-        // Move first element (10) and insert into middle of dst
-        src.swap_remove(0).unwrap().insert_into(&mut dst, 1).unwrap();
+        // Move first element (10) and overwrite index 1 of dst
+        src.swap_remove(0).unwrap().set_into(&mut dst, 1).unwrap();
         let s = src.typed::<i32>().unwrap();
         assert_eq!(s.as_slice(), &[30, 20]);
         {
             let d = dst.typed::<i32>().unwrap();
-            assert_eq!(d.as_slice(), &[100, 10, 200]);
+            assert_eq!(d.as_slice(), &[100, 10]);
         }
-
-        // Insert at end
-        let end = dst.len();
-        src.swap_remove(0).unwrap().insert_into(&mut dst, end).unwrap();
+        // Overwrite at index 0 with next value (30)
+        src.swap_remove(0).unwrap().set_into(&mut dst, 0).unwrap();
         {
             let s2 = src.typed::<i32>().unwrap();
             assert_eq!(s2.as_slice(), &[20]);
         }
         {
             let d2 = dst.typed::<i32>().unwrap();
-            assert_eq!(d2.as_slice(), &[100, 10, 200, 30]);
+            assert_eq!(d2.as_slice(), &[30, 10]);
         }
 
-        // Insert at beginning
-        src.swap_remove(0).unwrap().insert_into(&mut dst, 0).unwrap();
+        // Overwrite again at index 1 with last remaining value (20)
+        src.swap_remove(0).unwrap().set_into(&mut dst, 1).unwrap();
         let d3 = dst.typed::<i32>().unwrap();
-        assert_eq!(d3.as_slice(), &[20, 100, 10, 200, 30]);
+        assert_eq!(d3.as_slice(), &[30, 20]);
     }
 
     #[test]
@@ -1177,7 +1157,7 @@ mod tests {
     }
 
     #[test]
-    fn test_zst_insert_and_push_into() {
+    fn test_zst_set_into_and_push_into() {
         #[derive(Copy, Clone, Debug)]
         struct Z;
         let mut a = DynVec::new::<Z>();
@@ -1189,13 +1169,14 @@ mod tests {
         a.swap_remove(1).unwrap().push_into(&mut b).unwrap();
         assert_eq!(a.len(), 2);
         assert_eq!(b.len(), 1);
-        a.swap_remove(0).unwrap().insert_into(&mut b, 0).unwrap();
+        // Overwrite at index 0; length does not change
+        a.swap_remove(0).unwrap().set_into(&mut b, 0).unwrap();
         assert_eq!(a.len(), 1);
-        assert_eq!(b.len(), 2);
-        let end = b.len();
-        a.swap_remove(0).unwrap().insert_into(&mut b, end).unwrap();
+        assert_eq!(b.len(), 1);
+        // Overwrite again at index 0 with last remaining value
+        a.swap_remove(0).unwrap().set_into(&mut b, 0).unwrap();
         assert_eq!(a.len(), 0);
-        assert_eq!(b.len(), 3);
+        assert_eq!(b.len(), 1);
     }
 
     #[test]
