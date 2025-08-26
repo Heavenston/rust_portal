@@ -12,9 +12,9 @@ use std::{
     ops::{ Deref, DerefMut }
 };
 use derive_more::{ From, Into };
-use dynvec::{ DynVec, DynVecMetadata };
+use dynvec::{ DynVec, DynVecMetadata, OwnedDynVecValue };
 
-use utils::{ itertools::chain, prelude::* };
+use utils::{ itertools::{chain, zip_eq}, prelude::* };
 
 use crate::{
     index_map::{ IndexMap, IndexMapIndex },
@@ -94,8 +94,8 @@ impl<'a, C: Component> Deref for TypedComponentRef<'a, C> {
 
     fn deref(&self) -> &C {
         self.storage_ref.storage.storages[self.component_idx]
-            .typed::<C>().as_slice().get(self.storage_ref.idx)
-            .expect("Valid index")
+            .typed::<C>().expect("Correct type")
+            .as_slice().get(self.storage_ref.idx).expect("Valid index")
     }
 }
 
@@ -125,16 +125,16 @@ impl<'a, C: Component> Deref for TypedComponentRefMut<'a, C> {
 
     fn deref(&self) -> &C {
         self.storage_ref.storage.storages[self.component_idx]
-            .typed::<C>().as_slice().get(self.storage_ref.idx)
-            .expect("Valid index")
+            .typed::<C>().expect("Correct type")
+            .as_slice().get(self.storage_ref.idx).expect("Valid index")
     }
 }
 
 impl<'a, C: Component> DerefMut for TypedComponentRefMut<'a, C> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.storage_ref.storage.storages[self.component_idx]
-            .typed_mut::<C>().as_mut_slice().get_mut(self.storage_ref.idx)
-            .expect("Valid index")
+            .typed_mut::<C>().expect("Correct ype")
+            .as_mut_slice().get_mut(self.storage_ref.idx).expect("Valid index")
     }
 }
 
@@ -147,7 +147,9 @@ struct ComponentDenseStorage {
 }
 
 impl SparseSetDenseStorage for ComponentDenseStorage {
-    type OwnedItem = Box<[Box<dyn Any>]>;
+    type OwnedInput<'a> = Either<Self::OwnedOutput<'a>, Box<[Box<dyn Any>]>>;
+    type OwnedOutput<'a> = impl Iterator<Item = OwnedDynVecValue<'a>>
+        where Self: 'a;
     type RefItem<'a> = StorageComponentsRef<'a>
         where Self: 'a;
     type RefMutItem<'a> = StorageComponentsRefMut<'a>
@@ -161,25 +163,44 @@ impl SparseSetDenseStorage for ComponentDenseStorage {
         self.len
     }
 
-    fn push(&mut self, comps: Self::OwnedItem) {
+    #[define_opaque()]
+    fn push(&mut self, comps: Self::OwnedInput<'_>) {
         self.len += 1;
-        for (storage, comp) in zip(self.storages.iter_mut(), comps) {
-            storage.push(comp);
+        match comps {
+            Either::Left(output) => {
+                for (storage, comp) in zip_eq(self.storages.iter_mut(), output) {
+                    comp.push_into(storage).expect("Correct type")
+                }
+            },
+            Either::Right(box_dyn) => {
+                for (storage, comp) in zip_eq(self.storages.iter_mut(), box_dyn) {
+                    storage.push(comp).expect("Correct type");
+                }
+            },
         }
     }
 
-    fn swap_remove(&mut self, idx: usize) -> Self::OwnedItem {
+    fn swap_remove(&mut self, idx: usize) -> Self::OwnedOutput<'_> {
         self.len -= 1;
         self.storages.iter_mut()
-            .map(|storage| storage.swap_remove(idx).into_boxed_any())
-            .collect_vec()
-            .into_boxed_slice()
+            .map(move |storage| storage.swap_remove(idx).expect("Valid index"))
+            .consume_on_drop()
     }
 
-    fn set(&mut self, idx: usize, value: Self::OwnedItem) {
+    #[define_opaque()]
+    fn set(&mut self, idx: usize, value: Self::OwnedInput<'_>) {
         assert!(idx < self.len);
-        for (storage, comp) in zip(self.storages.iter_mut(), value) {
-            storage.set(idx, comp);
+        match value {
+            Either::Left(output) => {
+                for (storage, comp) in zip_eq(self.storages.iter_mut(), output) {
+                    comp.set_into(storage, idx).expect("Correct type");
+                }
+            },
+            Either::Right(box_dyn) => {
+                for (storage, comp) in zip_eq(self.storages.iter_mut(), box_dyn) {
+                    storage.set(idx, comp).expect("Correct type");
+                }
+            },
         }
     }
 
@@ -260,7 +281,7 @@ impl World {
         for reserved in this.entity_storage.reserved_entities() {
             this.entities_archetypes.set_or_push(reserved.index(), empty_archetyp);
             this.tables[this.archetypes[empty_archetyp].table_id]
-                .sparse_set.insert(reserved.index(), vec![].into_boxed_slice());
+                .sparse_set.insert(reserved.index(), Either::Right(vec![].into_boxed_slice()));
         }
 
         // Hard-code the first table for the ComponentComponent's component entity
@@ -289,12 +310,13 @@ impl World {
         let empty_table_id = this.archetypes[empty_archetyp].table_id;
         let _ = this.tables[empty_table_id].sparse_set.remove(cc_entity.index());
         this.entities_archetypes.set_or_push(cc_entity.index(), cc_archetype_id);
-        let row: Box<[Box<dyn Any>]> = vec![
-            Box::new(ComponentComponent {
-                dynvec_meta: DynVecMetadata::new::<DynVecMetadata>(),
-            }) as Box<dyn Any>
-        ].into_boxed_slice();
-        this.tables[cc_table_id].sparse_set.insert(cc_entity.index(), row);
+        this.tables[cc_table_id].sparse_set.insert(cc_entity.index(), Either::Right(
+            vec![
+                Box::new(ComponentComponent {
+                    dynvec_meta: DynVecMetadata::new::<DynVecMetadata>(),
+                }) as Box<dyn Any>
+            ].into_boxed_slice()
+        ));
 
         this
     }

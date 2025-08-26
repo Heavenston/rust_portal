@@ -4,16 +4,18 @@ use utils::mapped_nonzero::PlusOneNonZero;
 type SparseIdx = u32;
 
 pub trait SparseSetDenseStorage {
-    type OwnedItem;
+    type OwnedInput<'a>;
+    type OwnedOutput<'a>
+        where Self: 'a;
     type RefItem<'a>
         where Self: 'a;
     type RefMutItem<'a>
         where Self: 'a;
 
     fn len(&self) -> usize;
-    fn push(&mut self, val: Self::OwnedItem);
-    fn swap_remove(&mut self, idx: usize) -> Self::OwnedItem;
-    fn set(&mut self, idx: usize, value: Self::OwnedItem);
+    fn push(&mut self, val: Self::OwnedInput<'_>);
+    fn swap_remove(&mut self, idx: usize) -> Self::OwnedOutput<'_>;
+    fn set(&mut self, idx: usize, value: Self::OwnedInput<'_>);
 
     fn get(&self, idx: usize) -> Option<Self::RefItem<'_>>;
     fn get_mut(&mut self, idx: usize) -> Option<Self::RefMutItem<'_>>;
@@ -23,7 +25,9 @@ pub trait SparseSetDenseStorage {
 }
 
 impl<T> SparseSetDenseStorage for Vec<T> {
-    type OwnedItem = T;
+    type OwnedInput<'a> = T;
+    type OwnedOutput<'a> = T
+        where T: 'a;
     type RefItem<'a> = &'a T
         where T: 'a;
     type RefMutItem<'a> = &'a mut T
@@ -33,11 +37,11 @@ impl<T> SparseSetDenseStorage for Vec<T> {
         self.len()
     }
 
-    fn push(&mut self, val: Self::OwnedItem) {
+    fn push(&mut self, val: T) {
         self.push(val)
     }
 
-    fn swap_remove(&mut self, idx: usize) -> Self::OwnedItem {
+    fn swap_remove(&mut self, idx: usize) -> T {
         self.swap_remove(idx)
     }
 
@@ -104,7 +108,7 @@ impl<S> SparseSet<S>
         self.dense_values.get_mut(ix!(dense_idx))
     }
 
-    pub fn insert(&mut self, sparse_idx: SparseIdx, value: S::OwnedItem) {
+    pub fn insert(&mut self, sparse_idx: SparseIdx, value: S::OwnedInput<'_>) {
         let sparse = ix!(sparse_idx);
         if self.sparse_to_dense_indices.len() <= sparse {
             self.sparse_to_dense_indices.resize_with(sparse + 1, || None);
@@ -128,7 +132,7 @@ impl<S> SparseSet<S>
         }
     }
 
-    pub fn remove(&mut self, sparse_idx: SparseIdx) -> Option<S::OwnedItem> {
+    pub fn remove(&mut self, sparse_idx: SparseIdx) -> Option<S::OwnedOutput<'_>> {
         let sparse = ix!(sparse_idx);
         let dense_idx = self.sparse_to_dense_indices.get(sparse)
             .copied().flatten()?.get();
@@ -140,21 +144,21 @@ impl<S> SparseSet<S>
         let moved_sparse_idx = self.dense_to_sparse_indices.last().copied()
             .expect("Cannot be empty here");
 
-        let value = self.dense_values.swap_remove(d);
-        let removed_sparse_idx = self.dense_to_sparse_indices.swap_remove(d);
-        debug_assert_eq!(removed_sparse_idx, sparse_idx);
-
         if moved_sparse_idx != sparse_idx {
-            debug_assert_ne!(moved_sparse_idx, sparse_idx);
             debug_assert_eq!(
                 self.sparse_to_dense_indices[ix!(moved_sparse_idx)],
                 Some(PlusOneNonZero::<SparseIdx>::new(
-                    SparseIdx::try_from(self.dense_values.len()).expect("no overflow")
+                    SparseIdx::try_from(self.dense_values.len() - 1).expect("no overflow")
                 )),
+                "The dense index of the last value should be... the last value"
             );
             self.sparse_to_dense_indices[ix!(moved_sparse_idx)] =
                 Some(PlusOneNonZero::<SparseIdx>::new(dense_idx));
         }
+
+        let value = self.dense_values.swap_remove(d);
+        let removed_sparse_idx = self.dense_to_sparse_indices.swap_remove(d);
+        debug_assert_eq!(removed_sparse_idx, sparse_idx);
 
         Some(value)
     }
