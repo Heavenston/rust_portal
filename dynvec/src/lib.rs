@@ -8,8 +8,8 @@
 //!
 //! - Construction: `DynVec::new::<T>()` or `DynVec::new_with_meta(DynVecMetadata::new::<T>())`.
 //! - Untyped access: `get`/`get_mut` yield `&dyn Any`/`&mut dyn Any`.
-//! - Typed views: `typed::<T>()`/`typed_mut::<T>()` provide fast typed methods without
-//!   re-checking the type on every call.
+//! - Typed views: `typed::<T>()`/`typed_mut::<T>()` return a `Result` with a typed view
+//!   and provide fast typed methods without re-checking the type on every call.
 //! - Mutation:
 //!   - Untyped: `push`/`set` take `Box<dyn Any>`; removals `swap_remove`/`pop` return an owning
 //!     guard (OwnedDynVecValue) that can be consumed (e.g., `into_typed`, `push_into`, `insert_into`).
@@ -20,13 +20,13 @@
 //! ## Example
 //!
 //! ```
-//! extern crate portal_dynvec; use portal_dynvec::DynVec;
+//! use portal_dynvec::DynVec;
 //!
 //! // Choose the element type at runtime
 //! let mut v = DynVec::new::<i32>();
 //!
 //! // Fast typed access via a view
-//! let mut t = v.typed_mut::<i32>();
+//! let mut t = v.typed_mut::<i32>().unwrap();
 //! t.push(1);
 //! t.push(2);
 //! assert_eq!(t.len(), 2);
@@ -42,11 +42,59 @@
 //! - Elements are dropped exactly once on `clear`/`set`/`swap_remove`/`drop`.
 
 use std::alloc::{ alloc, dealloc, realloc, Layout };
-use std::any::{ Any, TypeId };
+use std::any::{ type_name, Any, TypeId };
 use std::ops::{ Deref, DerefMut };
 use std::ptr::{ self, from_raw_parts, from_raw_parts_mut, NonNull };
 use std::slice;
 use std::ptr::Alignment;
+
+/// Error returned when there is mismatched between expected and received types.
+#[derive(thiserror::Error, Debug)]
+#[error("Type mismatch, expected '{}' but received '{}'", self.display_expected(), self.display_received())]
+pub struct IncorrectTypeError {
+    /// The type_name of the expected type (the one of the DynVec)
+    pub expected_name: Option<&'static str>,
+    /// The `TypeId` of the expected type (the one of the DynVec)
+    pub expected_typeid: TypeId,
+    /// The type_name of the type that was given to the function
+    pub received_name: Option<&'static str>,
+    /// The `TypeId` of the type that was given to the function
+    pub received_typeid: TypeId,
+}
+
+impl IncorrectTypeError {
+    fn display_expected(&self) -> String {
+        self.expected_name.map(String::from)
+            .unwrap_or_else(|| format!("{:?}", self.expected_typeid))
+    }
+
+    fn display_received(&self) -> String {
+        self.received_name.map(String::from)
+            .unwrap_or_else(|| format!("{:?}", self.received_typeid))
+    }
+}
+
+/// Error returned when it is attempted to access an index that is out of bound.
+#[derive(thiserror::Error, Debug)]
+#[error("Index out of bound, {index} should be less than {len}")]
+pub struct IndexOutOfBoundError {
+    /// The index that was attempted
+    pub index: usize,
+    /// The length of the DynVec
+    pub len: usize,
+}
+
+/// Error returned for insertion where both an incorrect type and index out of bound
+/// is possible.
+#[derive(thiserror::Error, Debug)]
+pub enum InsertionError {
+    /// See [`IncorrectTypeError`]
+    #[error(transparent)]
+    IncorrectType(#[from] IncorrectTypeError),
+    /// See [`IndexOutOfBoundError`]
+    #[error(transparent)]
+    IndexOutOfBound(#[from] IndexOutOfBoundError),
+}
 
 #[inline]
 fn dangling_with_layout(layout: Layout) -> NonNull<u8> {
@@ -65,6 +113,8 @@ fn dangling_with_layout(layout: Layout) -> NonNull<u8> {
 pub struct DynVecMetadata {
     /// The `TypeId` of the element type.
     pub type_id: TypeId,
+    /// The type_name of the element type.
+    pub type_name: &'static str,
     /// The `Layout` of the element type.
     pub layout: Layout,
     /// The vtable metadata for `dyn Any` corresponding to the element type.
@@ -81,7 +131,14 @@ impl DynVecMetadata {
         // since we only query metadata and never dereference the fat pointer.
         let obj: *const dyn Any = std::ptr::null::<T>() as *const T as *const dyn Any;
         let meta = std::ptr::metadata(obj);
-        Self { type_id: TypeId::of::<T>(), layout: Layout::new::<T>(), meta, _priv: () }
+
+        Self {
+            type_id: TypeId::of::<T>(),
+            type_name: type_name::<T>(),
+            layout: Layout::new::<T>(),
+            meta,
+            _priv: ()
+        }
     }
 }
 
@@ -104,9 +161,9 @@ impl DynVec {
     ///
     /// Example
     /// ```
-    /// extern crate portal_dynvec; use portal_dynvec::DynVec;
+    /// use portal_dynvec::DynVec;
     /// let mut v = DynVec::new::<i32>();
-    /// v.push(Box::new(1_i32));
+    /// v.push(Box::new(1_i32)).unwrap();
     /// assert_eq!(v.len(), 1);
     /// ```
     pub fn new<T: 'static>() -> Self {
@@ -177,8 +234,72 @@ impl DynVec {
     }
 
     #[inline]
-    fn assert_type(&self, any: &dyn Any) {
-        assert!(any.type_id() == self.meta.type_id, "TypeId mismatch in DynVec::push/set");
+    fn assert_type(&self, any: &dyn Any) -> Result<(), IncorrectTypeError> {
+        let received_typeid = any.type_id();
+        if received_typeid == self.meta.type_id {
+            Ok(())
+        }
+        else {
+            Err(IncorrectTypeError {
+                expected_name: Some(self.meta.type_name),
+                expected_typeid: self.meta.type_id,
+                received_name: None,
+                received_typeid,
+            })
+        }
+    }
+
+    #[inline]
+    fn assert_type_t<T: 'static>(&self) -> Result<(), IncorrectTypeError> {
+        let received_typeid = TypeId::of::<T>();
+        if received_typeid == self.meta.type_id {
+            Ok(())
+        }
+        else {
+            Err(IncorrectTypeError {
+                expected_name: Some(self.meta.type_name),
+                expected_typeid: self.meta.type_id,
+                received_name: Some(type_name::<T>()),
+                received_typeid,
+            })
+        }
+    }
+
+    #[inline]
+    fn assert_type_meta(&self, meta: &DynVecMetadata) -> Result<(), IncorrectTypeError> {
+        if meta.type_id == self.meta.type_id {
+            Ok(())
+        }
+        else {
+            Err(IncorrectTypeError {
+                expected_name: Some(self.meta.type_name),
+                expected_typeid: self.meta.type_id,
+                received_name: Some(meta.type_name),
+                received_typeid: meta.type_id,
+            })
+        }
+    }
+
+    #[inline]
+    fn assert_index(&self, idx: usize) -> Result<(), IndexOutOfBoundError> {
+        if idx < self.len() {
+            Ok(())
+        }
+        else {
+            Err(IndexOutOfBoundError {
+                index: idx,
+                len: self.len(),
+            })
+        }
+    }
+
+    #[inline]
+    fn assert_index_inclusive(&self, idx: usize) -> Result<(), IndexOutOfBoundError> {
+        if idx <= self.len() {
+            Ok(())
+        } else {
+            Err(IndexOutOfBoundError { index: idx, len: self.len() })
+        }
     }
 
     #[inline]
@@ -291,15 +412,17 @@ impl DynVec {
 
     /// Creates a typed shared view for element type `T`.
     ///
-    /// Panics if `T` does not match the vector's element type.
-    pub fn typed<T: 'static>(&self) -> TypedDynVecRef<'_, T> {
+    /// Returns an `Err(IncorrectTypeError)` if `T` does not match the
+    /// vector's element type.
+    pub fn typed<T: 'static>(&self) -> Result<TypedDynVecRef<'_, T>, IncorrectTypeError> {
         TypedDynVecRef::<T>::new(self)
     }
 
     /// Creates a typed mutable view for element type `T`.
     ///
-    /// Panics if `T` does not match the vector's element type.
-    pub fn typed_mut<T: 'static>(&mut self) -> TypedDynVecRefMut<'_, T> {
+    /// Returns an `Err(IncorrectTypeError)` if `T` does not match the
+    /// vector's element type.
+    pub fn typed_mut<T: 'static>(&mut self) -> Result<TypedDynVecRefMut<'_, T>, IncorrectTypeError> {
         TypedDynVecRefMut::<T>::new(self)
     }
 
@@ -321,22 +444,27 @@ impl DynVec {
 
     /// Appends an element to the back as `Box<dyn Any>`.
     ///
-    /// Panics if the boxed value's `TypeId` does not match the vector's element type.
-    pub fn push(&mut self, val: Box<dyn Any>) {
-        self.assert_type(val.as_ref());
+    /// Returns an `Err(IncorrectTypeError)` if the boxed value's `TypeId`
+    /// does not match the vector's element type.
+    pub fn push(&mut self, val: Box<dyn Any>) -> Result<(), IncorrectTypeError> {
+        self.assert_type(val.as_ref())?;
+
         if self.meta.layout.size() == 0 {
             // ZST: no bytes to move; forget the box to defer drop to vector's lifecycle.
             core::mem::forget(val);
             self.reserve(1);
             self.len += 1;
-            return;
+            return Ok(());
         }
+
         let data_ptr = Box::into_raw(val) as *mut u8;
         self.reserve(1);
         // Safety: destination is within allocation; `data_ptr` points to a valid T value.
         unsafe { ptr::copy_nonoverlapping(data_ptr, self.idx_ptr(self.len), self.meta.layout.size()) };
         unsafe { dealloc(data_ptr, self.meta.layout) };
         self.len += 1;
+
+        Ok(())
     }
 
     /// Pops the last element, if any, returning an owning guard over that value.
@@ -344,59 +472,63 @@ impl DynVec {
     /// The element is actually removed from the vector when the returned guard is dropped.
     pub fn pop(&mut self) -> Option<OwnedDynVecValue<'_>> {
         if self.len == 0 { return None; }
-        Some(self.swap_remove(self.len - 1))
+        Some(unsafe { self.swap_remove(self.len - 1).unwrap_unchecked() })
     }
 
     /// Replaces the element at `idx`, dropping the previous value in place.
     ///
-    /// Panics if `idx` is out of bounds or the boxed value's `TypeId` mismatches.
-    pub fn set(&mut self, idx: usize, val: Box<dyn Any>) {
-        assert!(idx < self.len, "index out of bounds");
-        self.assert_type(val.as_ref());
+    /// Returns an error if `idx` is out of bounds or the boxed value's `TypeId` mismatches.
+    pub fn set(&mut self, idx: usize, val: Box<dyn Any>) -> Result<(), InsertionError> {
+        self.assert_index(idx)?;
+        self.assert_type(val.as_ref())?;
+
         if self.meta.layout.size() == 0 {
             // ZST: drop the previous value's drop glue now; forget the new one to drop later.
             unsafe { self.drop_at(idx) };
             core::mem::forget(val);
-            return;
+            return Ok(());
         }
+
         let data_ptr = Box::into_raw(val) as *mut u8;
         unsafe { self.drop_at(idx) };
         unsafe { ptr::copy_nonoverlapping(data_ptr, self.idx_ptr(idx), self.meta.layout.size()) };
         unsafe { dealloc(data_ptr, self.meta.layout) };
+
+        Ok(())
     }
 
     /// Removes and returns an owning guard for the element at `idx`.
     ///
     /// The element is logically owned by the returned guard. The backing vector is actually
     /// updated (swap in the last element and decrement `len`) when the guard is dropped.
-    /// Panics if out of bounds.
+    /// Returns `Err(IndexOutOfBoundError)` if out of bounds.
     ///
     /// # Examples
     ///
     /// Move a value into another `DynVec` with no allocation:
     /// ```
-    /// extern crate portal_dynvec; use portal_dynvec::DynVec;
+    /// use portal_dynvec::DynVec;
     /// let mut a = DynVec::new::<i32>();
     /// let mut b = DynVec::new::<i32>();
-    /// a.typed_mut::<i32>().extend([1, 2, 3]);
-    /// a.swap_remove(1).push_into(&mut b);
-    /// assert_eq!(a.typed::<i32>().as_slice(), &[1, 3]);
-    /// assert_eq!(b.typed::<i32>().as_slice(), &[2]);
+    /// a.typed_mut::<i32>().unwrap().extend([1, 2, 3]);
+    /// a.swap_remove(1).unwrap().push_into(&mut b).unwrap();
+    /// assert_eq!(a.typed::<i32>().unwrap().as_slice(), &[1, 3]);
+    /// assert_eq!(b.typed::<i32>().unwrap().as_slice(), &[2]);
     /// ```
     ///
     /// Extract the removed value by type:
     /// ```
-    /// extern crate portal_dynvec; use portal_dynvec::DynVec;
+    /// use portal_dynvec::DynVec;
     /// let mut v = DynVec::new::<u64>();
-    /// v.typed_mut::<u64>().extend([10, 20]);
-    /// let x: u64 = v.swap_remove(0).into_typed();
+    /// v.typed_mut::<u64>().unwrap().extend([10, 20]);
+    /// let x: u64 = v.swap_remove(0).unwrap().into_typed().unwrap();
     /// assert_eq!(x, 10);
-    /// assert_eq!(v.typed::<u64>().as_slice(), &[20]);
+    /// assert_eq!(v.typed::<u64>().unwrap().as_slice(), &[20]);
     /// ```
-    pub fn swap_remove(&mut self, idx: usize) -> OwnedDynVecValue<'_> {
-        assert!(idx < self.len, "index out of bounds");
+    pub fn swap_remove(&mut self, idx: usize) -> Result<OwnedDynVecValue<'_>, IndexOutOfBoundError> {
+        self.assert_index(idx)?;
         let last = self.len - 1;
-        OwnedDynVecValue { vec: self, idx, last, consumed: false }
+        Ok(OwnedDynVecValue { vec: self, idx, last, consumed: false })
     }
 }
 
@@ -440,12 +572,12 @@ impl<'a> OwnedDynVecValue<'a> {
     ///
     /// # Example
     /// ```
-    /// extern crate portal_dynvec; use portal_dynvec::DynVec;
+    /// use portal_dynvec::DynVec;
     /// let mut v = DynVec::new::<String>();
-    /// v.typed_mut::<String>().extend(["a".to_string(), "b".to_string()]);
-    /// let any = v.swap_remove(0).into_boxed_any();
+    /// v.typed_mut::<String>().unwrap().extend(["a".to_string(), "b".to_string()]);
+    /// let any = v.swap_remove(0).unwrap().into_boxed_any();
     /// assert!(any.downcast::<String>().is_ok());
-    /// assert_eq!(v.typed::<String>().as_slice(), &["b".to_string()]);
+    /// assert_eq!(v.typed::<String>().unwrap().as_slice(), &["b".to_string()]);
     /// ```
     pub fn into_boxed_any(mut self) -> Box<dyn Any> {
         let size = self.vec.meta.layout.size();
@@ -472,40 +604,41 @@ impl<'a> OwnedDynVecValue<'a> {
 
     /// Consumes the guard and returns the value as `T`.
     ///
-    /// Panics if `T` does not match the vector's element type.
+    /// Returns an `Err(IncorrectTypeError)` if `T` does not match the vector's element type.
     ///
     /// # Example
     /// ```
-    /// extern crate portal_dynvec; use portal_dynvec::DynVec;
+    /// use portal_dynvec::DynVec;
     /// let mut v = DynVec::new::<i32>();
-    /// v.typed_mut::<i32>().extend([1, 2]);
-    /// let val: i32 = v.swap_remove(1).into_typed();
+    /// v.typed_mut::<i32>().unwrap().extend([1, 2]);
+    /// let val: i32 = v.swap_remove(1).unwrap().into_typed().unwrap();
     /// assert_eq!(val, 2);
-    /// assert_eq!(v.typed::<i32>().as_slice(), &[1]);
+    /// assert_eq!(v.typed::<i32>().unwrap().as_slice(), &[1]);
     /// ```
-    pub fn into_typed<T: 'static>(mut self) -> T {
-        assert!(TypeId::of::<T>() == self.vec.meta.type_id, "OwnedDynVecValue::into_typed: type mismatch");
+    pub fn into_typed<T: 'static>(mut self) -> Result<T, IncorrectTypeError> {
+        self.vec.assert_type_t::<T>()?;
         let out = unsafe { self.vec.read_t::<T>(self.idx) };
         self.consumed = true;
-        out
+        Ok(out)
     }
 
     /// Moves the value into another `DynVec` with the same element type.
     ///
-    /// Panics if the destination's element type differs.
+    /// Returns an `Err(IncorrectTypeError)` if the destination's element type differs.
     ///
     /// # Example
     /// ```
-    /// extern crate portal_dynvec; use portal_dynvec::DynVec;
+    /// use portal_dynvec::DynVec;
     /// let mut a = DynVec::new::<u32>();
     /// let mut b = DynVec::new::<u32>();
-    /// a.typed_mut::<u32>().extend([1, 2, 3]);
-    /// a.swap_remove(0).push_into(&mut b);
-    /// assert_eq!(a.typed::<u32>().as_slice(), &[3, 2]);
-    /// assert_eq!(b.typed::<u32>().as_slice(), &[1]);
+    /// a.typed_mut::<u32>().unwrap().extend([1, 2, 3]);
+    /// a.swap_remove(0).unwrap().push_into(&mut b).unwrap();
+    /// assert_eq!(a.typed::<u32>().unwrap().as_slice(), &[3, 2]);
+    /// assert_eq!(b.typed::<u32>().unwrap().as_slice(), &[1]);
     /// ```
-    pub fn push_into(mut self, dst: &mut DynVec) {
-        assert!(self.vec.meta.type_id == dst.meta.type_id, "push_into: TypeId mismatch");
+    pub fn push_into(mut self, dst: &mut DynVec) -> Result<(), IncorrectTypeError> {
+        dst.assert_type_meta(&self.vec.meta)?;
+
         let size = self.vec.meta.layout.size();
         if size == 0 {
             dst.reserve(1);
@@ -519,35 +652,40 @@ impl<'a> OwnedDynVecValue<'a> {
             dst.len += 1;
             self.consumed = true;
         }
+
+        Ok(())
     }
 
     /// Inserts the value into another `DynVec` at position `at`, shifting elements to the right.
     ///
-    /// Panics if `at > dst.len()` or the destination's element type differs.
+    /// Returns an error if `at > dst.len()` or the destination's element type differs.
     ///
     /// # Example
     /// ```
-    /// extern crate portal_dynvec; use portal_dynvec::DynVec;
+    /// use portal_dynvec::DynVec;
     /// let mut a = DynVec::new::<i32>();
     /// let mut b = DynVec::new::<i32>();
-    /// a.typed_mut::<i32>().extend([10, 20, 30]);
-    /// b.typed_mut::<i32>().extend([1, 2, 3]);
-    /// a.swap_remove(1).insert_into(&mut b, 1);
-    /// assert_eq!(a.typed::<i32>().as_slice(), &[10, 30]);
-    /// assert_eq!(b.typed::<i32>().as_slice(), &[1, 20, 2, 3]);
+    /// a.typed_mut::<i32>().unwrap().extend([10, 20, 30]);
+    /// b.typed_mut::<i32>().unwrap().extend([1, 2, 3]);
+    /// a.swap_remove(1).unwrap().insert_into(&mut b, 1).unwrap();
+    /// assert_eq!(a.typed::<i32>().unwrap().as_slice(), &[10, 30]);
+    /// assert_eq!(b.typed::<i32>().unwrap().as_slice(), &[1, 20, 2, 3]);
     /// ```
-    pub fn insert_into(mut self, dst: &mut DynVec, at: usize) {
-        assert!(self.vec.meta.type_id == dst.meta.type_id, "insert_into: TypeId mismatch");
-        assert!(at <= dst.len, "insert_into: index out of bounds");
+    pub fn insert_into(mut self, dst: &mut DynVec, at: usize) -> Result<(), InsertionError> {
+        dst.assert_type_meta(&self.vec.meta)?;
+        dst.assert_index_inclusive(at)?;
+
         let size = self.vec.meta.layout.size();
         dst.reserve(1);
+
         if size == 0 {
             // ZST: no bytes to move, only grow logically
             // Shifting is a no-op for ZST.
             dst.len += 1;
             self.consumed = true;
-            return;
+            return Ok(());
         }
+
         unsafe {
             if at < dst.len {
                 // Shift tail to make room: memmove [at..len) -> [at+1..len+1)
@@ -564,6 +702,8 @@ impl<'a> OwnedDynVecValue<'a> {
             dst.len += 1;
         }
         self.consumed = true;
+
+        Ok(())
     }
 }
 
@@ -601,9 +741,9 @@ pub struct TypedDynVecRef<'a, T: 'static> {
 
 impl<'a, T: 'static> TypedDynVecRef<'a, T> {
     /// Creates a typed view, panicking if the vector's element type mismatches `T`.
-    pub fn new(vec: &'a DynVec) -> Self {
-        assert!(TypeId::of::<T>() == vec.meta.type_id, "TypedDynVecRef::new: type mismatch");
-        Self { vec, _marker: std::marker::PhantomData }
+    pub fn new(vec: &'a DynVec) -> Result<Self, IncorrectTypeError> {
+        vec.assert_type_t::<T>()?;
+        Ok(Self { vec, _marker: std::marker::PhantomData })
     }
 
     /// Returns the length of the underlying vector.
@@ -635,9 +775,9 @@ pub struct TypedDynVecRefMut<'a, T: 'static> {
 
 impl<'a, T: 'static> TypedDynVecRefMut<'a, T> {
     /// Creates a typed mutable view, panicking if the vector's element type mismatches `T`.
-    pub fn new(vec: &'a mut DynVec) -> Self {
-        assert!(TypeId::of::<T>() == vec.meta.type_id, "TypedDynVecRefMut::new: type mismatch");
-        Self { vec, _marker: std::marker::PhantomData }
+    pub fn new(vec: &'a mut DynVec) -> Result<Self, IncorrectTypeError> {
+        vec.assert_type_t::<T>()?;
+        Ok(Self { vec, _marker: std::marker::PhantomData })
     }
 
     /// Returns the length of the underlying vector.
@@ -653,26 +793,32 @@ impl<'a, T: 'static> TypedDynVecRefMut<'a, T> {
         self.vec.len += 1;
     }
     /// Sets index to value, dropping the old, without boxing.
-    pub fn set(&mut self, idx: usize, val: T) {
-        assert!(idx < self.vec.len, "index out of bounds");
+    ///
+    /// Returns `Err(IndexOutOfBoundError)` if `idx >= len`.
+    pub fn set(&mut self, idx: usize, val: T) -> Result<(), IndexOutOfBoundError> {
+        self.vec.assert_index(idx)?;
         unsafe { self.vec.drop_at(idx); }
         unsafe { self.vec.write_t::<T>(idx, val); }
+        Ok(())
     }
     /// Removes at index and returns the removed value, swapping in the last.
-    pub fn swap_remove(&mut self, idx: usize) -> T {
-        assert!(idx < self.vec.len, "index out of bounds");
+    ///
+    /// Returns `Err(IndexOutOfBoundError)` if `idx >= len`.
+    pub fn swap_remove(&mut self, idx: usize) -> Result<T, IndexOutOfBoundError> {
+        self.vec.assert_index(idx)?;
         let last_idx = self.vec.len - 1;
         let out = unsafe { self.vec.read_t::<T>(idx) };
         if idx != last_idx {
             unsafe { self.vec.copy_t::<T>(last_idx, idx, 1); }
         }
         self.vec.len -= 1;
-        out
+        Ok(out)
     }
     /// Pops the last element, if any.
     pub fn pop(&mut self) -> Option<T> {
         if self.vec.len == 0 { return None; }
-        Some(self.swap_remove(self.vec.len - 1))
+        // safe unwrap: index is in-bounds by construction
+        Some(self.swap_remove(self.vec.len - 1).unwrap())
     }
 
     /// Returns a shared slice over all elements.
@@ -703,7 +849,7 @@ impl Extend<Box<dyn Any>> for DynVec {
         let it = iter.into_iter();
         let (lower, _) = it.size_hint();
         if lower > 0 { self.reserve(lower); }
-        for item in it { DynVec::push(self, item); }
+        for item in it { self.push(item).expect("Attempted to extend with an incorrect type"); }
     }
 }
 
@@ -735,7 +881,7 @@ impl<T: 'static> std::iter::FromIterator<T> for DynVec {
         let mut v = DynVec::new::<T>();
         if lower > 0 { v.reserve(lower); }
         {
-            let mut tv = v.typed_mut::<T>();
+            let mut tv = v.typed_mut::<T>().expect("Type it was just created with");
             for item in it { tv.push(item); }
         }
         v
@@ -752,7 +898,7 @@ mod tests {
         let mut dyn_vec = DynVec::new::<i32>();
         assert_eq!(dyn_vec.metadata().type_id, std::any::TypeId::of::<i32>());
 
-        let mut view = dyn_vec.typed_mut::<i32>();
+        let mut view = dyn_vec.typed_mut::<i32>().unwrap();
 
         view.push(10_i32);
         view.push(20_i32);
@@ -767,10 +913,10 @@ mod tests {
         let val_after_mut = view.get(1).unwrap();
         assert_eq!(*val_after_mut, 25);
 
-        view.set(0, 5);
+        view.set(0, 5).unwrap();
         assert_eq!(*view.get(0).unwrap(), 5);
         assert_eq!(view.len(), 3);
-        let removed = view.swap_remove(0);
+        let removed = view.swap_remove(0).unwrap();
         assert_eq!(removed, 5);
         assert_eq!(view.len(), 2);
         assert_eq!(*view.get(0).unwrap(), 30);
@@ -778,28 +924,28 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
     fn test_type_mismatch_push() {
         let mut dyn_vec = DynVec::new::<i32>();
-        dyn_vec.push(Box::new("hello".to_string()));
+        let res = dyn_vec.push(Box::new("hello".to_string()));
+        assert!(res.is_err());
     }
 
     #[test]
     fn test_growth_and_bounds() {
         let mut v = DynVec::new::<u64>();
         {
-            let mut tv = v.typed_mut::<u64>();
+            let mut tv = v.typed_mut::<u64>().unwrap();
             for i in 0..100 { tv.push(i as u64); }
             assert_eq!(tv.len(), 100);
             assert_eq!(*tv.get(50).unwrap(), 50);
         }
         let removed = {
-            let mut tv = v.typed_mut::<u64>();
-            tv.swap_remove(10)
+            let mut tv = v.typed_mut::<u64>().unwrap();
+            tv.swap_remove(10).unwrap()
         };
         assert_eq!(removed, 10);
         assert_eq!(v.len(), 99);
-        let tv = v.typed::<u64>();
+        let tv = v.typed::<u64>().unwrap();
         assert!(tv.get(999).is_none());
 
         assert!(!v.is_empty());
@@ -815,7 +961,7 @@ mod tests {
         assert!(v.capacity() >= 10);
 
         {
-            let mut tv = v.typed_mut::<i32>();
+            let mut tv = v.typed_mut::<i32>().unwrap();
             tv.push(1_i32);
             tv.push(2_i32);
             tv.push(3_i32);
@@ -827,7 +973,7 @@ mod tests {
         assert!(v.is_empty());
         let cap = v.capacity();
         {
-            let mut tv = v.typed_mut::<i32>();
+            let mut tv = v.typed_mut::<i32>().unwrap();
             tv.push(4_i32);
         }
         assert_eq!(v.capacity(), cap);
@@ -845,10 +991,10 @@ mod tests {
         let hits = Arc::new(AtomicUsize::new(0));
         let mut v = DynVec::new::<DropProbe>();
         {
-            let mut tv = v.typed_mut::<DropProbe>();
+            let mut tv = v.typed_mut::<DropProbe>().unwrap();
             for _ in 0..5 { tv.push(DropProbe { hits: hits.clone() }); }
-            tv.set(2, DropProbe { hits: hits.clone() });
-            let _r: DropProbe = tv.swap_remove(1);
+            tv.set(2, DropProbe { hits: hits.clone() }).unwrap();
+            let _r: DropProbe = tv.swap_remove(1).unwrap();
             drop(_r);
             tv.clear();
         }
@@ -861,24 +1007,24 @@ mod tests {
     fn test_typed_views() {
         let mut v = DynVec::new::<i32>();
         {
-            let mut tv = v.typed_mut::<i32>();
+            let mut tv = v.typed_mut::<i32>().unwrap();
             tv.push(1);
             tv.push(2);
             tv.push(3);
         }
-        let view = v.typed::<i32>();
+        let view = v.typed::<i32>().unwrap();
         assert_eq!(view.len(), 3);
         assert_eq!(*view.get(1).unwrap(), 2);
         assert_eq!(view[0], 1);
         assert_eq!(view.iter().copied().sum::<i32>(), 1 + 2 + 3);
-        let mut view_mut = v.typed_mut::<i32>();
+        let mut view_mut = v.typed_mut::<i32>().unwrap();
         assert_eq!(*view_mut.get_mut(2).unwrap(), 3);
-        view_mut.set(1, 20);
+        view_mut.set(1, 20).unwrap();
         view_mut.push(4);
-        assert_eq!(view_mut.swap_remove(0), 1);
+        assert_eq!(view_mut.swap_remove(0).unwrap(), 1);
         assert_eq!(view_mut.pop().unwrap(), 3);
         for x in view_mut.iter_mut() { *x *= 2; }
-        let view2 = v.typed::<i32>();
+        let view2 = v.typed::<i32>().unwrap();
         assert_eq!(view2.as_slice(), &[8, 40]);
     }
 
@@ -886,13 +1032,13 @@ mod tests {
     fn test_zst_unit_typed() {
         let mut v = DynVec::new::<()>();
         {
-            let mut tv = v.typed_mut::<()>();
+            let mut tv = v.typed_mut::<()>().unwrap();
             for _ in 0..10 { tv.push(()); }
             assert_eq!(tv.len(), 10);
             // Indexing and iteration should work
             assert_eq!(tv.as_slice().len(), 10);
-            // swap_remove should not panic and keep len consistent
-            tv.swap_remove(3);
+            // swap_remove keeps len consistent
+            tv.swap_remove(3).unwrap();
             assert_eq!(tv.len(), 9);
             // pop returns Some(()) until empty
             assert!(tv.pop().is_some());
@@ -904,15 +1050,15 @@ mod tests {
     #[test]
     fn test_zst_unit_untyped() {
         let mut v = DynVec::new::<()>();
-        for _ in 0..5 { v.push(Box::new(())); }
+        for _ in 0..5 { let _ = v.push(Box::new(())); }
         assert_eq!(v.len(), 5);
         // get returns &dyn Any; downcast_ref::<()>() works
         assert!(v.get(0).unwrap().is::<()>());
         // set with ZST keeps len
-        v.set(2, Box::new(()));
+        let _ = v.set(2, Box::new(()));
         assert_eq!(v.len(), 5);
         // swap_remove returns OwnedDynVecValue; convert to Box<dyn Any>
-        let b = v.swap_remove(1).into_boxed_any();
+        let b = v.swap_remove(1).unwrap().into_boxed_any();
         assert!(b.downcast::<()>().is_ok());
         assert_eq!(v.len(), 4);
         // pop to empty
@@ -926,17 +1072,17 @@ mod tests {
         struct Z;
         let mut v = DynVec::new::<Z>();
         {
-            let mut tv = v.typed_mut::<Z>();
+            let mut tv = v.typed_mut::<Z>().unwrap();
             for _ in 0..16 { tv.push(Z); }
             assert_eq!(tv.len(), 16);
             // swap remove a few
-            tv.swap_remove(0);
-            tv.swap_remove(5.min(tv.len()-1));
+            tv.swap_remove(0).unwrap();
+            tv.swap_remove(5.min(tv.len()-1)).unwrap();
             assert!(tv.pop().is_some());
         }
         assert!(v.len() <= 14);
         // Untyped operations work too
-        v.push(Box::new(Z));
+        let _ = v.push(Box::new(Z));
         assert!(v.get(0).unwrap().is::<Z>());
     }
 
@@ -945,15 +1091,15 @@ mod tests {
         let mut src = DynVec::new::<i32>();
         let mut dst = DynVec::new::<i32>();
         {
-            let mut tv = src.typed_mut::<i32>();
+            let mut tv = src.typed_mut::<i32>().unwrap();
             tv.extend([1, 2, 3]);
         }
         // remove middle element and push into dst
-        src.swap_remove(1).push_into(&mut dst);
+        src.swap_remove(1).unwrap().push_into(&mut dst).unwrap();
         // After guard drop, src should have [1, 3] in some order (swap removal brings last into idx)
-        let s = src.typed::<i32>();
+        let s = src.typed::<i32>().unwrap();
         assert_eq!(s.as_slice(), &[1, 3]);
-        let d = dst.typed::<i32>();
+        let d = dst.typed::<i32>().unwrap();
         assert_eq!(d.as_slice(), &[2]);
     }
 
@@ -962,50 +1108,50 @@ mod tests {
         let mut src = DynVec::new::<i32>();
         let mut dst = DynVec::new::<i32>();
         {
-            let mut tv = src.typed_mut::<i32>();
+            let mut tv = src.typed_mut::<i32>().unwrap();
             tv.extend([10, 20, 30]);
         }
         {
-            let mut dv = dst.typed_mut::<i32>();
+            let mut dv = dst.typed_mut::<i32>().unwrap();
             dv.extend([100, 200]);
         }
         // Move first element (10) and insert into middle of dst
-        src.swap_remove(0).insert_into(&mut dst, 1);
-        let s = src.typed::<i32>();
+        src.swap_remove(0).unwrap().insert_into(&mut dst, 1).unwrap();
+        let s = src.typed::<i32>().unwrap();
         assert_eq!(s.as_slice(), &[30, 20]);
         {
-            let d = dst.typed::<i32>();
+            let d = dst.typed::<i32>().unwrap();
             assert_eq!(d.as_slice(), &[100, 10, 200]);
         }
 
         // Insert at end
         let end = dst.len();
-        src.swap_remove(0).insert_into(&mut dst, end);
+        src.swap_remove(0).unwrap().insert_into(&mut dst, end).unwrap();
         {
-            let s2 = src.typed::<i32>();
+            let s2 = src.typed::<i32>().unwrap();
             assert_eq!(s2.as_slice(), &[20]);
         }
         {
-            let d2 = dst.typed::<i32>();
+            let d2 = dst.typed::<i32>().unwrap();
             assert_eq!(d2.as_slice(), &[100, 10, 200, 30]);
         }
 
         // Insert at beginning
-        src.swap_remove(0).insert_into(&mut dst, 0);
-        let d3 = dst.typed::<i32>();
+        src.swap_remove(0).unwrap().insert_into(&mut dst, 0).unwrap();
+        let d3 = dst.typed::<i32>().unwrap();
         assert_eq!(d3.as_slice(), &[20, 100, 10, 200, 30]);
     }
 
     #[test]
-    #[should_panic]
-    fn test_push_into_type_mismatch_panics() {
+    fn test_push_into_type_mismatch_returns_err() {
         let mut a = DynVec::new::<i32>();
         let mut b = DynVec::new::<u64>();
         {
-            let mut tv = a.typed_mut::<i32>();
+            let mut tv = a.typed_mut::<i32>().unwrap();
             tv.push(42);
         }
-        a.swap_remove(0).push_into(&mut b);
+        let res = a.swap_remove(0).unwrap().push_into(&mut b);
+        assert!(res.is_err());
     }
 
     #[test]
@@ -1018,10 +1164,10 @@ mod tests {
         let hits = Arc::new(AtomicUsize::new(0));
         let mut v = DynVec::new::<DropProbe>();
         {
-            let mut tv = v.typed_mut::<DropProbe>();
+            let mut tv = v.typed_mut::<DropProbe>().unwrap();
             tv.push(DropProbe { hits: hits.clone() });
         }
-        let p: DropProbe = v.swap_remove(0).into_typed::<DropProbe>();
+        let p: DropProbe = v.swap_remove(0).unwrap().into_typed::<DropProbe>().unwrap();
         assert_eq!(hits.load(Ordering::SeqCst), 0);
         drop(p);
         assert_eq!(hits.load(Ordering::SeqCst), 1);
@@ -1030,10 +1176,10 @@ mod tests {
         // Not consumed path: dropping guard should drop the element
         let mut v2 = DynVec::new::<DropProbe>();
         {
-            let mut tv = v2.typed_mut::<DropProbe>();
+            let mut tv = v2.typed_mut::<DropProbe>().unwrap();
             tv.push(DropProbe { hits: hits.clone() });
         }
-        let _guard = v2.swap_remove(0);
+        let _guard = v2.swap_remove(0).unwrap();
         drop(_guard);
         assert_eq!(hits.load(Ordering::SeqCst), 2);
         assert_eq!(v2.len(), 0);
@@ -1046,17 +1192,17 @@ mod tests {
         let mut a = DynVec::new::<Z>();
         let mut b = DynVec::new::<Z>();
         {
-            let mut tv = a.typed_mut::<Z>();
+            let mut tv = a.typed_mut::<Z>().unwrap();
             for _ in 0..3 { tv.push(Z); }
         }
-        a.swap_remove(1).push_into(&mut b);
+        a.swap_remove(1).unwrap().push_into(&mut b).unwrap();
         assert_eq!(a.len(), 2);
         assert_eq!(b.len(), 1);
-        a.swap_remove(0).insert_into(&mut b, 0);
+        a.swap_remove(0).unwrap().insert_into(&mut b, 0).unwrap();
         assert_eq!(a.len(), 1);
         assert_eq!(b.len(), 2);
         let end = b.len();
-        a.swap_remove(0).insert_into(&mut b, end);
+        a.swap_remove(0).unwrap().insert_into(&mut b, end).unwrap();
         assert_eq!(a.len(), 0);
         assert_eq!(b.len(), 3);
     }
@@ -1064,14 +1210,14 @@ mod tests {
     #[test]
     fn test_pop_returns_guard() {
         let mut v = DynVec::new::<i32>();
-        v.typed_mut::<i32>().extend([7, 8]);
+        v.typed_mut::<i32>().unwrap().extend([7, 8]);
         let g = v.pop().unwrap();
         // Move into another vec
         let mut dst = DynVec::new::<i32>();
-        g.push_into(&mut dst);
+        g.push_into(&mut dst).unwrap();
         // src len decremented on drop
         assert_eq!(v.len(), 1);
-        assert_eq!(dst.typed::<i32>().as_slice(), &[8]);
+        assert_eq!(dst.typed::<i32>().unwrap().as_slice(), &[8]);
     }
 
     #[test]
@@ -1079,7 +1225,7 @@ mod tests {
         // Typed view extend
         let mut v = DynVec::new::<i32>();
         {
-            let mut tv = v.typed_mut::<i32>();
+            let mut tv = v.typed_mut::<i32>().unwrap();
             // trait method (in scope via prelude)
             tv.extend([1, 2, 3]);
             // trait method
@@ -1088,7 +1234,7 @@ mod tests {
             let buf = vec![6_i32, 7_i32];
             tv.extend(buf.iter());
         }
-        let tv = v.typed::<i32>();
+        let tv = v.typed::<i32>().unwrap();
         assert_eq!(tv.as_slice(), &[1, 2, 3, 4, 5, 6, 7]);
 
         // Untyped extend via Box<dyn Any>
@@ -1098,7 +1244,7 @@ mod tests {
         // trait method
         let items2 = ["dddd", "eeeee"].into_iter().map(|s| Box::new(s.to_string()) as Box<dyn Any>);
         std::iter::Extend::extend(&mut u, items2);
-        let uv = u.typed::<String>();
+        let uv = u.typed::<String>().unwrap();
         assert_eq!(
             uv.as_slice(),
             &["a".to_string(), "bb".to_string(), "ccc".to_string(), "dddd".to_string(), "eeeee".to_string()]
@@ -1109,7 +1255,7 @@ mod tests {
     fn test_collect_into_dynvec() {
         let v: DynVec = [10_i64, 20, 30].into_iter().collect();
         assert_eq!(v.metadata().type_id, TypeId::of::<i64>());
-        let t = v.typed::<i64>();
+        let t = v.typed::<i64>().unwrap();
         assert_eq!(t.as_slice(), &[10, 20, 30]);
     }
 }
