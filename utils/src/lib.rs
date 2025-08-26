@@ -1,6 +1,7 @@
 #![feature(generic_const_exprs)]
 #![feature(never_type)]
 #![feature(nonzero_internals)]
+#![feature(option_zip)]
 
 #![expect(internal_features)]
 #![expect(incomplete_features)]
@@ -21,6 +22,7 @@ pub mod prelude {
         sorted_vec::{ SortedVec, SortedSet },
         dyn_clone,
         consume_on_drop::{ ConsumeOnDropExt as _ },
+        chain_after::{ ChainAfterExt as _ },
     };
 }
 
@@ -38,6 +40,7 @@ pub mod axis;
 pub mod axis_direction;
 pub mod mapped_nonzero;
 pub mod consume_on_drop;
+pub mod chain_after;
 
 use std::hash::{ DefaultHasher, Hash, Hasher };
 
