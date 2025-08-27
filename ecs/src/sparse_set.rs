@@ -3,8 +3,12 @@ use utils::mapped_nonzero::PlusOneNonZero;
 
 type SparseIdx = u32;
 
+pub trait SparseSetDenseStorageInput<C> {
+    fn push(&mut self, item: C);
+    fn set(&mut self, idx: usize, item: C);
+}
+
 pub trait SparseSetDenseStorage {
-    type OwnedInput<'a>;
     type OwnedOutput<'a>
         where Self: 'a;
     type RefItem<'a>
@@ -13,9 +17,8 @@ pub trait SparseSetDenseStorage {
         where Self: 'a;
 
     fn len(&self) -> usize;
-    fn push(&mut self, val: Self::OwnedInput<'_>);
+
     fn swap_remove(&mut self, idx: usize) -> Self::OwnedOutput<'_>;
-    fn set(&mut self, idx: usize, value: Self::OwnedInput<'_>);
 
     fn get(&self, idx: usize) -> Option<Self::RefItem<'_>>;
     fn get_mut(&mut self, idx: usize) -> Option<Self::RefMutItem<'_>>;
@@ -24,44 +27,45 @@ pub trait SparseSetDenseStorage {
     fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = Self::RefMutItem<'a>> + DoubleEndedIterator + ExactSizeIterator;
 }
 
+impl<T> SparseSetDenseStorageInput<T> for Vec<T> {
+    fn push(&mut self, item: T) {
+        self.push(item)
+    }
+
+    fn set(&mut self, idx: usize, item: T) {
+        self[idx] = item;
+    }
+}
+
 impl<T> SparseSetDenseStorage for Vec<T> {
-    type OwnedInput<'a> = T;
     type OwnedOutput<'a> = T
-        where T: 'a;
+        where Self: 'a;
     type RefItem<'a> = &'a T
-        where T: 'a;
+        where Self: 'a;
     type RefMutItem<'a> = &'a mut T
-        where T: 'a;
+        where Self: 'a;
 
     fn len(&self) -> usize {
         self.len()
     }
 
-    fn push(&mut self, val: T) {
-        self.push(val)
-    }
-
-    fn swap_remove(&mut self, idx: usize) -> T {
+    fn swap_remove(&mut self, idx: usize) -> Self::OwnedOutput<'_> {
         self.swap_remove(idx)
     }
 
-    fn set(&mut self, idx: usize, value: T) {
-        self.as_mut_slice()[idx] = value;
-    }
-
-    fn get(&self, idx: usize) -> Option<&T> {
+    fn get(&self, idx: usize) -> Option<Self::RefItem<'_>> {
         self.as_slice().get(idx)
     }
 
-    fn get_mut(&mut self, idx: usize) -> Option<&mut T> {
+    fn get_mut(&mut self, idx: usize) -> Option<Self::RefMutItem<'_>> {
         self.as_mut_slice().get_mut(idx)
     }
 
-    fn iter<'a>(&'a self) -> impl Iterator<Item = &'a T> + DoubleEndedIterator + ExactSizeIterator + Clone {
+    fn iter<'a>(&'a self) -> impl Iterator<Item = Self::RefItem<'a>> + DoubleEndedIterator + ExactSizeIterator + Clone {
         self.as_slice().iter()
     }
 
-    fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = &'a mut T> + DoubleEndedIterator + ExactSizeIterator {
+    fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = Self::RefMutItem<'a>> + DoubleEndedIterator + ExactSizeIterator {
         self.as_mut_slice().iter_mut()
     }
 }
@@ -108,7 +112,9 @@ impl<S> SparseSet<S>
         self.dense_values.get_mut(ix!(dense_idx))
     }
 
-    pub fn insert(&mut self, sparse_idx: SparseIdx, value: S::OwnedInput<'_>) {
+    pub fn insert<I>(&mut self, sparse_idx: SparseIdx, value: I)
+        where S: SparseSetDenseStorageInput<I>
+    {
         let sparse = ix!(sparse_idx);
         if self.sparse_to_dense_indices.len() <= sparse {
             self.sparse_to_dense_indices.resize_with(sparse + 1, || None);

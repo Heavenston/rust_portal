@@ -2,23 +2,22 @@ mod entity_storage;
 pub use entity_storage::{ Entity, EntityIndexType, EntityGenerationType };
 mod entity_set;
 pub use entity_set::{ EntitySet };
+mod component_storage;
+use component_storage::*;
 
 use std::{
     any::{ Any, TypeId },
     borrow::Cow,
-    collections::HashMap,
-    iter::{ empty, once, zip },
-    marker::PhantomData,
-    ops::{ Deref, DerefMut }
+    collections::HashMap, iter::{empty, once},
 };
 use derive_more::{ From, Into };
-use dynvec::{ DynVec, DynVecMetadata, OwnedDynVecValue };
+use dynvec::{ DynVec, DynVecMetadata };
 
-use utils::{ itertools::{chain, zip_eq}, prelude::* };
+use utils::prelude::*;
 
 use crate::{
-    index_map::{ IndexMap, IndexMapIndex },
-    sparse_set::{ SparseSet, SparseSetDenseStorage },
+    dyn_option::DynOption, index_map::{ IndexMap, IndexMapIndex },
+    sparse_set::SparseSet
 };
 
 pub trait Component: 'static + Any { }
@@ -66,169 +65,6 @@ struct Archetyp {
     /// Multiple Archtyps could point to the same tables if they have the same
     /// (table) components.
     table_id: TableId,
-}
-
-struct StorageComponentsRef<'a> {
-    idx: usize,
-    storage: &'a ComponentDenseStorage,
-}
-
-impl<'a> StorageComponentsRef<'a> {
-    fn typed<C>(self, component_idx: usize) -> TypedComponentRef<'a, C> {
-        TypedComponentRef {
-            storage_ref: self,
-            component_idx,
-            _data: PhantomData,
-        }
-    }
-}
-
-pub struct TypedComponentRef<'a, C> {
-    storage_ref: StorageComponentsRef<'a>,
-    component_idx: usize,
-    _data: PhantomData<*const C>,
-}
-
-impl<'a, C: Component> Deref for TypedComponentRef<'a, C> {
-    type Target = C;
-
-    fn deref(&self) -> &C {
-        self.storage_ref.storage.storages[self.component_idx]
-            .typed::<C>().expect("Correct type")
-            .as_slice().get(self.storage_ref.idx).expect("Valid index")
-    }
-}
-
-struct StorageComponentsRefMut<'a> {
-    idx: usize,
-    storage: &'a mut ComponentDenseStorage,
-}
-
-impl<'a> StorageComponentsRefMut<'a> {
-    fn typed<C>(self, component_idx: usize) -> TypedComponentRefMut<'a, C> {
-        TypedComponentRefMut {
-            storage_ref: self,
-            component_idx,
-            _data: PhantomData,
-        }
-    }
-}
-
-pub struct TypedComponentRefMut<'a, C> {
-    storage_ref: StorageComponentsRefMut<'a>,
-    component_idx: usize,
-    _data: PhantomData<*const C>,
-}
-
-impl<'a, C: Component> Deref for TypedComponentRefMut<'a, C> {
-    type Target = C;
-
-    fn deref(&self) -> &C {
-        self.storage_ref.storage.storages[self.component_idx]
-            .typed::<C>().expect("Correct type")
-            .as_slice().get(self.storage_ref.idx).expect("Valid index")
-    }
-}
-
-impl<'a, C: Component> DerefMut for TypedComponentRefMut<'a, C> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.storage_ref.storage.storages[self.component_idx]
-            .typed_mut::<C>().expect("Correct ype")
-            .as_mut_slice().get_mut(self.storage_ref.idx).expect("Valid index")
-    }
-}
-
-#[derive_where::derive_where(Debug)]
-#[derive(Default)]
-struct ComponentDenseStorage {
-    len: usize,
-    #[derive_where(skip)]
-    storages: Box<[DynVec]>,
-}
-
-impl SparseSetDenseStorage for ComponentDenseStorage {
-    type OwnedInput<'a> = Either<Self::OwnedOutput<'a>, Box<[Box<dyn Any>]>>;
-    type OwnedOutput<'a> = impl Iterator<Item = OwnedDynVecValue<'a>>
-        where Self: 'a;
-    type RefItem<'a> = StorageComponentsRef<'a>
-        where Self: 'a;
-    type RefMutItem<'a> = StorageComponentsRefMut<'a>
-        where Self: 'a;
-
-    fn len(&self) -> usize {
-        debug_assert!(
-            chain(once(self.len), self.storages.iter().map(|storage| storage.len()))
-                .all_equal()
-        );
-        self.len
-    }
-
-    #[define_opaque()]
-    fn push(&mut self, comps: Self::OwnedInput<'_>) {
-        self.len += 1;
-        match comps {
-            Either::Left(output) => {
-                for (storage, comp) in zip_eq(self.storages.iter_mut(), output) {
-                    comp.push_into(storage).expect("Correct type")
-                }
-            },
-            Either::Right(box_dyn) => {
-                for (storage, comp) in zip_eq(self.storages.iter_mut(), box_dyn) {
-                    storage.push(comp).expect("Correct type");
-                }
-            },
-        }
-    }
-
-    fn swap_remove(&mut self, idx: usize) -> Self::OwnedOutput<'_> {
-        self.len -= 1;
-        self.storages.iter_mut()
-            .map(move |storage| storage.swap_remove(idx).expect("Valid index"))
-            .consume_on_drop()
-    }
-
-    #[define_opaque()]
-    fn set(&mut self, idx: usize, value: Self::OwnedInput<'_>) {
-        assert!(idx < self.len);
-        match value {
-            Either::Left(output) => {
-                for (storage, comp) in zip_eq(self.storages.iter_mut(), output) {
-                    comp.set_into(storage, idx).expect("Correct type");
-                }
-            },
-            Either::Right(box_dyn) => {
-                for (storage, comp) in zip_eq(self.storages.iter_mut(), box_dyn) {
-                    storage.set(idx, comp).expect("Correct type");
-                }
-            },
-        }
-    }
-
-    fn get(&self, idx: usize) -> Option<Self::RefItem<'_>> {
-        (idx < self.len)
-            .then(|| StorageComponentsRef {
-                idx,
-                storage: self,
-            })
-    }
-
-    fn get_mut(&mut self, idx: usize) -> Option<Self::RefMutItem<'_>> {
-        (idx < self.len)
-            .then(|| StorageComponentsRefMut {
-                idx,
-                storage: self,
-            })
-    }
-
-    fn iter<'a>(&'a self) -> impl Iterator<Item = Self::RefItem<'a>> + DoubleEndedIterator + ExactSizeIterator + Clone {
-        (0..self.len)
-            .map(|idx| self.get(idx).expect("in bound"))
-    }
-
-    fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = Self::RefMutItem<'a>> + DoubleEndedIterator + ExactSizeIterator {
-        // TODO: Implement (do i need unsafe ?? x( )
-        empty()
-    }
 }
 
 create_id!(TableId(u32));
@@ -281,7 +117,7 @@ impl World {
         for reserved in this.entity_storage.reserved_entities() {
             this.entities_archetypes.set_or_push(reserved.index(), empty_archetyp);
             this.tables[this.archetypes[empty_archetyp].table_id]
-                .sparse_set.insert(reserved.index(), Either::Right(vec![].into_boxed_slice()));
+                .sparse_set.insert(reserved.index(), empty::<ComponentDenseStorageInput>());
         }
 
         // Hard-code the first table for the ComponentComponent's component entity
@@ -292,11 +128,10 @@ impl World {
         let cc_set = EntitySet::from(&[cc_entity][..]);
         let cc_table_id = this.tables.push(Table {
             table_components: cc_set.clone(),
-            sparse_set: SparseSet::new(ComponentDenseStorage {
-                len: 0,
-                storages: vec![DynVec::new::<ComponentComponent>()]
-                    .into_boxed_slice(),
-            }),
+            sparse_set: SparseSet::new(ComponentDenseStorage::new(
+                vec![DynVec::new::<ComponentComponent>()]
+                    .into_boxed_slice()
+            )),
         });
         this.components_set_to_table.insert(cc_set.clone(), cc_table_id);
 
@@ -310,13 +145,11 @@ impl World {
         let empty_table_id = this.archetypes[empty_archetyp].table_id;
         let _ = this.tables[empty_table_id].sparse_set.remove(cc_entity.index());
         this.entities_archetypes.set_or_push(cc_entity.index(), cc_archetype_id);
-        this.tables[cc_table_id].sparse_set.insert(cc_entity.index(), Either::Right(
-            vec![
-                Box::new(ComponentComponent {
-                    dynvec_meta: DynVecMetadata::new::<DynVecMetadata>(),
-                }) as Box<dyn Any>
-            ].into_boxed_slice()
-        ));
+        this.tables[cc_table_id].sparse_set.insert(cc_entity.index(), vec![
+            &mut Some(ComponentComponent {
+                dynvec_meta: DynVecMetadata::new::<DynVecMetadata>(),
+            }) as &mut dyn DynOption
+        ]);
 
         this
     }
@@ -330,7 +163,7 @@ impl World {
         let entity = self.entity_storage.spawn();
         self.entities_archetypes.set_or_push(entity.index(), empty_archetyp);
         self.tables[self.archetypes[empty_archetyp].table_id]
-            .sparse_set.insert(entity.index(), vec![].into_boxed_slice());
+            .sparse_set.insert(entity.index(), empty::<ComponentDenseStorageInput>());
         entity
     }
 
@@ -379,9 +212,8 @@ impl World {
                 let comp_set = table_components.into_owned();
                 let table_id = self.tables.push(Table {
                     table_components: comp_set.clone(),
-                    sparse_set: SparseSet::new(ComponentDenseStorage {
-                        len: 0,
-                        storages: comp_set.iter()
+                    sparse_set: SparseSet::new(ComponentDenseStorage::new(
+                        comp_set.iter()
                             .map(|component| {
                                 let component_metadata = self.get::<ComponentComponent>(component)
                                     .expect("Entity is component");
@@ -389,8 +221,8 @@ impl World {
                                 DynVec::new_with_meta(component_metadata.dynvec_meta.clone())
                             })
                             .collect::<Vec<_>>()
-                            .into_boxed_slice(),
-                    }),
+                            .into_boxed_slice()
+                    )),
                 });
 
                 self.components_set_to_table.insert(comp_set, table_id);
@@ -503,14 +335,20 @@ impl World {
         // change this
         // (and both tables could be the same)
 
-        let mut old_components = self.tables[old_table_id].sparse_set.remove(entity.index())
-            .expect("entity is in table").into_vec();
-        old_components.insert(new_component_idx, Box::new(f()) as Box<dyn Component>);
+        let mut new_component_value = Some(f());
 
-        let new_table = &mut self.tables[new_table_id];
-        new_table.sparse_set.insert(
-            entity.index(), old_components.into_boxed_slice()
-        );
+        let [old_table, new_table] = self.tables.get_disjoint_mut([
+            old_table_id, new_table_id,
+        ]).expect("Old table and new table are not equal");
+
+        let components = old_table.sparse_set.remove(entity.index())
+            .expect("entity is in table")
+            .map(ComponentDenseStorageInput::from)
+            // inserts the component into the list at its index
+            .chain_after(new_component_idx, once(
+                &mut new_component_value as &mut dyn DynOption
+            ).map(ComponentDenseStorageInput::from));
+        new_table.sparse_set.insert(entity.index(), components);
 
         let r#ref = new_table.sparse_set.get_mut(entity.index()).expect("Entity just inserted")
             .typed(new_component_idx);
@@ -614,7 +452,7 @@ mod tests {
         // The component entity must carry ComponentComponent describing Foo
         let meta = w.get::<ComponentComponent>(comp_entity).expect("has meta");
         assert_eq!(meta.dynvec_meta.type_id, TypeId::of::<Foo>());
-        assert_eq!(meta.dynvec_meta.layout, Layout::new::<Foo>());
+        assert_eq!(meta.dynvec_meta.layout(), Layout::new::<Foo>());
     }
 
     #[test]

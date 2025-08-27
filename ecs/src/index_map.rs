@@ -80,6 +80,12 @@ impl<T, I> IndexMap<T, I>
             self.vec[idx] = val;
         }
     }
+
+    pub fn get_disjoint_mut<const N: usize>(
+        &mut self, indices: [I; N]
+    ) -> Result<[&mut T; N], std::slice::GetDisjointMutError> {
+        self.as_mut_slice().get_disjoint_mut(indices.map(|i| i.to_usize()))
+    }
 }
 
 impl<T, I> Index<I> for IndexMap<T, I>
