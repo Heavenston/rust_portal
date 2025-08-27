@@ -23,6 +23,7 @@ pub mod prelude {
         dyn_clone,
         consume_on_drop::{ ConsumeOnDropExt as _ },
         chain_after::{ ChainAfterExt as _ },
+        skip_after::{ SkipAfterExt as _ },
     };
 }
 
@@ -41,6 +42,7 @@ pub mod axis_direction;
 pub mod mapped_nonzero;
 pub mod consume_on_drop;
 pub mod chain_after;
+pub mod skip_after;
 
 use std::hash::{ DefaultHasher, Hash, Hasher };
 
