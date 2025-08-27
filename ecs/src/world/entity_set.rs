@@ -26,7 +26,7 @@ impl EntitySet {
     }
 
     pub fn index_of(&self, entity: Entity) -> Option<usize> {
-        self.entities.iter().position(|&e| e == entity)
+        self.entities.binary_search(&entity).ok()
     }
 
     /// Returns the new element's index
@@ -34,8 +34,10 @@ impl EntitySet {
         self.entities.find_or_insert(entity).index()
     }
 
-    pub fn remove(&mut self, entity: Entity) {
-        self.entities.remove_item(&entity);
+    pub fn remove(&mut self, entity: Entity) -> Option<usize> {
+        let idx = self.entities.binary_search(&entity).ok()?;
+        self.entities.remove_index(idx);
+        Some(idx)
     }
 
     /// Returns a *sorted* iterator over the contained entities
@@ -48,9 +50,9 @@ impl EntitySet {
         (idx, self)
     }
 
-    pub fn without(mut self, entity: Entity) -> Self {
-        self.remove(entity);
-        self
+    pub fn without(mut self, entity: Entity) -> (Option<usize>, Self) {
+        let idx = self.remove(entity);
+        (idx, self)
     }
 }
 

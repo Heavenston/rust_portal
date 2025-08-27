@@ -360,6 +360,40 @@ impl World {
             was_added: true,
         }
     }
+
+    pub fn remove<C>(&mut self, entity: Entity) -> Option<C>
+        where C: Component,
+    {
+        let component = self.component::<C>();
+
+        let archetyp_id = self.entities_archetypes[entity.index()];
+        let archetyp = &mut self.archetypes[archetyp_id];
+        if !archetyp.components.has(component) {
+            return None;
+        }
+
+        let (Some(component_idx), new_component_set) = archetyp.components.clone().without(component)
+        else { unreachable!("Component is inside the set") };
+        let old_archetyp_id = self.entities_archetypes[entity.index()];
+        let old_table_id = self.archetypes[old_archetyp_id].table_id;
+        let new_archtyp_id = self.archtyp_for(Cow::Borrowed(&new_component_set));
+        let new_table_id = self.archetypes[new_archtyp_id].table_id;
+
+        let [old_table, new_table] = self.tables.get_disjoint_mut([
+            old_table_id, new_table_id,
+        ]).expect("Old table and new table are not equal");
+
+        let mut extracted_component = None;
+        let components = old_table.sparse_set.remove(entity.index())
+            .expect("entity is in table")
+            .extract_nth(component_idx, |comp| extracted_component = Some(comp));
+        new_table.sparse_set.insert(entity.index(), components);
+        let extracted_component = extracted_component.expect("Exist in iterator so should have been extracted");
+
+        self.entities_archetypes[entity.index()] = new_archtyp_id;
+
+        Some(extracted_component.into_typed().expect("Correct type"))
+    }
 }
 
 impl Default for World {
