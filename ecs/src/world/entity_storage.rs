@@ -1,4 +1,4 @@
-use std::iter::repeat_n;
+use std::{ fmt::Display, iter::repeat_n };
 
 use utils::{ itertools::chain, prelude::* };
 
@@ -25,6 +25,12 @@ impl Entity {
 
     pub fn generation(self) -> EntityGenerationType {
         self.generation
+    }
+}
+
+impl Display for Entity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Entity(0x{:016x})", u64::from(self.index()) | (u64::from(self.generation) << 32))
     }
 }
 

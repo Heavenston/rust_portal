@@ -1,0 +1,416 @@
+use super::{ World, Entity, ComponentComponent };
+use super::RESERVED_ENTITY_COUNT;
+use std::{alloc::Layout, any::TypeId};
+
+#[test]
+fn spawn_produces_sequential_indices_after_reserved_and_alive() {
+    let mut w = World::new();
+
+    let e0 = w.spawn();
+    let e1 = w.spawn();
+    let e2 = w.spawn();
+
+    assert_eq!(e0.index(), RESERVED_ENTITY_COUNT);
+    assert_eq!(e1.index(), RESERVED_ENTITY_COUNT + 1);
+    assert_eq!(e2.index(), RESERVED_ENTITY_COUNT + 2);
+
+    assert_eq!(e0.generation(), 0);
+    assert_eq!(e1.generation(), 0);
+    assert_eq!(e2.generation(), 0);
+
+    assert!(w.alive(e0));
+    assert!(w.alive(e1));
+    assert!(w.alive(e2));
+}
+
+#[test]
+fn dispawn_makes_entity_dead_and_double_despawn_false() {
+    let mut w = World::new();
+    let e = w.spawn();
+    assert!(w.alive(e));
+
+    assert!(w.dispawn(e));
+    assert!(!w.alive(e));
+
+    // Double-despawn should return false
+    assert!(!w.dispawn(e));
+}
+
+#[test]
+fn dispawn_of_invalid_or_stale_entity_returns_false() {
+    let mut w = World::new();
+    // Invalid index well beyond allocated range
+    let invalid = Entity::new(42, 0);
+    assert!(!w.dispawn(invalid));
+
+    // Stale entity after despawn
+    let e = w.spawn();
+    assert!(w.dispawn(e));
+    // Old handle should now be stale
+    assert!(!w.dispawn(e));
+}
+
+#[test]
+fn spawn_many_returns_correct_amount_and_alive() {
+    let mut w = World::new();
+    let count = 5;
+    let entities: Vec<_> = w.spawn_many(count).collect();
+    assert_eq!(entities.len() as u32, count);
+
+    // Indices should be contiguous after reserved block
+    for (i, e) in entities.iter().enumerate() {
+        assert_eq!(e.index(), RESERVED_ENTITY_COUNT + i as u32);
+        assert!(w.alive(*e));
+    }
+}
+
+#[test]
+fn component_registration_creates_entity_with_componentcomponent() {
+    #[derive(Debug)]
+    struct Foo;
+
+    let mut w = World::new();
+    let comp_entity = w.component::<Foo>();
+    assert!(w.alive(comp_entity));
+
+    // Same call returns the same entity
+    let comp_entity2 = w.component::<Foo>();
+    assert_eq!(comp_entity.index(), comp_entity2.index());
+
+    // The component entity must carry ComponentComponent describing Foo
+    let meta = w.get::<ComponentComponent>(comp_entity).expect("has meta");
+    assert_eq!(meta.dynvec_meta.type_id, TypeId::of::<Foo>());
+    assert_eq!(meta.dynvec_meta.layout(), Layout::new::<Foo>());
+}
+
+#[test]
+fn archetypes_and_tables_created_and_reused_on_moves() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct A(u32);
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct B(u32);
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct C(u32);
+
+    let mut w = World::new();
+    let e1 = w.spawn();
+    let e2 = w.spawn();
+
+    // Start from empty archetype for each entity
+    assert!(!w.has::<A>(e1));
+    assert!(!w.has::<B>(e1));
+    assert!(!w.has::<A>(e2));
+    assert!(!w.has::<B>(e2));
+
+    // Move e1 to archetype {A}
+    let add_a_e1 = w.add(e1, A(1));
+    assert!(add_a_e1.was_added);
+    assert!(w.has::<A>(e1));
+    assert_eq!(w.get::<A>(e1).map(|r| r.0), Some(1));
+
+    // Move e2 to archetype {B}
+    let add_b_e2 = w.add(e2, B(2));
+    assert!(add_b_e2.was_added);
+    assert!(w.has::<B>(e2));
+    assert_eq!(w.get::<B>(e2).map(|r| r.0), Some(2));
+
+    // Move e1 to a not-yet-existing archetype {A,B}
+    let add_b_e1 = w.add(e1, B(20));
+    assert!(add_b_e1.was_added, "inserting new component should mark was_added");
+    assert!(w.has::<A>(e1) && w.has::<B>(e1));
+    assert_eq!(w.get::<A>(e1).map(|r| r.0), Some(1));
+    assert_eq!(w.get::<B>(e1).map(|r| r.0), Some(20));
+
+    // Move e2 to an already existing archetype {A,B}
+    let add_a_e2 = w.add(e2, A(10));
+    assert!(add_a_e2.was_added);
+    assert!(w.has::<A>(e2) && w.has::<B>(e2));
+    assert_eq!(w.get::<A>(e2).map(|r| r.0), Some(10));
+    assert_eq!(w.get::<B>(e2).map(|r| r.0), Some(2));
+
+    // Move e2 further to a new archetype {A,B,C}
+    let add_c_e2 = w.add(e2, C(7));
+    assert!(add_c_e2.was_added);
+    assert!(w.has::<C>(e2));
+    assert!(!w.has::<C>(e1));
+
+    // Ensure add again does not mark was_added and we can mutate via get_mut
+    let add_again = w.add(e1, A(999)); // already had A
+    assert!(!add_again.was_added);
+    let before = w.get::<A>(e1).map(|r| r.0).unwrap();
+    w.get_mut::<A>(e1).unwrap().0 = before + 1;
+    assert_eq!(w.get::<A>(e1).map(|r| r.0), Some(before + 1));
+}
+
+#[test]
+fn get_or_default_inserts_once_then_reuses() {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    struct D(i32);
+
+    let mut w = World::new();
+    let e = w.spawn();
+
+    // First call inserts default
+    let add1 = w.get_or_default::<D>(e);
+    assert!(add1.was_added);
+    assert_eq!(add1.r#ref.0, 0);
+
+    // Second call should not insert again
+    let add2 = w.get_or_default::<D>(e);
+    assert!(!add2.was_added);
+    assert_eq!(add2.r#ref.0, 0);
+}
+
+// ----------------------
+// Additional comprehensive tests
+// ----------------------
+
+#[test]
+fn try_component_none_before_use_then_some_after_add() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct E(u8);
+
+    let mut w = World::new();
+    let e = w.spawn();
+
+    // Not registered yet
+    assert!(w.try_component::<E>().is_none());
+    assert!(w.get::<E>(e).is_none());
+
+    // Using add registers the component type
+    w.add(e, E(5));
+    assert!(w.try_component::<E>().is_some());
+    assert_eq!(w.get::<E>(e).map(|r| r.0), Some(5));
+}
+
+#[test]
+fn remove_nonexistent_component_returns_none_and_no_change() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct A(i32);
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct B(i32);
+
+    let mut w = World::new();
+    let e = w.spawn();
+
+    w.add(e, A(1));
+    assert!(w.has::<A>(e));
+    assert!(!w.has::<B>(e));
+
+    // Removing B should be a no-op
+    assert_eq!(w.remove::<B>(e), None);
+    assert!(w.has::<A>(e));
+    assert!(!w.has::<B>(e));
+    assert_eq!(w.get::<A>(e).map(|r| r.0), Some(1));
+}
+
+#[test]
+fn remove_present_component_returns_value_and_entity_loses_component() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct A(i32);
+
+    let mut w = World::new();
+    let e = w.spawn();
+    w.add(e, A(42));
+
+    let removed = w.remove::<A>(e);
+    assert_eq!(removed, Some(A(42)));
+    assert!(!w.has::<A>(e));
+    assert!(w.get::<A>(e).is_none());
+}
+
+#[test]
+fn readding_after_remove_inserts_again_with_new_value() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct A(i32);
+
+    let mut w = World::new();
+    let e = w.spawn();
+    w.add(e, A(1));
+    let _ = w.remove::<A>(e);
+    assert!(!w.has::<A>(e));
+
+    let add_again = w.add(e, A(7));
+    assert!(add_again.was_added);
+    assert_eq!(w.get::<A>(e).map(|r| r.0), Some(7));
+}
+
+#[test]
+fn add_order_does_not_change_end_state() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct A(u8);
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct B(u8);
+
+    let mut w = World::new();
+    let x = w.spawn();
+    let y = w.spawn();
+
+    // Add in A then B order
+    w.add(x, A(1));
+    w.add(x, B(2));
+
+    // Add in B then A order
+    w.add(y, B(2));
+    w.add(y, A(1));
+
+    assert!(w.has::<A>(x) && w.has::<B>(x));
+    assert!(w.has::<A>(y) && w.has::<B>(y));
+    assert_eq!(w.get::<A>(x).map(|r| r.0), w.get::<A>(y).map(|r| r.0));
+    assert_eq!(w.get::<B>(x).map(|r| r.0), w.get::<B>(y).map(|r| r.0));
+}
+
+#[test]
+fn value_persists_when_moving_between_archetypes() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct A(i32);
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct B(i32);
+
+    let mut w = World::new();
+    let e = w.spawn();
+
+    w.add(e, A(10));
+    // mutate via get_mut
+    w.get_mut::<A>(e).unwrap().0 = 11;
+    // add B, forcing a move to a new archetype
+    w.add(e, B(1));
+
+    // A should still be 11
+    assert_eq!(w.get::<A>(e).map(|r| r.0), Some(11));
+    assert_eq!(w.get::<B>(e).map(|r| r.0), Some(1));
+}
+
+#[test]
+fn spawn_despawn_reuse_index_does_not_leak_previous_components() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct A(u32);
+
+    let mut w = World::new();
+    let e1 = w.spawn();
+    w.add(e1, A(99));
+    assert!(w.has::<A>(e1));
+    assert!(w.dispawn(e1));
+
+    // Reuse index for a fresh entity
+    let e2 = w.spawn();
+    assert_eq!(e1.index(), e2.index());
+    assert_ne!(e1.generation(), e2.generation());
+
+    // A should not be visible on the new entity until explicitly added
+    assert!(!w.has::<A>(e2));
+    assert!(w.get::<A>(e2).is_none());
+}
+
+#[test]
+fn has_get_get_mut_remove_on_dead_entity_behave_safely() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct A(i32);
+
+    let mut w = World::new();
+    let e = w.spawn();
+    w.add(e, A(1));
+    assert!(w.dispawn(e));
+
+    // Dead entities should not appear to have components
+    assert!(!w.has::<A>(e));
+    // Accessors should return None on dead entities
+    assert!(w.get::<A>(e).is_none());
+    assert!(w.get_mut::<A>(e).is_none());
+    // Removing from dead should be a no-op
+    assert!(w.remove::<A>(e).is_none());
+}
+
+#[test]
+#[should_panic]
+fn add_component_to_dead_entity_should_panic() {
+    // It is expected that adding to a dead entity is invalid and should panic.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct A(i32);
+
+    let mut w = World::new();
+    let e = w.spawn();
+    assert!(w.dispawn(e));
+    let _ = w.add(e, A(3));
+}
+
+#[test]
+fn access_with_invalid_entity_is_safe() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct A(i32);
+
+    let w = &mut World::new();
+    // An entity index far beyond any allocated range
+    let invalid = Entity::new(1_000_000, 0);
+
+    // Expected safe behavior: has/get/get_mut/remove should not panic and indicate absence
+    assert!(!w.has::<A>(invalid));
+    assert!(w.get::<A>(invalid).is_none());
+    assert!(w.get_mut::<A>(invalid).is_none());
+    assert!(w.remove::<A>(invalid).is_none());
+}
+
+#[test]
+fn many_entities_heterogeneous_components_stay_isolated() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct A(u8);
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct B(u8);
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct C(u8);
+
+    let mut w = World::new();
+    let e1 = w.spawn(); // A
+    let e2 = w.spawn(); // B
+    let e3 = w.spawn(); // A,B
+    let e4 = w.spawn(); // C
+    let e5 = w.spawn(); // none
+
+    w.add(e1, A(1));
+    w.add(e2, B(2));
+    w.add(e3, A(10));
+    w.add(e3, B(20));
+    w.add(e4, C(3));
+
+    assert_eq!(w.get::<A>(e1).map(|r| r.0), Some(1));
+    assert!(w.get::<B>(e1).is_none());
+    assert_eq!(w.get::<B>(e2).map(|r| r.0), Some(2));
+    assert!(w.get::<A>(e2).is_none());
+    assert_eq!(w.get::<A>(e3).map(|r| r.0), Some(10));
+    assert_eq!(w.get::<B>(e3).map(|r| r.0), Some(20));
+    assert_eq!(w.get::<C>(e4).map(|r| r.0), Some(3));
+    assert!(w.get::<A>(e5).is_none());
+    assert!(w.get::<B>(e5).is_none());
+    assert!(w.get::<C>(e5).is_none());
+
+    // Remove B from e3, ensure isolation
+    let _ = w.remove::<B>(e3);
+    assert!(w.get::<B>(e3).is_none());
+    assert_eq!(w.get::<A>(e3).map(|r| r.0), Some(10));
+    assert_eq!(w.get::<B>(e2).map(|r| r.0), Some(2));
+}
+
+#[test]
+fn component_entity_is_registered_and_carries_metadata() {
+    #[derive(Debug)]
+    struct FooBar;
+
+    let mut w = World::new();
+    // Before registration: try_component is None
+    assert!(w.try_component::<FooBar>().is_none());
+
+    let comp_entity = w.component::<FooBar>();
+    assert!(w.alive(comp_entity));
+    let cc = w.get::<ComponentComponent>(comp_entity).expect("has ComponentComponent");
+    assert_eq!(cc.dynvec_meta.type_id, TypeId::of::<FooBar>());
+    assert_eq!(cc.dynvec_meta.layout(), Layout::new::<FooBar>());
+}
+
+#[test]
+fn removing_componentcomponent_from_component_entity_is_disallowed() {
+    // It should not be possible to remove the metadata from the component entity.
+    // Expected: None (no-op) or panic; we assert None here.
+    let mut w = World::new();
+    let comp_entity = w.component::<u32>();
+    assert!(w.remove::<ComponentComponent>(comp_entity).is_none());
+}
