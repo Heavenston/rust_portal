@@ -24,6 +24,7 @@ pub mod prelude {
         consume_on_drop::{ ConsumeOnDropExt as _ },
         chain_after::{ ChainAfterExt as _ },
         skip_after::{ SkipAfterExt as _ },
+        extract_nth::{ ExtractNthExt as _ },
     };
 }
 
@@ -43,6 +44,7 @@ pub mod mapped_nonzero;
 pub mod consume_on_drop;
 pub mod chain_after;
 pub mod skip_after;
+pub mod extract_nth;
 
 use std::hash::{ DefaultHasher, Hash, Hasher };
 
