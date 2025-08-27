@@ -3,10 +3,13 @@
 //!
 //! Its role is to store a list of lists of components.
 
-use super::{ Component };
-use crate::{dyn_option::DynOption, sparse_set::{
-    SparseSetDenseStorage, SparseSetDenseStorageInput,
-}};
+use crate::{
+    component::Component,
+    dyn_option::DynOption,
+    sparse_set::{
+        SparseSetDenseStorage, SparseSetDenseStorageInput,
+    },
+};
 
 use std::{
     iter::{ empty, once },
@@ -14,9 +17,9 @@ use std::{
     ops::{ Deref, DerefMut }
 };
 
+use utils::{ itertools::{ chain, zip_eq }, prelude::* };
 use derive_more::From;
 use dynvec::{ DynVec, OwnedDynVecValue };
-use utils::{ itertools::{ chain, zip_eq }, prelude::* };
 
 pub struct StorageComponentsRef<'a> {
     idx: usize,

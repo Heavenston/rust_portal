@@ -1,5 +1,7 @@
-use super::{ World, Entity, ComponentComponent };
-use super::RESERVED_ENTITY_COUNT;
+use crate::component::ComponentComponent;
+
+use super::{ World, Entity, RESERVED_ENTITY_COUNT };
+
 use std::{alloc::Layout, any::TypeId};
 
 #[test]

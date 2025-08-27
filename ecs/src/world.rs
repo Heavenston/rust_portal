@@ -5,26 +5,22 @@ mod entity_storage;
 pub use entity_storage::{ Entity, EntityIndexType, EntityGenerationType };
 mod entity_set;
 pub use entity_set::{ EntitySet };
-mod component_storage;
-use component_storage::*;
+
+use crate::{
+    component::*,
+    dyn_option::DynOption,
+    index_map::{ IndexMap, IndexMapIndex },
+    sparse_set::SparseSet,
+};
 
 use std::{
-    any::{ Any, TypeId },
+    any::TypeId,
     borrow::Cow,
     collections::HashMap, iter::{empty, once},
 };
+use utils::prelude::*;
 use derive_more::{ From, Into };
 use dynvec::{ DynVec, DynVecMetadata };
-
-use utils::prelude::*;
-
-use crate::{
-    dyn_option::DynOption, index_map::{ IndexMap, IndexMapIndex },
-    sparse_set::SparseSet
-};
-
-pub trait Component: 'static + Any { }
-impl<T: 'static> Component for T { }
 
 const RESERVED_ENTITY_COUNT: u32 = 100;
 
@@ -51,12 +47,6 @@ macro_rules! create_id {
             }
         }
     };
-}
-
-/// Component given to all entities of components
-#[derive(Clone)]
-pub struct ComponentComponent {
-    pub dynvec_meta: DynVecMetadata,
 }
 
 create_id!(ArchetypId(u32));
@@ -179,6 +169,8 @@ impl World {
         self.entity_storage.dispawn(entity)
     }
 
+    /// Returns the entity for the given component, or None if it was never
+    /// registred.
     pub fn try_component<C: Component>(&self) -> Option<Entity> {
         let type_id = TypeId::of::<C>();
         self.components_typeid_to_entity.get(&type_id)
