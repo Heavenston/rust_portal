@@ -137,6 +137,11 @@ impl DynVecMetadata {
             _priv: ()
         }
     }
+
+    /// Returns the Layout from the pointer metadata
+    pub fn layout(&self) -> Layout {
+        self.dyn_meta.layout()
+    }
 }
 
 /// Type-erased vector storing a single runtime-selected element type.
