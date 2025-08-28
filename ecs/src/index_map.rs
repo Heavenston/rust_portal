@@ -100,6 +100,60 @@ impl<T, I> IndexMap<T, I>
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::IndexMap;
+
+    #[test]
+    fn set_or_push_and_get_behave_as_expected() {
+        // Exercise new()
+        let mut m: IndexMap<i32, usize> = IndexMap::new();
+        // push returns next index implicitly; verify set_or_push grows
+        m.set_or_push(0usize, 10);
+        m.set_or_push(1usize, 20);
+        // overwrite in place
+        m.set_or_push(1usize, 21);
+        assert_eq!(m.get(0usize), Some(&10));
+        assert_eq!(m.get(1usize), Some(&21));
+        // set updates existing
+        m.set(0usize, 11);
+        assert_eq!(m[0usize], 11);
+
+        // values()/last()/into_vec cover convenience APIs
+        let vals: Vec<_> = m.values().copied().collect();
+        assert_eq!(vals, vec![11, 21]);
+        assert_eq!(m.last(), Some(&21));
+        let v = m.clone().into_vec();
+        assert_eq!(v, vec![11, 21]);
+    }
+
+    #[test]
+    fn extend_until_and_get_disjoint_mut_cover_paths() {
+        let mut m: IndexMap<i32, usize> = IndexMap::default();
+        // Ensure we can extend until a distant index
+        m.extend_until(5usize, || 0);
+        // Now set values at multiple positions
+        m.set(2usize, 12);
+        m.set(5usize, 55);
+        // Get two disjoint mutable refs and mutate
+        let [a, b] = m.get_disjoint_mut([2usize, 5usize]).expect("disjoint");
+        *a += 1;
+        *b += 1;
+        assert_eq!(m[2usize], 13);
+        assert_eq!(m[5usize], 56);
+    }
+
+    #[test]
+    fn get_mut_returns_mutable_reference() {
+        let mut m: IndexMap<i32, usize> = IndexMap::new();
+        m.set_or_push(0usize, 1);
+        if let Some(v) = m.get_mut(0usize) {
+            *v = 2;
+        }
+        assert_eq!(m.get(0usize), Some(&2));
+    }
+}
+
 impl<T, I> Index<I> for IndexMap<T, I>
     where I: IndexMapIndex,
 {

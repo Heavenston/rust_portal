@@ -321,4 +321,17 @@ mod tests {
         assert_eq!(set.get(7), Some(&(20 + 7)));
         assert_eq!(set.get(9), Some(&(30 + 9)));
     }
+
+    #[test]
+    fn len_and_sparse_indices_match_insertions() {
+        let mut set = SparseSet::<Vec<i32>>::default();
+        assert_eq!(set.len(), 0);
+        set.insert(4, 10);
+        set.insert(7, 20);
+        set.insert(9, 30);
+        assert_eq!(set.len(), 3);
+        let indices: Vec<_> = set.sparse_indices().collect();
+        // Dense order is [4,7,9] after these insertions
+        assert_eq!(indices, vec![4, 7, 9]);
+    }
 }

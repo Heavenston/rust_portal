@@ -156,3 +156,87 @@ impl<'a, T, I> SparseSetDenseStorageInput<I> for ComponentDenseStorage
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ComponentDenseStorage, StorageComponentsRef, StorageComponentsRefMut, ComponentDenseStorageInput};
+    use dynvec::DynVec;
+    use crate::world::EntityIndex;
+    use crate::sparse_set::{SparseSetDenseStorage, SparseSetDenseStorageInput};
+
+    #[test]
+    fn push_get_set_iter_and_swap_remove_cover_paths() {
+        // Two component columns: i32 and &str
+        let mut storage = ComponentDenseStorage::new(vec![
+            DynVec::new::<i32>(),
+            DynVec::new::<&'static str>(),
+        ].into_boxed_slice());
+
+        // Push one row via DynOption inputs
+        let mut c0 = Some(1);
+        let mut c1 = Some("a");
+        storage.push([
+            &mut c0 as &mut dyn crate::dyn_option::DynOption,
+            &mut c1 as &mut dyn crate::dyn_option::DynOption,
+        ]);
+        assert_eq!(storage.len(), 1);
+
+        // get and get_mut accessors
+        assert_eq!(*storage.get(0).unwrap().typed::<i32>(0), 1);
+        assert_eq!(*storage.get(0).unwrap().typed::<&'static str>(1), "a");
+
+        let row0m: StorageComponentsRefMut<'_> = storage.get_mut(0).unwrap();
+        *row0m.typed::<i32>(0) = 2;
+        assert_eq!(storage.get(0).unwrap().typed::<i32>(0), &2);
+
+        // iter returns exactly one item
+        let collected: Vec<_> = storage.iter().collect();
+        assert_eq!(collected.len(), 1);
+
+        // iter_mut is currently unimplemented and returns empty iterator
+        assert_eq!(storage.iter_mut().count(), 0);
+
+        // set overwrites values
+        let mut d0 = Some(3);
+        let mut d1 = Some("b");
+        storage.set(0, [
+            &mut d0 as &mut dyn crate::dyn_option::DynOption,
+            &mut d1 as &mut dyn crate::dyn_option::DynOption,
+        ]);
+        assert_eq!(storage.get(0).unwrap().typed::<i32>(0), &3);
+        assert_eq!(storage.get(0).unwrap().typed::<&'static str>(1), &"b");
+
+        // swap_remove drops row and decreases len
+        let _ = storage.swap_remove(0);
+        assert_eq!(storage.len(), 0);
+        assert!(storage.get(0).is_none());
+    }
+
+    #[test]
+    fn set_with_owned_dynvec_values_path() {
+        // build owned values by using temporary DynVecs and swap_remove
+        let mut s0 = DynVec::new::<i64>();
+        let mut s1 = DynVec::new::<&'static str>();
+        s0.typed_mut::<i64>().unwrap().push(9);
+        s1.typed_mut::<&'static str>().unwrap().push("x");
+        let v0 = s0.swap_remove(0).unwrap();
+        let v1 = s1.swap_remove(0).unwrap();
+
+        let mut storage = ComponentDenseStorage::new(vec![
+            DynVec::new::<i64>(),
+            DynVec::new::<&'static str>(),
+        ].into_boxed_slice());
+        // push a placeholder row first so that set operates in-bounds
+        let mut p0 = Some(0i64);
+        let mut p1 = Some("_");
+        storage.push([
+            &mut p0 as &mut dyn crate::dyn_option::DynOption,
+            &mut p1 as &mut dyn crate::dyn_option::DynOption,
+        ]);
+
+        // Now set using OwnedDynVecValue branch
+        storage.set(0, [v0, v1]);
+        assert_eq!(*storage.get(0).unwrap().typed::<i64>(0), 9);
+        assert_eq!(*storage.get(0).unwrap().typed::<&'static str>(1), "x");
+    }
+}

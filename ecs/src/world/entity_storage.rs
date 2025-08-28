@@ -319,5 +319,28 @@ mod tests {
         assert_eq!(e2.index(), e0.index());
         assert_eq!(e2.generation(), e1.generation().next(), "generation should increment by exactly 1");
     }
-}
 
+    #[test]
+    fn entity_generation_nth_and_conversions() {
+        // nth should add wrapping amount, and conversions should succeed
+        let g = EntityGeneration::FIRST.nth(5);
+        assert_eq!(u64::from(g), u64::from(5u32));
+        let usize_val: usize = usize::try_from(g).unwrap();
+        assert_eq!(usize_val, 5usize);
+
+        let idx = EntityIndex::try_from(42usize).unwrap();
+        assert_eq!(u64::from(idx), u64::from(42u32));
+        let idx2 = EntityIndex::try_from(100u64).unwrap();
+        let usize_from_idx: usize = usize::try_from(idx2).unwrap();
+        assert_eq!(usize_from_idx, 100usize);
+    }
+
+    #[test]
+    fn take_next_reserved_none_when_exhausted() {
+        // With zero reserved, take_next_reserved should immediately return None
+        let mut w = EntityStorage::default();
+        assert!(w.take_next_reserved().is_none());
+        // Also validate the reserved_entities iterator is empty in this case
+        assert_eq!(w.reserved_entities().count(), 0);
+    }
+}

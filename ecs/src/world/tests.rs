@@ -339,6 +339,59 @@ fn access_with_invalid_entity_is_safe() {
 }
 
 #[test]
+fn get_mut_unknown_component_errors() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct Z(i32);
+
+    let mut w = World::new();
+    let e = w.spawn();
+    let err = w.get_mut::<Z>(e).unwrap_err();
+    // Unknown component path should be taken for non-registered types
+    assert!(matches!(err, super::GetComponentError::UnknownComponent { .. }));
+}
+
+#[test]
+fn world_default_constructs_and_works() {
+    let mut w: World = Default::default();
+    let e = w.spawn();
+    assert!(w.alive(e));
+}
+
+#[test]
+fn get_mut_registered_but_not_present_returns_component_not_present() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct A(i32);
+
+    let mut w = World::new();
+    let e = w.spawn();
+    // Register component type without attaching to entity
+    let _ = w.component::<A>();
+    let err = w.get_mut::<A>(e).unwrap_err();
+    assert!(matches!(err, super::GetComponentError::ComponentNotPresent { .. }));
+}
+
+#[test]
+fn internal_table_for_cache_hit_and_id_defaults_are_exercised() {
+    use std::borrow::Cow;
+    // Access private items in parent module via `super::` path
+    let mut w = World::new();
+
+    // Create a component entity and build a component set
+    #[derive(Debug)] struct X;
+    let x_entity = w.component::<X>();
+    let set = super::EntitySet::from(&[x_entity][..]);
+
+    // First call creates the table (miss path)
+    let _t0: super::TableId = w.table_for(Cow::Owned(set.clone()));
+    // Second call should hit the cache (Some branch)
+    let _t1: super::TableId = w.table_for(Cow::Borrowed(&set));
+
+    // Touch defaults of internal id wrappers
+    let _aid: super::ArchetypId = Default::default();
+    let _tid: super::TableId = Default::default();
+}
+
+#[test]
 fn many_entities_heterogeneous_components_stay_isolated() {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct A(u8);

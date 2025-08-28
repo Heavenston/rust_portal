@@ -63,3 +63,49 @@ impl From<&[Entity]> for EntitySet {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{EntitySet};
+    use crate::world::{Entity, EntityIndex, EntityGeneration};
+
+    fn e(i: u32, _g: u32) -> Entity {
+        // Tests only need distinct indices; use FIRST generation
+        Entity::new(EntityIndex(i), EntityGeneration::FIRST)
+    }
+
+    #[test]
+    fn basic_insert_has_index_of_and_len() {
+        let mut s = EntitySet::new();
+        assert_eq!(s.len(), 0);
+        let a = e(1, 0);
+        let b = e(2, 0);
+        let ia = s.insert(a);
+        let ib = s.insert(b);
+        assert!(s.has(a) && s.has(b));
+        assert_eq!(s.index_of(a), Some(ia));
+        assert_eq!(s.index_of(b), Some(ib));
+        assert_eq!(s.len(), 2);
+    }
+
+    #[test]
+    fn remove_and_iter_and_with_without() {
+        let a = e(5, 0);
+        let b = e(3, 0);
+        let c = e(9, 0);
+        let mut s = EntitySet::from(&[a, c, b][..]);
+        // iter is sorted
+        let v: Vec<_> = s.iter().collect();
+        assert_eq!(v, vec![b, a, c]);
+
+        // remove existing and non-existing
+        assert!(s.remove(a).is_some());
+        assert!(s.remove(a).is_none());
+
+        // with/without helpers
+        let (_idx, s2) = s.clone().with(a);
+        assert!(s2.has(a));
+        let (_idx2, s3) = s2.clone().without(a);
+        assert!(!s3.has(a));
+    }
+}
