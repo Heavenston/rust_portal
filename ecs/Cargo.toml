@@ -8,4 +8,5 @@ utils = { workspace = true }
 dynvec = { workspace = true }
 
 derive-where = { version = "1.5.0", features = ["nightly"] }
-derive_more = { version = "2.0.1", features = ["from", "into"] }
+derive_more = { version = "2.0.1", features = ["from", "into", "is_variant"] }
+thiserror = "2.0.16"

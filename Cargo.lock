@@ -2164,6 +2164,7 @@ dependencies = [
  "derive_more",
  "portal-dynvec",
  "portal-utils",
+ "thiserror 2.0.16",
 ]
 
 [[package]]

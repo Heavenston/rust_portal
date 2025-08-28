@@ -14,12 +14,12 @@ use crate::{
 };
 
 use std::{
-    any::TypeId,
+    any::{type_name, TypeId},
     borrow::Cow,
     collections::HashMap, iter::{empty, once},
 };
 use utils::prelude::*;
-use derive_more::{ From, Into };
+use derive_more::{ From, Into, IsVariant };
 use dynvec::{ DynVec, DynVecMetadata };
 
 const RESERVED_ENTITY_COUNT: u32 = 100;
@@ -71,6 +71,41 @@ struct Table {
 pub struct AddComponent<'a, C> {
     pub r#ref: &'a mut C,
     pub was_added: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+pub enum HasComponent {
+    /// The entity is dead
+    EntityIsNotAlive,
+    /// The component was never registred
+    UnknownComponent,
+    /// The component is not present in this entity's archetyp
+    NotPresent,
+    /// The component *is* present in this entity's archtyp
+    Present,
+}
+
+impl HasComponent {
+    pub fn bool(self) -> bool {
+        self.is_present()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum GetComponentError {
+    #[error("Tried to get component of dead entity {entity}")]
+    EntityIsNotAlive {
+        entity: Entity,
+    },
+    #[error("Component from type '{type_name}' was never registred")]
+    UnknownComponent {
+        type_name: &'static str,
+    },
+    #[error("Component from type '{type_name}' is not present in the entity {entity}")]
+    ComponentNotPresent {
+        type_name: &'static str,
+        entity: Entity,
+    },
 }
 
 #[derive(Debug)]
@@ -164,7 +199,7 @@ impl World {
         self.entity_storage.spawn_many(amount)
     }
 
-    /// Returns false if the entity wasn't alive already
+    /// Returns false if the entity was already dead.
     pub fn dispawn(&mut self, entity: Entity) -> bool {
         self.entity_storage.dispawn(entity)
     }
@@ -248,45 +283,69 @@ impl World {
         }
     }
 
-    pub fn has<C: Component>(&self, entity: Entity) -> bool {
+    pub fn has<C: Component>(&self, entity: Entity) -> HasComponent {
         if !self.entity_storage.alive(entity)
-        { return false; }
+        { return HasComponent::EntityIsNotAlive; }
 
         let Some(component) = self.try_component::<C>()
-        else { return false };
+        else { return HasComponent::UnknownComponent; };
         let archetyp_id = self.entities_archetypes[entity.index()];
         let archetyp = &self.archetypes[archetyp_id];
-        archetyp.components.has(component)
+
+        if archetyp.components.has(component) {
+            HasComponent::Present
+        }
+        else {
+            HasComponent::NotPresent
+        }
     }
 
-    pub fn get<C: Component>(&self, entity: Entity) -> Option<&C> {
+    pub fn get<C: Component>(&self, entity: Entity) -> Result<&C, GetComponentError> {
         if !self.alive(entity)
-        { return None; }
+        { return Err(GetComponentError::EntityIsNotAlive { entity }); }
 
-        let component = self.try_component::<C>()?;
+        let Some(component) = self.try_component::<C>()
+        else { return Err(GetComponentError::UnknownComponent {
+            type_name: type_name::<C>()
+        })};
 
         let archetyp_id = self.entities_archetypes[entity.index()];
         let archetyp = &self.archetypes[archetyp_id];
         let table_id = archetyp.table_id;
         let table = &self.tables[table_id];
-        let component_idx = table.table_components.index_of(component)?;
-        table.sparse_set.get(entity.index())
-            .map(|p| p.typed(component_idx))
+
+        let Some(component_idx) = table.table_components.index_of(component)
+        else { return Err(GetComponentError::ComponentNotPresent { type_name: type_name::<C>(), entity }) };
+
+        let component = table.sparse_set.get(entity.index())
+            .expect("Entity is in this table")
+            .typed(component_idx);
+
+        Ok(component)
     }
 
-    pub fn get_mut<C: Component>(&mut self, entity: Entity) -> Option<&mut C> {
+    pub fn get_mut<C: Component>(&mut self, entity: Entity) -> Result<&mut C, GetComponentError> {
         if !self.alive(entity)
-        { return None; }
+        { return Err(GetComponentError::EntityIsNotAlive { entity }); }
 
-        let component = self.try_component::<C>()?;
+        let Some(component) = self.try_component::<C>()
+        else { return Err(GetComponentError::UnknownComponent {
+            type_name: type_name::<C>()
+        })};
 
         let archetyp_id = self.entities_archetypes[entity.index()];
         let archetyp = &mut self.archetypes[archetyp_id];
         let table_id = archetyp.table_id;
         let table = &mut self.tables[table_id];
-        let component_idx = table.table_components.index_of(component)?;
-        table.sparse_set.get_mut(entity.index())
-            .map(|p| p.typed(component_idx))
+
+        let Some(component_idx) = table.table_components.index_of(component)
+        else { return Err(GetComponentError::ComponentNotPresent { type_name: type_name::<C>(), entity }) };
+
+        let component = table.sparse_set.get_mut(entity.index())
+            .expect("Entity in this table")
+            .typed(component_idx);
+
+        Ok(component)
     }
 
     pub fn get_or_default<C: Component + Default>(&mut self, entity: Entity) -> AddComponent<'_, C> {

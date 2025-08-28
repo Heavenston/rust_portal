@@ -99,49 +99,49 @@ fn archetypes_and_tables_created_and_reused_on_moves() {
     let e2 = w.spawn();
 
     // Start from empty archetype for each entity
-    assert!(!w.has::<A>(e1));
-    assert!(!w.has::<B>(e1));
-    assert!(!w.has::<A>(e2));
-    assert!(!w.has::<B>(e2));
+    assert!(!w.has::<A>(e1).bool());
+    assert!(!w.has::<B>(e1).bool());
+    assert!(!w.has::<A>(e2).bool());
+    assert!(!w.has::<B>(e2).bool());
 
     // Move e1 to archetype {A}
     let add_a_e1 = w.add(e1, A(1));
     assert!(add_a_e1.was_added);
-    assert!(w.has::<A>(e1));
-    assert_eq!(w.get::<A>(e1).map(|r| r.0), Some(1));
+    assert!(w.has::<A>(e1).bool());
+    assert_eq!(w.get::<A>(e1).unwrap().0, 1);
 
     // Move e2 to archetype {B}
     let add_b_e2 = w.add(e2, B(2));
     assert!(add_b_e2.was_added);
-    assert!(w.has::<B>(e2));
-    assert_eq!(w.get::<B>(e2).map(|r| r.0), Some(2));
+    assert!(w.has::<B>(e2).bool());
+    assert_eq!(w.get::<B>(e2).unwrap().0, 2);
 
     // Move e1 to a not-yet-existing archetype {A,B}
     let add_b_e1 = w.add(e1, B(20));
     assert!(add_b_e1.was_added, "inserting new component should mark was_added");
-    assert!(w.has::<A>(e1) && w.has::<B>(e1));
-    assert_eq!(w.get::<A>(e1).map(|r| r.0), Some(1));
-    assert_eq!(w.get::<B>(e1).map(|r| r.0), Some(20));
+    assert!(w.has::<A>(e1).bool() && w.has::<B>(e1).bool());
+    assert_eq!(w.get::<A>(e1).unwrap().0, 1);
+    assert_eq!(w.get::<B>(e1).unwrap().0, 20);
 
     // Move e2 to an already existing archetype {A,B}
     let add_a_e2 = w.add(e2, A(10));
     assert!(add_a_e2.was_added);
-    assert!(w.has::<A>(e2) && w.has::<B>(e2));
-    assert_eq!(w.get::<A>(e2).map(|r| r.0), Some(10));
-    assert_eq!(w.get::<B>(e2).map(|r| r.0), Some(2));
+    assert!(w.has::<A>(e2).bool() && w.has::<B>(e2).bool());
+    assert_eq!(w.get::<A>(e2).unwrap().0, 10);
+    assert_eq!(w.get::<B>(e2).unwrap().0, 2);
 
     // Move e2 further to a new archetype {A,B,C}
     let add_c_e2 = w.add(e2, C(7));
     assert!(add_c_e2.was_added);
-    assert!(w.has::<C>(e2));
-    assert!(!w.has::<C>(e1));
+    assert!(w.has::<C>(e2).bool());
+    assert!(!w.has::<C>(e1).bool());
 
     // Ensure add again does not mark was_added and we can mutate via get_mut
     let add_again = w.add(e1, A(999)); // already had A
     assert!(!add_again.was_added);
-    let before = w.get::<A>(e1).map(|r| r.0).unwrap();
+    let before = w.get::<A>(e1).unwrap().0;
     w.get_mut::<A>(e1).unwrap().0 = before + 1;
-    assert_eq!(w.get::<A>(e1).map(|r| r.0), Some(before + 1));
+    assert_eq!(w.get::<A>(e1).unwrap().0, before + 1);
 }
 
 #[test]
@@ -177,12 +177,12 @@ fn try_component_none_before_use_then_some_after_add() {
 
     // Not registered yet
     assert!(w.try_component::<E>().is_none());
-    assert!(w.get::<E>(e).is_none());
+    assert!(w.get::<E>(e).is_err());
 
     // Using add registers the component type
     w.add(e, E(5));
     assert!(w.try_component::<E>().is_some());
-    assert_eq!(w.get::<E>(e).map(|r| r.0), Some(5));
+    assert_eq!(w.get::<E>(e).unwrap().0, 5);
 }
 
 #[test]
@@ -196,14 +196,14 @@ fn remove_nonexistent_component_returns_none_and_no_change() {
     let e = w.spawn();
 
     w.add(e, A(1));
-    assert!(w.has::<A>(e));
-    assert!(!w.has::<B>(e));
+    assert!(w.has::<A>(e).bool());
+    assert!(!w.has::<B>(e).bool());
 
     // Removing B should be a no-op
     assert_eq!(w.remove::<B>(e), None);
-    assert!(w.has::<A>(e));
-    assert!(!w.has::<B>(e));
-    assert_eq!(w.get::<A>(e).map(|r| r.0), Some(1));
+    assert!(w.has::<A>(e).bool());
+    assert!(!w.has::<B>(e).bool());
+    assert_eq!(w.get::<A>(e).unwrap().0, 1);
 }
 
 #[test]
@@ -217,8 +217,8 @@ fn remove_present_component_returns_value_and_entity_loses_component() {
 
     let removed = w.remove::<A>(e);
     assert_eq!(removed, Some(A(42)));
-    assert!(!w.has::<A>(e));
-    assert!(w.get::<A>(e).is_none());
+    assert!(!w.has::<A>(e).bool());
+    assert!(w.get::<A>(e).is_err());
 }
 
 #[test]
@@ -230,11 +230,11 @@ fn readding_after_remove_inserts_again_with_new_value() {
     let e = w.spawn();
     w.add(e, A(1));
     let _ = w.remove::<A>(e);
-    assert!(!w.has::<A>(e));
+    assert!(!w.has::<A>(e).bool());
 
     let add_again = w.add(e, A(7));
     assert!(add_again.was_added);
-    assert_eq!(w.get::<A>(e).map(|r| r.0), Some(7));
+    assert_eq!(w.get::<A>(e).unwrap().0, 7);
 }
 
 #[test]
@@ -256,10 +256,10 @@ fn add_order_does_not_change_end_state() {
     w.add(y, B(2));
     w.add(y, A(1));
 
-    assert!(w.has::<A>(x) && w.has::<B>(x));
-    assert!(w.has::<A>(y) && w.has::<B>(y));
-    assert_eq!(w.get::<A>(x).map(|r| r.0), w.get::<A>(y).map(|r| r.0));
-    assert_eq!(w.get::<B>(x).map(|r| r.0), w.get::<B>(y).map(|r| r.0));
+    assert!(w.has::<A>(x).bool() && w.has::<B>(x).bool());
+    assert!(w.has::<A>(y).bool() && w.has::<B>(y).bool());
+    assert_eq!(w.get::<A>(x).unwrap().0, w.get::<A>(y).unwrap().0);
+    assert_eq!(w.get::<B>(x).unwrap().0, w.get::<B>(y).unwrap().0);
 }
 
 #[test]
@@ -279,8 +279,8 @@ fn value_persists_when_moving_between_archetypes() {
     w.add(e, B(1));
 
     // A should still be 11
-    assert_eq!(w.get::<A>(e).map(|r| r.0), Some(11));
-    assert_eq!(w.get::<B>(e).map(|r| r.0), Some(1));
+    assert_eq!(w.get::<A>(e).unwrap().0, 11);
+    assert_eq!(w.get::<B>(e).unwrap().0, 1);
 }
 
 #[test]
@@ -291,7 +291,7 @@ fn spawn_despawn_reuse_index_does_not_leak_previous_components() {
     let mut w = World::new();
     let e1 = w.spawn();
     w.add(e1, A(99));
-    assert!(w.has::<A>(e1));
+    assert!(w.has::<A>(e1).bool());
     assert!(w.dispawn(e1));
 
     // Reuse index for a fresh entity
@@ -300,8 +300,8 @@ fn spawn_despawn_reuse_index_does_not_leak_previous_components() {
     assert_ne!(e1.generation(), e2.generation());
 
     // A should not be visible on the new entity until explicitly added
-    assert!(!w.has::<A>(e2));
-    assert!(w.get::<A>(e2).is_none());
+    assert!(!w.has::<A>(e2).bool());
+    assert!(w.get::<A>(e2).is_err());
 }
 
 #[test]
@@ -315,10 +315,10 @@ fn has_get_get_mut_remove_on_dead_entity_behave_safely() {
     assert!(w.dispawn(e));
 
     // Dead entities should not appear to have components
-    assert!(!w.has::<A>(e));
-    // Accessors should return None on dead entities
-    assert!(w.get::<A>(e).is_none());
-    assert!(w.get_mut::<A>(e).is_none());
+    assert!(!w.has::<A>(e).bool());
+    // Accessors should return error on dead entities
+    assert!(w.get::<A>(e).is_err());
+    assert!(w.get_mut::<A>(e).is_err());
     // Removing from dead should be a no-op
     assert!(w.remove::<A>(e).is_none());
 }
@@ -346,9 +346,9 @@ fn access_with_invalid_entity_is_safe() {
     let invalid = Entity::new(1_000_000, 0);
 
     // Expected safe behavior: has/get/get_mut/remove should not panic and indicate absence
-    assert!(!w.has::<A>(invalid));
-    assert!(w.get::<A>(invalid).is_none());
-    assert!(w.get_mut::<A>(invalid).is_none());
+    assert!(!w.has::<A>(invalid).bool());
+    assert!(w.get::<A>(invalid).is_err());
+    assert!(w.get_mut::<A>(invalid).is_err());
     assert!(w.remove::<A>(invalid).is_none());
 }
 
@@ -374,22 +374,22 @@ fn many_entities_heterogeneous_components_stay_isolated() {
     w.add(e3, B(20));
     w.add(e4, C(3));
 
-    assert_eq!(w.get::<A>(e1).map(|r| r.0), Some(1));
-    assert!(w.get::<B>(e1).is_none());
-    assert_eq!(w.get::<B>(e2).map(|r| r.0), Some(2));
-    assert!(w.get::<A>(e2).is_none());
-    assert_eq!(w.get::<A>(e3).map(|r| r.0), Some(10));
-    assert_eq!(w.get::<B>(e3).map(|r| r.0), Some(20));
-    assert_eq!(w.get::<C>(e4).map(|r| r.0), Some(3));
-    assert!(w.get::<A>(e5).is_none());
-    assert!(w.get::<B>(e5).is_none());
-    assert!(w.get::<C>(e5).is_none());
+    assert_eq!(w.get::<A>(e1).unwrap().0, 1);
+    assert!(w.get::<B>(e1).is_err());
+    assert_eq!(w.get::<B>(e2).unwrap().0, 2);
+    assert!(w.get::<A>(e2).is_err());
+    assert_eq!(w.get::<A>(e3).unwrap().0, 10);
+    assert_eq!(w.get::<B>(e3).unwrap().0, 20);
+    assert_eq!(w.get::<C>(e4).unwrap().0, 3);
+    assert!(w.get::<A>(e5).is_err());
+    assert!(w.get::<B>(e5).is_err());
+    assert!(w.get::<C>(e5).is_err());
 
     // Remove B from e3, ensure isolation
     let _ = w.remove::<B>(e3);
-    assert!(w.get::<B>(e3).is_none());
-    assert_eq!(w.get::<A>(e3).map(|r| r.0), Some(10));
-    assert_eq!(w.get::<B>(e2).map(|r| r.0), Some(2));
+    assert!(w.get::<B>(e3).is_err());
+    assert_eq!(w.get::<A>(e3).unwrap().0, 10);
+    assert_eq!(w.get::<B>(e2).unwrap().0, 2);
 }
 
 #[test]
