@@ -1,44 +1,111 @@
-use std::{ fmt::Display, iter::repeat_n };
+use utils::prelude::*;
 
-use utils::{ itertools::chain, prelude::* };
+mod entity {
+    use std::fmt::Display;
+    use derive_more::{From, Into};
 
-pub type EntityGenerationType = u32;
-pub type EntityIndexType = u32;
+    #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Into)]
+    pub struct EntityGeneration(u32);
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Entity {
-    index: EntityIndexType,
-    generation: EntityGenerationType,
-}
+    impl EntityGeneration {
+        pub const MAX: Self = Self(u32::MAX);
+        pub const FIRST: Self = Self(u32::MIN);
 
-impl Entity {
-    pub fn new(index: EntityIndexType, generation: EntityGenerationType) -> Self {
-        Self {
-            index,
-            generation,
+        pub fn next(self) -> Self {
+            Self(self.0.wrapping_add(1))
+        }
+
+        pub fn nth(self, nth: u32) -> Self {
+            Self(self.0.wrapping_add(nth))
         }
     }
 
-    pub fn index(self) -> EntityIndexType {
-        self.index
+    impl From<EntityGeneration> for u64 {
+        fn from(value: EntityGeneration) -> Self {
+            u64::from(u32::from(value))
+        }
     }
 
-    pub fn generation(self) -> EntityGenerationType {
-        self.generation
-    }
-}
+    impl TryFrom<EntityGeneration> for usize {
+        type Error = <u32 as TryInto<usize>>::Error;
 
-impl Display for Entity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Entity(0x{:016x})", u64::from(self.index()) | (u64::from(self.generation) << 32))
+        fn try_from(value: EntityGeneration) -> Result<Self, Self::Error> {
+            usize::try_from(value.0)
+        }
+    }
+
+    #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Into, From)]
+    pub struct EntityIndex(pub u32);
+
+    impl From<EntityIndex> for u64 {
+        fn from(value: EntityIndex) -> Self {
+            u64::from(u32::from(value))
+        }
+    }
+
+    impl TryFrom<u64> for EntityIndex {
+        type Error = <u32 as TryFrom<u64>>::Error;
+
+        fn try_from(value: u64) -> Result<Self, Self::Error> {
+            Ok(Self(u32::try_from(value)?))
+        }
+    }
+
+    impl TryFrom<EntityIndex> for usize {
+        type Error = <u32 as TryInto<usize>>::Error;
+
+        fn try_from(value: EntityIndex) -> Result<Self, Self::Error> {
+            usize::try_from(value.0)
+        }
+    }
+
+    impl TryFrom<usize> for EntityIndex {
+        type Error = <usize as TryFrom<u32>>::Error;
+
+        fn try_from(value: usize) -> Result<Self, Self::Error> {
+            Ok(Self(u32::try_from(value)?))
+        }
+    }
+
+    #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct Entity {
+        index: EntityIndex,
+        generation: EntityGeneration,
+    }
+
+    impl Entity {
+        pub fn new(index: EntityIndex, generation: EntityGeneration) -> Self {
+            Self {
+                index,
+                generation,
+            }
+        }
+
+        pub fn index(self) -> EntityIndex {
+            self.index
+        }
+
+        pub fn generation(self) -> EntityGeneration {
+            self.generation
+        }
+    }
+
+    impl Display for Entity {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "Entity(0x{:016x})", u64::from(self.index()) | (u64::from(self.generation) << 32))
+        }
     }
 }
+pub use entity::*;
+
+/// this value doesn't matter really, using max u32 for easier debugging (this value should never be read)
+const UNUSED_NEXT_SENTINEL: u32 = u32::MAX;
 
 #[derive(Default, Debug, Clone)]
 pub struct EntityStorage {
     unused_head: Option<u32>,
     unused_count: u32,
-    entities_generations: Vec<EntityGenerationType>,
+    entities_generations: Vec<EntityGeneration>,
     /// Linked list by their indices, the last value of the linked list points
     /// to itself, values never referenced by the linked list have undefined values
     entities_unused_next: Vec<u32>,
@@ -55,10 +122,8 @@ impl EntityStorage {
         Self {
             unused_head: default(),
             unused_count: default(),
-            // Sets reserved entities generations to max int to make the
-            // `reserved_entities` iterator output not-yet alive entities
-            entities_generations: vec![!0u32; ix!(reserved_internal_count)],
-            entities_unused_next: vec![!0u32; ix!(reserved_internal_count)],
+            entities_generations: vec![EntityGeneration::MAX; ix!(reserved_internal_count)],
+            entities_unused_next: vec![UNUSED_NEXT_SENTINEL; ix!(reserved_internal_count)],
 
             reserved_internal_count,
             reserved_internal_counter: 0,
@@ -71,11 +136,14 @@ impl EntityStorage {
     /// in the same order.
     pub fn reserved_entities(&self) -> impl Iterator<Item = Entity> {
         (self.reserved_internal_counter..self.reserved_internal_count)
+            .map(EntityIndex)
             .map(|idx| {
-                Entity {
-                    index: idx,
-                    generation: 0,
-                }
+                Entity::new(
+                    idx,
+                    // We now the generations of reserved entities start at MAX
+                    // so this entity is not yet 'alive' until `take_nex_reserved`
+                    EntityGeneration::FIRST,
+                )
             })
     }
 
@@ -87,19 +155,19 @@ impl EntityStorage {
         let index = self.reserved_internal_counter;
         self.reserved_internal_counter += 1;
 
-        debug_assert_eq!(self.entities_generations[ix!(index)], !0u32);
-        self.entities_generations[ix!(index)] = 0;
-        debug_assert_eq!(self.entities_unused_next[ix!(index)], !0u32);
+        // Before being used reserved entities should have this generation
+        debug_assert_eq!(self.entities_generations[ix!(index)], EntityGeneration::MAX);
+        self.entities_generations[ix!(index)] = EntityGeneration::FIRST;
 
-        Some(Entity {
-            index,
-            generation: 0,
-        })
+        Some(Entity::new(
+            EntityIndex(index),
+            EntityGeneration::FIRST,
+        ))
     }
 
     pub fn alive(&self, entity: Entity) -> bool {
-        self.entities_generations.get(ix!(entity.index))
-            .is_some_and(|&generation| generation == entity.generation)
+        self.entities_generations.get(ix!(entity.index()))
+            .is_some_and(|&generation| generation == entity.generation())
     }
 
     pub fn spawn(&mut self) -> Entity {
@@ -108,57 +176,39 @@ impl EntityStorage {
                 let generation = self.entities_generations[ix!(unused_index)];
 
                 let unused_next = self.entities_unused_next[ix!(unused_index)];
-                debug_assert_ne!(unused_next, !0u32);
+                debug_assert_ne!(unused_next, UNUSED_NEXT_SENTINEL);
                 self.unused_head = (unused_next != unused_index)
                     .then_some(unused_next);
                 self.unused_count -= 1;
 
-                Entity {
-                    index: unused_index,
+                Entity::new(
+                    EntityIndex(unused_index),
                     generation,
-                }
+                )
             },
             None => {
                 let index = u32::try_from(self.entities_generations.len()).expect("Not too much entities");
-                self.entities_unused_next.push(!0u32 /* this value doesn't matter really, using max u32 for easier debugging (this value should never be read) */);
-                self.entities_generations.push(0);
-                Entity {
-                    index,
-                    generation: 0,
-                }
+                self.entities_unused_next.push(UNUSED_NEXT_SENTINEL);
+                self.entities_generations.push(EntityGeneration::FIRST);
+                Entity::new(
+                    EntityIndex(index),
+                    EntityGeneration::FIRST,
+                )
             },
         }
     }
 
-    pub fn spawn_many(&mut self, amount: u32) -> impl Iterator<Item = Entity> {
-        let use_unused = self.unused_count.min(amount);
-        let remaining = amount - use_unused;
-
-        let first_index = u32::try_from(self.entities_generations.len()).expect("Not too much entities");
-        self.entities_unused_next.extend(
-            repeat_n(!0u32 /* see `spawn` */, ix!(remaining))
-        );
-        self.entities_generations.extend(
-            repeat_n(0, ix!(remaining))
-        );
-
-        chain(
-            (0..use_unused)
-                .map(move |_| self.spawn()),
-            (0..remaining)
-                .map(move |offset| { Entity { index: first_index + offset, generation: 0 } })
-        )
-    }
-
     pub fn dispawn(&mut self, entity: Entity) -> bool {
-        let Some(generation) = self.entities_generations.get_mut(ix!(entity.index))
-        else { return false };
-        if *generation != entity.generation { return false; }
-        *generation = generation.wrapping_add(1);
+        let index = ix!(entity.index());
 
-        self.entities_unused_next[ix!(entity.index)] = self.unused_head
-            .unwrap_or(entity.index);
-        self.unused_head = Some(entity.index);
+        let Some(generation) = self.entities_generations.get_mut(index)
+        else { return false };
+        if *generation != entity.generation() { return false; }
+        *generation = generation.next();
+
+        let i = entity.index().into();
+        self.entities_unused_next[index] = self.unused_head.unwrap_or(i);
+        self.unused_head = Some(i);
         self.unused_count += 1;
 
         true
@@ -167,7 +217,19 @@ impl EntityStorage {
 
 #[cfg(test)]
 mod tests {
-    use super::{ EntityStorage, Entity };
+    use super::{ EntityStorage, Entity, EntityIndex, EntityGeneration };
+
+    impl PartialEq<u32> for EntityIndex {
+        fn eq(&self, &other: &u32) -> bool {
+            u32::from(*self) == other
+        }
+    }
+
+    impl PartialEq<u32> for EntityGeneration {
+        fn eq(&self, &other: &u32) -> bool {
+            u32::from(*self) == other
+        }
+    }
 
     #[test]
     fn spawn_produces_sequential_indices_and_alive() {
@@ -176,13 +238,13 @@ mod tests {
         let e1 = w.spawn();
         let e2 = w.spawn();
 
-        assert_eq!(e0.index, 0);
-        assert_eq!(e1.index, 1);
-        assert_eq!(e2.index, 2);
+        assert_eq!(e0.index(), 0);
+        assert_eq!(e1.index(), 1);
+        assert_eq!(e2.index(), 2);
 
-        assert_eq!(e0.generation, 0);
-        assert_eq!(e1.generation, 0);
-        assert_eq!(e2.generation, 0);
+        assert_eq!(e0.generation(), 0);
+        assert_eq!(e1.generation(), 0);
+        assert_eq!(e2.generation(), 0);
 
         assert!(w.alive(e0));
         assert!(w.alive(e1));
@@ -206,7 +268,7 @@ mod tests {
     fn dispawn_of_invalid_or_stale_entity_returns_false() {
         let mut w = EntityStorage::default();
         // Invalid index
-        assert!(!w.dispawn(Entity { index: 42, generation: 0 }));
+        assert!(!w.dispawn(Entity::new(EntityIndex(42), EntityGeneration::FIRST)));
 
         // Stale entity after despawn
         let e = w.spawn();
@@ -231,15 +293,15 @@ mod tests {
 
         // Expect to reuse e2's index first
         let n2 = w.spawn();
-        assert_eq!(n2.index, e2.index, "should reuse most recently despawned index");
+        assert_eq!(n2.index(), e2.index(), "should reuse most recently despawned index");
 
         // Then reuse e1's index next
         let n1 = w.spawn();
-        assert_eq!(n1.index, e1.index, "should reuse next despawned index");
+        assert_eq!(n1.index(), e1.index(), "should reuse next despawned index");
 
         // e0 still alive and unchanged
         assert!(w.alive(e0));
-        assert_eq!(e0.generation, 0);
+        assert_eq!(e0.generation(), 0);
     }
 
     #[test]
@@ -249,13 +311,13 @@ mod tests {
         assert!(w.dispawn(e0));
 
         let e1 = w.spawn();
-        assert_eq!(e1.index, e0.index);
-        assert_eq!(e1.generation, e0.generation + 1, "generation should increment by exactly 1");
+        assert_eq!(e1.index(), e0.index());
+        assert_eq!(e1.generation(), e0.generation().next(), "generation should increment by exactly 1");
 
         assert!(w.dispawn(e1));
         let e2 = w.spawn();
-        assert_eq!(e2.index, e0.index);
-        assert_eq!(e2.generation, e1.generation + 1, "generation should increment by exactly 1");
+        assert_eq!(e2.index(), e0.index());
+        assert_eq!(e2.generation(), e1.generation().next(), "generation should increment by exactly 1");
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::component::ComponentComponent;
+use crate::{ component::ComponentComponent, world::{EntityGeneration, EntityIndex} };
 
 use super::{ World, Entity, RESERVED_ENTITY_COUNT };
 
@@ -42,7 +42,7 @@ fn dispawn_makes_entity_dead_and_double_despawn_false() {
 fn dispawn_of_invalid_or_stale_entity_returns_false() {
     let mut w = World::new();
     // Invalid index well beyond allocated range
-    let invalid = Entity::new(42, 0);
+    let invalid = Entity::new(EntityIndex(42), EntityGeneration::FIRST);
     assert!(!w.dispawn(invalid));
 
     // Stale entity after despawn
@@ -50,20 +50,6 @@ fn dispawn_of_invalid_or_stale_entity_returns_false() {
     assert!(w.dispawn(e));
     // Old handle should now be stale
     assert!(!w.dispawn(e));
-}
-
-#[test]
-fn spawn_many_returns_correct_amount_and_alive() {
-    let mut w = World::new();
-    let count = 5;
-    let entities: Vec<_> = w.spawn_many(count).collect();
-    assert_eq!(entities.len() as u32, count);
-
-    // Indices should be contiguous after reserved block
-    for (i, e) in entities.iter().enumerate() {
-        assert_eq!(e.index(), RESERVED_ENTITY_COUNT + i as u32);
-        assert!(w.alive(*e));
-    }
 }
 
 #[test]
@@ -343,7 +329,7 @@ fn access_with_invalid_entity_is_safe() {
 
     let w = &mut World::new();
     // An entity index far beyond any allocated range
-    let invalid = Entity::new(1_000_000, 0);
+    let invalid = Entity::new(EntityIndex(1_000_000), EntityGeneration::FIRST);
 
     // Expected safe behavior: has/get/get_mut/remove should not panic and indicate absence
     assert!(!w.has::<A>(invalid).bool());

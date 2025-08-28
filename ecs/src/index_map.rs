@@ -1,4 +1,4 @@
-use std::{ marker::PhantomData, ops::{ Index, IndexMut } };
+use std::{ marker::PhantomData, ops::{ Index, IndexMut }, fmt::Debug };
 
 use utils::prelude::*;
 
@@ -7,23 +7,17 @@ pub trait IndexMapIndex {
     fn to_usize(&self) -> usize;
 }
 
-impl IndexMapIndex for usize {
-    fn from_usize(usize: usize) -> Self {
-        usize
-    }
-
-    fn to_usize(&self) -> usize {
-        *self
-    }
-}
-
-impl IndexMapIndex for u32 {
+impl<T: Clone, E1, E2> IndexMapIndex for T
+    where usize: TryFrom<T, Error = E1>,
+          T: TryFrom<usize, Error = E2>,
+          E1: Debug, E2: Debug,
+{
     fn from_usize(usize: usize) -> Self {
         usize.try_into().expect("No overflow")
     }
 
     fn to_usize(&self) -> usize {
-        ix!(*self)
+        ix!(self.clone())
     }
 }
 
@@ -44,13 +38,25 @@ impl<T, I> IndexMap<T, I> {
     pub fn into_vec(self) -> Vec<T> {
         self.vec
     }
+
+    pub fn last(&self) -> Option<&T> {
+        self.vec.last()
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &T> + ExactSizeIterator + DoubleEndedIterator + Clone {
+        self.vec.iter()
+    }
 }
 
 impl<T, I> IndexMap<T, I>
     where I: IndexMapIndex,
 {
+    pub fn len(&self) -> I {
+        I::from_usize(self.vec.len())
+    }
+
     pub fn push(&mut self, val: T) -> I {
-        let index = I::from_usize(self.vec.len());
+        let index = self.len();
         self.vec.push(val);
         index
     }
@@ -65,10 +71,32 @@ impl<T, I> IndexMap<T, I>
         }
     }
 
+    pub fn set(&mut self, idx: I, val: T) {
+        self.vec[idx.to_usize()] = val;
+    }
+
+    pub fn extend_until(&mut self, target: I, with: impl Fn() -> T) {
+        let target_length = target.to_usize() + 1;
+        let missing = target_length.saturating_sub(self.vec.len());
+        self.vec.resize_with(self.vec.len() + missing, with);
+    }
+
+    pub fn get(&self, idx: I) -> Option<&T> {
+        self.vec.get(idx.to_usize())
+    }
+
+    pub fn get_mut(&mut self, idx: I) -> Option<&mut T> {
+        self.vec.get_mut(idx.to_usize())
+    }
+
     pub fn get_disjoint_mut<const N: usize>(
         &mut self, indices: [I; N]
     ) -> Result<[&mut T; N], std::slice::GetDisjointMutError> {
         self.vec.get_disjoint_mut(indices.map(|i| i.to_usize()))
+    }
+
+    pub fn swap_remove(&mut self, idx: I) -> T {
+        self.vec.swap_remove(idx.to_usize())
     }
 }
 

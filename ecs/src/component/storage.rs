@@ -8,7 +8,7 @@ use crate::{
     dyn_option::DynOption,
     sparse_set::{
         SparseSetDenseStorage, SparseSetDenseStorageInput,
-    },
+    }, world::EntityIndex,
 };
 
 use std::iter::{ empty, once };
@@ -46,7 +46,7 @@ impl<'a> StorageComponentsRefMut<'a> {
 #[derive_where::derive_where(Debug)]
 #[derive(Default)]
 pub struct ComponentDenseStorage {
-    len: usize,
+    len: u32,
     #[derive_where(skip)]
     storages: Box<[DynVec]>,
 }
@@ -61,6 +61,10 @@ impl ComponentDenseStorage {
 }
 
 impl SparseSetDenseStorage for ComponentDenseStorage {
+    type SparseIdx = EntityIndex;
+    type DenseIdx = u32;
+    type PrimitiveDenseIdx = u32;
+
     type OwnedOutput<'a> = impl Iterator<Item = OwnedDynVecValue<'a>>
         where Self: 'a;
     type RefItem<'a> = StorageComponentsRef<'a>
@@ -68,33 +72,33 @@ impl SparseSetDenseStorage for ComponentDenseStorage {
     type RefMutItem<'a> = StorageComponentsRefMut<'a>
         where Self: 'a;
 
-    fn len(&self) -> usize {
+    fn len(&self) -> u32 {
         debug_assert!(
-            chain(once(self.len), self.storages.iter().map(|storage| storage.len()))
+            chain(once(ix!(self.len)), self.storages.iter().map(|storage| storage.len()))
                 .all_equal()
         );
         self.len
     }
 
-    fn swap_remove(&mut self, idx: usize) -> Self::OwnedOutput<'_> {
+    fn swap_remove(&mut self, idx: u32) -> Self::OwnedOutput<'_> {
         self.len -= 1;
         self.storages.iter_mut()
-            .map(move |storage| storage.swap_remove(idx).expect("Valid index"))
+            .map(move |storage| storage.swap_remove(ix!(idx)).expect("Valid index"))
             .consume_on_drop()
     }
 
-    fn get(&self, idx: usize) -> Option<Self::RefItem<'_>> {
+    fn get(&self, idx: u32) -> Option<Self::RefItem<'_>> {
         (idx < self.len)
             .then(|| StorageComponentsRef {
-                idx,
+                idx: ix!(idx),
                 storage: self,
             })
     }
 
-    fn get_mut(&mut self, idx: usize) -> Option<Self::RefMutItem<'_>> {
+    fn get_mut(&mut self, idx: u32) -> Option<Self::RefMutItem<'_>> {
         (idx < self.len)
             .then(|| StorageComponentsRefMut {
-                idx,
+                idx: ix!(idx),
                 storage: self,
             })
     }
@@ -136,15 +140,15 @@ impl<'a, T, I> SparseSetDenseStorageInput<I> for ComponentDenseStorage
         }
     }
 
-    fn set(&mut self, idx: usize, comps: I) {
+    fn set(&mut self, idx: u32, comps: I) {
         assert!(idx < self.len);
         for (storage, comp) in zip_eq(self.storages.iter_mut(), comps) {
             match comp.into() {
                 ComponentDenseStorageInput::DynVecValue(dyn_vec_value) => {
-                    dyn_vec_value.set_into(storage, idx).expect("Correct type");
+                    dyn_vec_value.set_into(storage, ix!(idx)).expect("Correct type");
                 },
                 ComponentDenseStorageInput::DynOption(dyn_option) => {
-                    dyn_option.take_and_set_into(idx, storage)
+                    dyn_option.take_and_set_into(ix!(idx), storage)
                         .expect("Not alredy taken")
                         .expect("Correct type");
                 },

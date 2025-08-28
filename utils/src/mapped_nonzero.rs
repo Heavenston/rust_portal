@@ -1,62 +1,24 @@
-use std::{ marker::PhantomData, num::{ NonZero, ZeroablePrimitive } };
+pub mod plus_one;
 
 use crate::default;
 
-pub trait NonZeroMapper<T: ZeroablePrimitive, O> {
+use std::{ marker::PhantomData, num::NonZero };
+
+/// Trait for hiding the unstable rust `nonzero_internals` feature
+pub trait NonZeroPrimitive: std::num::ZeroablePrimitive { }
+impl<T: std::num::ZeroablePrimitive> NonZeroPrimitive for T { }
+
+pub trait NonZeroMapper<T: NonZeroPrimitive, O> {
     fn into_nonzero(&self, val: O) -> NonZero<T>;
     fn from_nonzero(&self, val: NonZero<T>) -> O;
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PlusOneMapper<T> {
-    _phantom: PhantomData<T>,
-}
-
-impl NonZeroMapper<usize, usize> for PlusOneMapper<usize> {
-    #[inline]
-    fn into_nonzero(&self, val: usize) -> NonZero<usize> {
-        val.checked_add(1)
-            .and_then(|added| NonZero::new(added))
-            .expect("Max usize given")
-    }
-
-    #[inline]
-    fn from_nonzero(&self, val: NonZero<usize>) -> usize {
-        val.get().checked_sub(1).expect("impossible, non-zero")
-    }
-}
-
-impl NonZeroMapper<u32, u32> for PlusOneMapper<u32> {
-    #[inline]
-    fn into_nonzero(&self, val: u32) -> NonZero<u32> {
-        val.checked_add(1)
-            .and_then(|added| NonZero::new(added))
-            .expect("Max u32 given")
-    }
-
-    #[inline]
-    fn from_nonzero(&self, val: NonZero<u32>) -> u32 {
-        val.get().checked_sub(1).expect("impossible, non-zero")
-    }
-}
-
-impl NonZeroMapper<u64, u64> for PlusOneMapper<u64> {
-    #[inline]
-    fn into_nonzero(&self, val: u64) -> NonZero<u64> {
-        val.checked_add(1)
-            .and_then(|added| NonZero::new(added))
-            .expect("Max u64 given")
-    }
-
-    #[inline]
-    fn from_nonzero(&self, val: NonZero<u64>) -> u64 {
-        val.get().checked_sub(1).expect("impossible, non-zero")
-    }
-}
-
 #[derive_where::derive_where(PartialEq, Eq, Hash, Ord, PartialOrd; T)]
 #[derive_where(Debug, Clone, Copy; T, M)]
-pub struct MappedNonZero<T: ZeroablePrimitive, O, M> {
+pub struct MappedNonZero<T, O, M>
+    where T: NonZeroPrimitive,
+          M: NonZeroMapper<T, O>,
+{
     non_zero: NonZero<T>,
     #[derive_where(skip)]
     _output: PhantomData<*const O>,
@@ -64,8 +26,9 @@ pub struct MappedNonZero<T: ZeroablePrimitive, O, M> {
     mapper: M,
 }
 
-impl<T: ZeroablePrimitive, O, M> MappedNonZero<T, O, M>
-    where M: NonZeroMapper<T, O>,
+impl<T, O, M> MappedNonZero<T, O, M>
+    where T: NonZeroPrimitive,
+          M: NonZeroMapper<T, O>,
 {
     pub fn new_with_mapper(value: O, mapper: M) -> Self {
         Self {
@@ -99,7 +62,7 @@ impl<T: ZeroablePrimitive, O, M> MappedNonZero<T, O, M>
 }
 
 impl<T, O, M> Default for MappedNonZero<T, O, M>
-    where T: ZeroablePrimitive,
+    where T: NonZeroPrimitive,
           M: NonZeroMapper<T, O> + Default,
           O: Default,
 {
@@ -108,7 +71,3 @@ impl<T, O, M> Default for MappedNonZero<T, O, M>
         Self::new_with_mapper(default(), default())
     }
 }
-
-pub type PlusOneNonZero<T> = MappedNonZero<T, T, PlusOneMapper<T>>;
-pub type PlusOneNonZeroUsize = PlusOneNonZero<usize>;
-pub type PlusOneNonZeroU32 = PlusOneNonZero<u32>;

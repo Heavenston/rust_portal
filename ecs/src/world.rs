@@ -2,7 +2,7 @@
 mod tests;
 
 mod entity_storage;
-pub use entity_storage::{ Entity, EntityIndexType, EntityGenerationType };
+pub use entity_storage::{ Entity, EntityIndex, EntityGeneration };
 mod entity_set;
 pub use entity_set::{ EntitySet };
 
@@ -113,7 +113,7 @@ pub struct World {
     entity_storage: entity_storage::EntityStorage,
 
     /// Maps entity index to archetyp id
-    entities_archetypes: IndexMap<ArchetypId, EntityIndexType>,
+    entities_archetypes: IndexMap<ArchetypId, EntityIndex>,
 
     /// List of all archetypes indexed by their ids
     archetypes: IndexMap<Archetyp, ArchetypId>,
@@ -193,10 +193,6 @@ impl World {
         self.tables[self.archetypes[empty_archetyp].table_id]
             .sparse_set.insert(entity.index(), empty::<ComponentDenseStorageInput>());
         entity
-    }
-
-    pub fn spawn_many(&mut self, amount: u32) -> impl Iterator<Item = Entity> {
-        self.entity_storage.spawn_many(amount)
     }
 
     /// Returns false if the entity was already dead.

@@ -8,7 +8,7 @@
 
 pub mod prelude {
     pub use crate::{
-        ix,
+        ix, dix,
         uid::Uid,
         default, concat_arrays, flatten_array, hash_value,
         itertools::Itertools as _,
@@ -18,7 +18,6 @@ pub mod prelude {
         sign::{ Sign, Signed },
         axis::{ Axis, AxisVecHelper },
         axis_direction::AxisDirection,
-        mapped_nonzero::{ MappedNonZero, PlusOneNonZeroUsize },
         sorted_vec::{ SortedVec, SortedSet },
         dyn_clone,
         consume_on_drop::{ ConsumeOnDropExt as _ },
@@ -86,6 +85,13 @@ pub fn hash_value<T: Hash>(val: &T) -> u64 {
 #[macro_export]
 macro_rules! ix {
     ($val: expr) => {
-        usize::try_from($val).expect("no overflow")
+        TryInto::<usize>::try_into($val).expect("no overflow")
+    };
+}
+
+#[macro_export]
+macro_rules! dix {
+    ($val: expr) => {
+        TryInto::<usize>::try_into($val).ok().expect("no overflow")
     };
 }
