@@ -1,6 +1,7 @@
 use crate::{ component::ComponentComponent, world::{EntityGeneration, EntityIndex} };
 
 use super::{ World, Entity, RESERVED_ENTITY_COUNT };
+use super::HasComponent;
 
 use std::{alloc::Layout, any::TypeId};
 
@@ -85,42 +86,44 @@ fn archetypes_and_tables_created_and_reused_on_moves() {
     let e2 = w.spawn();
 
     // Start from empty archetype for each entity
-    assert!(!w.has::<A>(e1).bool());
-    assert!(!w.has::<B>(e1).bool());
-    assert!(!w.has::<A>(e2).bool());
-    assert!(!w.has::<B>(e2).bool());
+    assert_eq!(w.has::<A>(e1), HasComponent::UnknownComponent);
+    assert_eq!(w.has::<B>(e1), HasComponent::UnknownComponent);
+    assert_eq!(w.has::<A>(e2), HasComponent::UnknownComponent);
+    assert_eq!(w.has::<B>(e2), HasComponent::UnknownComponent);
 
     // Move e1 to archetype {A}
     let add_a_e1 = w.add(e1, A(1));
     assert!(add_a_e1.was_added);
-    assert!(w.has::<A>(e1).bool());
+    assert_eq!(w.has::<A>(e1), HasComponent::Present);
     assert_eq!(w.get::<A>(e1).unwrap().0, 1);
 
     // Move e2 to archetype {B}
     let add_b_e2 = w.add(e2, B(2));
     assert!(add_b_e2.was_added);
-    assert!(w.has::<B>(e2).bool());
+    assert_eq!(w.has::<B>(e2), HasComponent::Present);
     assert_eq!(w.get::<B>(e2).unwrap().0, 2);
 
     // Move e1 to a not-yet-existing archetype {A,B}
     let add_b_e1 = w.add(e1, B(20));
     assert!(add_b_e1.was_added, "inserting new component should mark was_added");
-    assert!(w.has::<A>(e1).bool() && w.has::<B>(e1).bool());
+    assert_eq!(w.has::<A>(e1), HasComponent::Present);
+    assert_eq!(w.has::<B>(e1), HasComponent::Present);
     assert_eq!(w.get::<A>(e1).unwrap().0, 1);
     assert_eq!(w.get::<B>(e1).unwrap().0, 20);
 
     // Move e2 to an already existing archetype {A,B}
     let add_a_e2 = w.add(e2, A(10));
     assert!(add_a_e2.was_added);
-    assert!(w.has::<A>(e2).bool() && w.has::<B>(e2).bool());
+    assert_eq!(w.has::<A>(e2), HasComponent::Present);
+    assert_eq!(w.has::<B>(e2), HasComponent::Present);
     assert_eq!(w.get::<A>(e2).unwrap().0, 10);
     assert_eq!(w.get::<B>(e2).unwrap().0, 2);
 
     // Move e2 further to a new archetype {A,B,C}
     let add_c_e2 = w.add(e2, C(7));
     assert!(add_c_e2.was_added);
-    assert!(w.has::<C>(e2).bool());
-    assert!(!w.has::<C>(e1).bool());
+    assert_eq!(w.has::<C>(e2), HasComponent::Present);
+    assert_eq!(w.has::<C>(e1), HasComponent::NotPresent);
 
     // Ensure add again does not mark was_added and we can mutate via get_mut
     let add_again = w.add(e1, A(999)); // already had A
@@ -182,13 +185,13 @@ fn remove_nonexistent_component_returns_none_and_no_change() {
     let e = w.spawn();
 
     w.add(e, A(1));
-    assert!(w.has::<A>(e).bool());
-    assert!(!w.has::<B>(e).bool());
+    assert_eq!(w.has::<A>(e), HasComponent::Present);
+    assert_eq!(w.has::<B>(e), HasComponent::UnknownComponent);
 
     // Removing B should be a no-op
     assert_eq!(w.remove::<B>(e), None);
-    assert!(w.has::<A>(e).bool());
-    assert!(!w.has::<B>(e).bool());
+    assert_eq!(w.has::<A>(e), HasComponent::Present);
+    assert_eq!(w.has::<B>(e), HasComponent::NotPresent);
     assert_eq!(w.get::<A>(e).unwrap().0, 1);
 }
 
@@ -203,7 +206,7 @@ fn remove_present_component_returns_value_and_entity_loses_component() {
 
     let removed = w.remove::<A>(e);
     assert_eq!(removed, Some(A(42)));
-    assert!(!w.has::<A>(e).bool());
+    assert_eq!(w.has::<A>(e), HasComponent::NotPresent);
     assert!(w.get::<A>(e).is_err());
 }
 
@@ -216,7 +219,7 @@ fn readding_after_remove_inserts_again_with_new_value() {
     let e = w.spawn();
     w.add(e, A(1));
     let _ = w.remove::<A>(e);
-    assert!(!w.has::<A>(e).bool());
+    assert_eq!(w.has::<A>(e), HasComponent::NotPresent);
 
     let add_again = w.add(e, A(7));
     assert!(add_again.was_added);
@@ -242,8 +245,10 @@ fn add_order_does_not_change_end_state() {
     w.add(y, B(2));
     w.add(y, A(1));
 
-    assert!(w.has::<A>(x).bool() && w.has::<B>(x).bool());
-    assert!(w.has::<A>(y).bool() && w.has::<B>(y).bool());
+    assert_eq!(w.has::<A>(x), HasComponent::Present);
+    assert_eq!(w.has::<B>(x), HasComponent::Present);
+    assert_eq!(w.has::<A>(y), HasComponent::Present);
+    assert_eq!(w.has::<B>(y), HasComponent::Present);
     assert_eq!(w.get::<A>(x).unwrap().0, w.get::<A>(y).unwrap().0);
     assert_eq!(w.get::<B>(x).unwrap().0, w.get::<B>(y).unwrap().0);
 }
@@ -277,7 +282,7 @@ fn spawn_despawn_reuse_index_does_not_leak_previous_components() {
     let mut w = World::new();
     let e1 = w.spawn();
     w.add(e1, A(99));
-    assert!(w.has::<A>(e1).bool());
+    assert_eq!(w.has::<A>(e1), HasComponent::Present);
     assert!(w.dispawn(e1));
 
     // Reuse index for a fresh entity
@@ -286,7 +291,7 @@ fn spawn_despawn_reuse_index_does_not_leak_previous_components() {
     assert_ne!(e1.generation(), e2.generation());
 
     // A should not be visible on the new entity until explicitly added
-    assert!(!w.has::<A>(e2).bool());
+    assert_eq!(w.has::<A>(e2), HasComponent::NotPresent);
     assert!(w.get::<A>(e2).is_err());
 }
 
@@ -301,7 +306,7 @@ fn has_get_get_mut_remove_on_dead_entity_behave_safely() {
     assert!(w.dispawn(e));
 
     // Dead entities should not appear to have components
-    assert!(!w.has::<A>(e).bool());
+    assert_eq!(w.has::<A>(e), HasComponent::EntityIsNotAlive);
     // Accessors should return error on dead entities
     assert!(w.get::<A>(e).is_err());
     assert!(w.get_mut::<A>(e).is_err());
@@ -332,7 +337,7 @@ fn access_with_invalid_entity_is_safe() {
     let invalid = Entity::new(EntityIndex(1_000_000), EntityGeneration::FIRST);
 
     // Expected safe behavior: has/get/get_mut/remove should not panic and indicate absence
-    assert!(!w.has::<A>(invalid).bool());
+    assert_eq!(w.has::<A>(invalid), HasComponent::EntityIsNotAlive);
     assert!(w.get::<A>(invalid).is_err());
     assert!(w.get_mut::<A>(invalid).is_err());
     assert!(w.remove::<A>(invalid).is_none());
