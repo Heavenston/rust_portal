@@ -41,22 +41,6 @@ impl<T, I> IndexMap<T, I> {
         Self::default()
     }
 
-    pub fn as_slice(&self) -> &[T] {
-        &self.vec
-    }
-
-    pub fn as_mut_slice(&mut self) -> &mut [T] {
-        &mut self.vec
-    }
-
-    pub fn as_vec(&self) -> &Vec<T> {
-        &self.vec
-    }
-
-    pub fn as_mut_vec(&mut self) -> &mut Vec<T> {
-        &mut self.vec
-    }
-
     pub fn into_vec(self) -> Vec<T> {
         self.vec
     }
@@ -84,7 +68,7 @@ impl<T, I> IndexMap<T, I>
     pub fn get_disjoint_mut<const N: usize>(
         &mut self, indices: [I; N]
     ) -> Result<[&mut T; N], std::slice::GetDisjointMutError> {
-        self.as_mut_slice().get_disjoint_mut(indices.map(|i| i.to_usize()))
+        self.vec.get_disjoint_mut(indices.map(|i| i.to_usize()))
     }
 }
 
