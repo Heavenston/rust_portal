@@ -11,11 +11,7 @@ use crate::{
     },
 };
 
-use std::{
-    iter::{ empty, once },
-    marker::PhantomData,
-    ops::{ Deref, DerefMut }
-};
+use std::iter::{ empty, once };
 
 use utils::{ itertools::{ chain, zip_eq }, prelude::* };
 use derive_more::From;
@@ -27,28 +23,10 @@ pub struct StorageComponentsRef<'a> {
 }
 
 impl<'a> StorageComponentsRef<'a> {
-    pub fn typed<C>(self, component_idx: usize) -> TypedComponentRef<'a, C> {
-        TypedComponentRef {
-            storage_ref: self,
-            component_idx,
-            _data: PhantomData,
-        }
-    }
-}
-
-pub struct TypedComponentRef<'a, C> {
-    storage_ref: StorageComponentsRef<'a>,
-    component_idx: usize,
-    _data: PhantomData<*const C>,
-}
-
-impl<'a, C: Component> Deref for TypedComponentRef<'a, C> {
-    type Target = C;
-
-    fn deref(&self) -> &C {
-        self.storage_ref.storage.storages[self.component_idx]
+    pub fn typed<C: Component>(self, component_idx: usize) -> &'a C {
+        self.storage.storages[component_idx]
             .typed::<C>().expect("Correct type")
-            .as_slice().get(self.storage_ref.idx).expect("Valid index")
+            .as_slice().get(self.idx).expect("Valid index")
     }
 }
 
@@ -58,36 +36,10 @@ pub struct StorageComponentsRefMut<'a> {
 }
 
 impl<'a> StorageComponentsRefMut<'a> {
-    pub fn typed<C>(self, component_idx: usize) -> TypedComponentRefMut<'a, C> {
-        TypedComponentRefMut {
-            storage_ref: self,
-            component_idx,
-            _data: PhantomData,
-        }
-    }
-}
-
-pub struct TypedComponentRefMut<'a, C> {
-    storage_ref: StorageComponentsRefMut<'a>,
-    component_idx: usize,
-    _data: PhantomData<*const C>,
-}
-
-impl<'a, C: Component> Deref for TypedComponentRefMut<'a, C> {
-    type Target = C;
-
-    fn deref(&self) -> &C {
-        self.storage_ref.storage.storages[self.component_idx]
-            .typed::<C>().expect("Correct type")
-            .as_slice().get(self.storage_ref.idx).expect("Valid index")
-    }
-}
-
-impl<'a, C: Component> DerefMut for TypedComponentRefMut<'a, C> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.storage_ref.storage.storages[self.component_idx]
+    pub fn typed<C: Component>(self, component_idx: usize) -> &'a mut C {
+        self.storage.storages[component_idx]
             .typed_mut::<C>().expect("Correct ype")
-            .as_mut_slice().get_mut(self.storage_ref.idx).expect("Valid index")
+            .as_mut_slice().get_mut(self.idx).expect("Valid index")
     }
 }
 

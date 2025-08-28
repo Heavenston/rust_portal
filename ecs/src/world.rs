@@ -69,7 +69,7 @@ struct Table {
 }
 
 pub struct AddComponent<'a, C> {
-    pub r#ref: TypedComponentRefMut<'a, C>,
+    pub r#ref: &'a mut C,
     pub was_added: bool,
 }
 
@@ -259,7 +259,7 @@ impl World {
         archetyp.components.has(component)
     }
 
-    pub fn get<C: Component>(&self, entity: Entity) -> Option<TypedComponentRef<'_, C>> {
+    pub fn get<C: Component>(&self, entity: Entity) -> Option<&C> {
         if !self.alive(entity)
         { return None; }
 
@@ -274,7 +274,7 @@ impl World {
             .map(|p| p.typed(component_idx))
     }
 
-    pub fn get_mut<C: Component>(&mut self, entity: Entity) -> Option<TypedComponentRefMut<'_, C>> {
+    pub fn get_mut<C: Component>(&mut self, entity: Entity) -> Option<&mut C> {
         if !self.alive(entity)
         { return None; }
 
