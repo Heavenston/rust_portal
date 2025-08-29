@@ -160,6 +160,20 @@ impl<T> BitSet<T>
     }
 }
 
+impl<T> Debug for BitSet<T>
+    where T: BitSetIndex + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("BitSet")
+            .field_with(|f| {
+                f.debug_list()
+                    .entries(self.iter())
+                    .finish()
+            })
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

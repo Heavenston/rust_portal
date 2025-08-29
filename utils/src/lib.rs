@@ -3,6 +3,7 @@
 #![feature(nonzero_internals)]
 #![feature(option_zip)]
 #![feature(macro_metavar_expr)]
+#![feature(debug_closure_helpers)]
 
 #![expect(internal_features)]
 #![expect(incomplete_features)]
