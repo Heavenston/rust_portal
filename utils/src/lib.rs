@@ -2,6 +2,7 @@
 #![feature(never_type)]
 #![feature(nonzero_internals)]
 #![feature(option_zip)]
+#![feature(macro_metavar_expr)]
 
 #![expect(internal_features)]
 #![expect(incomplete_features)]
@@ -24,6 +25,7 @@ pub mod prelude {
         chain_after::{ ChainAfterExt as _ },
         skip_after::{ SkipAfterExt as _ },
         extract_nth::{ ExtractNthExt as _ },
+        either_of, either_of::*,
     };
 }
 
@@ -44,6 +46,7 @@ pub mod consume_on_drop;
 pub mod chain_after;
 pub mod skip_after;
 pub mod extract_nth;
+pub mod either_of;
 
 use std::hash::{ DefaultHasher, Hash, Hasher };
 
@@ -93,5 +96,13 @@ macro_rules! ix {
 macro_rules! dix {
     ($val: expr) => {
         TryInto::<usize>::try_into($val).ok().expect("no overflow")
+    };
+}
+
+#[macro_export]
+macro_rules! count_args {
+    () => { 0 };
+    ($head:tt $(, $tail:tt)* $(,)?) => {
+        1 + $crate::count_args!($($tail),*)
     };
 }
