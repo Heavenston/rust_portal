@@ -4,25 +4,23 @@ mod tests;
 mod entity_storage;
 pub use entity_storage::{ Entity, EntityIndex, EntityGeneration };
 mod entity_set;
-pub use entity_set::{ EntitySet };
-mod query;
-// TODO: Specify the list of things to re-export
-pub use query::*;
+pub use entity_set::{ EntitySet, ComponentSet };
+pub mod component;
+use component::*;
 mod bundle;
-// TODO: Specify the list of things to re-export
 pub use bundle::*;
 
 use crate::{
-    component::*,
     dyn_option::DynOption,
     index_map::IndexMap,
     sparse_set::SparseSet,
 };
 
 use std::{
-    any::{type_name, Any, TypeId},
+    any::{ type_name, TypeId },
     borrow::Cow,
-    collections::HashMap, iter::{empty, once},
+    collections::HashMap,
+    iter::{ empty, once },
 };
 use utils::prelude::*;
 use derive_more::{ From, Into, IsVariant };
@@ -65,7 +63,7 @@ create_id!(ArchetypId(u32));
 
 #[derive(Default, Debug, Clone)]
 struct Archetyp {
-    components: EntitySet,
+    components: ComponentSet,
     /// Table used for storing the table components of this archetyp.
     /// Multiple Archtyps could point to the same tables if they have the same
     /// (table) components.
@@ -76,7 +74,7 @@ create_id!(TableId(u32));
 
 #[derive(Default, Debug)]
 struct Table {
-    table_components: EntitySet,
+    table_components: ComponentSet,
     sparse_set: SparseSet<ComponentDenseStorage>,
 }
 
@@ -132,9 +130,9 @@ pub struct World {
     /// List of tables indexed by their ids
     tables: IndexMap<Table, TableId>,
 
-    components_typeid_to_entity: HashMap<TypeId, Entity>,
-    components_set_to_archetyp: HashMap<EntitySet, ArchetypId>,
-    components_set_to_table: HashMap<EntitySet, TableId>,
+    components_typeid_to_entity: HashMap<TypeId, ComponentEntity>,
+    components_set_to_archetyp: HashMap<ComponentSet, ArchetypId>,
+    components_set_to_table: HashMap<ComponentSet, TableId>,
 }
 
 impl World {
@@ -163,6 +161,7 @@ impl World {
         // Hard-code the first table for the ComponentComponent's component entity
         let cc_entity = this.entity_storage.take_next_reserved()
             .unwrap_or_else(|| this.entity_storage.spawn());
+        let cc_entity = ComponentEntity(cc_entity);
         this.components_typeid_to_entity.insert(TypeId::of::<ComponentComponent>(), cc_entity);
 
         let cc_set = EntitySet::from(&[cc_entity][..]);
@@ -194,8 +193,12 @@ impl World {
         this
     }
 
-    pub fn alive(&self, entity: Entity) -> bool {
-        self.entity_storage.alive(entity)
+    pub fn generation_at_index(&self, index: EntityIndex) -> EntityGeneration {
+        self.entity_storage.generation_at_index(index)
+    }
+
+    pub fn alive(&self, entity: impl Into<Entity>) -> bool {
+        self.entity_storage.alive(entity.into())
     }
 
     pub fn spawn(&mut self) -> Entity {
@@ -208,26 +211,28 @@ impl World {
     }
 
     /// Returns false if the entity was already dead.
-    pub fn dispawn(&mut self, entity: Entity) -> bool {
-        self.entity_storage.dispawn(entity)
+    pub fn dispawn(&mut self, entity: impl Into<Entity>) -> bool {
+        self.entity_storage.dispawn(entity.into())
     }
 
-    /// Returns the entity for the given component, or None if it was never
+    /// Returns the entity for the given component type_id, or None if it was never
     /// registred.
-    pub fn try_component_entity(&self, type_id: TypeId) -> Option<Entity> {
+    ///
+    /// NOTE: Components cannot yet be registred through type_ids yet
+    pub fn try_component_entity(&self, type_id: TypeId) -> Option<ComponentEntity> {
         self.components_typeid_to_entity.get(&type_id)
             .copied()
     }
 
     /// Returns the entity for the given component, or None if it was never
     /// registred.
-    pub fn try_component<C: Component>(&self) -> Option<Entity> {
+    pub fn try_component<C: Component>(&self) -> Option<ComponentEntity> {
         self.try_component_entity(TypeId::of::<C>())
     }
 
     /// Returns the entity of the given component type.
     /// Registering it if not already done.
-    pub fn component<C: Component>(&mut self) -> Entity {
+    pub fn component<C: Component>(&mut self) -> ComponentEntity {
         let type_id = TypeId::of::<C>();
 
         use std::collections::hash_map::Entry;
@@ -236,6 +241,7 @@ impl World {
             Entry::Vacant(vacant) => {
                 let entity = self.entity_storage.take_next_reserved()
                     .unwrap_or_else(|| self.entity_storage.spawn());
+                let entity = ComponentEntity(entity);
                 vacant.insert(entity);
                 entity
             },
@@ -248,7 +254,7 @@ impl World {
         created_entity
     }
 
-    fn table_for(&mut self, table_components: Cow<'_, EntitySet>) -> TableId {
+    fn table_for(&mut self, table_components: Cow<'_, ComponentSet>) -> TableId {
         match self.components_set_to_table.get(table_components.as_ref()) {
             Some(&table_id) => table_id,
             None => {
@@ -275,7 +281,7 @@ impl World {
         }
     }
 
-    fn archtyp_for(&mut self, component_set: Cow<'_, EntitySet>) -> ArchetypId {
+    fn archtyp_for(&mut self, component_set: Cow<'_, ComponentSet>) -> ArchetypId {
         match self.components_set_to_archetyp.get(component_set.as_ref()) {
             Some(&id) => id,
             None => {
@@ -296,12 +302,15 @@ impl World {
         }
     }
 
-    pub fn has<C: Component>(&self, entity: Entity) -> HasComponent {
+    pub fn has<C: Component>(&self, entity: impl Into<Entity>) -> HasComponent {
+        let entity = entity.into();
+
         if !self.entity_storage.alive(entity)
         { return HasComponent::EntityIsNotAlive; }
 
         let Some(component) = self.try_component::<C>()
         else { return HasComponent::UnknownComponent; };
+
         let archetyp_id = self.entities_archetypes[entity.index()];
         let archetyp = &self.archetypes[archetyp_id];
 
@@ -313,7 +322,9 @@ impl World {
         }
     }
 
-    pub fn get<C: Component>(&self, entity: Entity) -> Result<&C, GetComponentError> {
+    pub fn get<C: Component>(&self, entity: impl Into<Entity>) -> Result<&C, GetComponentError> {
+        let entity = entity.into();
+
         if !self.alive(entity)
         { return Err(GetComponentError::EntityIsNotAlive { entity }); }
 
@@ -367,17 +378,19 @@ impl World {
 
     /// Gets the component of the given type for the given entity, if the entity
     /// does not have the component, it is inserted with the given value.
-    pub fn add<C: Component>(&mut self, entity: Entity, component: C) -> AddComponent<'_, C> {
+    pub fn add<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> AddComponent<'_, C> {
         self.add_with(entity, || component)
     }
 
     /// Gets the component of the given type for the given entity, if the entity
     /// does not have the component, then the given function is called
     /// for adding the component to the entity.
-    pub fn add_with<C, F>(&mut self, entity: Entity, f: F) -> AddComponent<'_, C>
+    pub fn add_with<C, F>(&mut self, entity: impl Into<Entity>, f: F) -> AddComponent<'_, C>
         where F: FnOnce() -> C,
               C: Component,
     {
+        let entity = entity.into();
+
         if !self.alive(entity)
         { panic!("Tried to add component to dead entity '{entity}'"); }
 
@@ -438,9 +451,11 @@ impl World {
         }
     }
 
-    pub fn remove<C>(&mut self, entity: Entity) -> Option<C>
+    pub fn remove<C>(&mut self, entity: impl Into<Entity>) -> Option<C>
         where C: Component,
     {
+        let entity = entity.into();
+
         if !self.alive(entity)
         { return None; }
 

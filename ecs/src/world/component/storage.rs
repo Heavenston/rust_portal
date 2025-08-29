@@ -4,11 +4,11 @@
 //! Its role is to store a list of lists of components.
 
 use crate::{
-    component::Component,
     dyn_option::DynOption,
     sparse_set::{
         SparseSetDenseStorage, SparseSetDenseStorageInput,
-    }, world::EntityIndex,
+    },
+    world::{ component::Component, EntityIndex },
 };
 
 use std::iter::{ empty, once };

@@ -1,4 +1,4 @@
-use crate::{ component::ComponentComponent, world::{EntityGeneration, EntityIndex} };
+use crate::world::{ component::ComponentComponent, EntityGeneration, EntityIndex };
 
 use super::{ World, Entity, RESERVED_ENTITY_COUNT };
 use super::HasComponent;

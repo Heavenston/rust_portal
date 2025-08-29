@@ -1,6 +1,6 @@
-use std::any::TypeId;
+use super::Component;
 
-use crate::component::Component;
+use std::any::TypeId;
 
 pub trait Bundle {
     fn type_ids() -> impl Iterator<Item = TypeId> + ExactSizeIterator;

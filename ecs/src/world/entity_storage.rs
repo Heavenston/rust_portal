@@ -1,22 +1,31 @@
+use crate::{ index_map::IndexMap, indexmap };
+
 use utils::prelude::*;
 
 mod entity {
     use std::fmt::Display;
     use derive_more::{From, Into};
 
-    #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Into)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Into)]
     pub struct EntityGeneration(u32);
 
     impl EntityGeneration {
         pub const MAX: Self = Self(u32::MAX);
         pub const FIRST: Self = Self(u32::MIN);
 
+        /// Wraps arount after MAX
         pub fn next(self) -> Self {
             Self(self.0.wrapping_add(1))
         }
 
         pub fn nth(self, nth: u32) -> Self {
             Self(self.0.wrapping_add(nth))
+        }
+    }
+
+    impl Default for EntityGeneration {
+        fn default() -> Self {
+            Self::FIRST
         }
     }
 
@@ -95,20 +104,33 @@ mod entity {
             write!(f, "Entity(0x{:016x})", u64::from(self.index()) | (u64::from(self.generation) << 32))
         }
     }
+
+    impl<'a> Into<Entity> for &'a Entity {
+        fn into(self) -> Entity {
+            *self
+        }
+    }
+
+    /// This is used and expected internally by the `EntityStorage` so not
+    /// changeable easily.
+    #[test]
+    fn generation_wraps_around() {
+        assert_eq!(EntityGeneration::MAX.next(), EntityGeneration::FIRST);
+    }
 }
 pub use entity::*;
 
 /// this value doesn't matter really, using max u32 for easier debugging (this value should never be read)
-const UNUSED_NEXT_SENTINEL: u32 = u32::MAX;
+const UNUSED_NEXT_SENTINEL: EntityIndex = EntityIndex(u32::MAX);
 
 #[derive(Default, Debug, Clone)]
 pub struct EntityStorage {
-    unused_head: Option<u32>,
+    unused_head: Option<EntityIndex>,
     unused_count: u32,
-    entities_generations: Vec<EntityGeneration>,
+    entities_generations: IndexMap<EntityGeneration, EntityIndex>,
     /// Linked list by their indices, the last value of the linked list points
     /// to itself, values never referenced by the linked list have undefined values
-    entities_unused_next: Vec<u32>,
+    entities_unused_next: IndexMap<EntityIndex, EntityIndex>,
 
     /// This means that the first `n` entities are reserved at the creation
     /// and are not added to the free list
@@ -122,12 +144,17 @@ impl EntityStorage {
         Self {
             unused_head: default(),
             unused_count: default(),
-            entities_generations: vec![EntityGeneration::MAX; ix!(reserved_internal_count)],
-            entities_unused_next: vec![UNUSED_NEXT_SENTINEL; ix!(reserved_internal_count)],
+            entities_generations: indexmap![EntityGeneration::MAX; ix!(reserved_internal_count)],
+            entities_unused_next: indexmap![UNUSED_NEXT_SENTINEL; ix!(reserved_internal_count)],
 
             reserved_internal_count,
             reserved_internal_counter: 0,
         }
+    }
+
+    pub fn generation_at_index(&self, index: EntityIndex) -> EntityGeneration {
+        self.entities_generations.get(index)
+            .copied().unwrap_or(EntityGeneration::FIRST)
     }
 
     /// Iterator over all of the remaining reserved entities, they are not yet valid
@@ -152,39 +179,33 @@ impl EntityStorage {
             return None;
         }
 
-        let index = self.reserved_internal_counter;
+        let index = EntityIndex(self.reserved_internal_counter);
         self.reserved_internal_counter += 1;
 
         // Before being used reserved entities should have this generation
-        debug_assert_eq!(self.entities_generations[ix!(index)], EntityGeneration::MAX);
-        self.entities_generations[ix!(index)] = EntityGeneration::FIRST;
+        debug_assert_eq!(self.entities_generations[index], EntityGeneration::MAX);
+        self.entities_generations[index] = EntityGeneration::FIRST;
 
-        Some(Entity::new(
-            EntityIndex(index),
-            EntityGeneration::FIRST,
-        ))
+        Some(Entity::new(index, EntityGeneration::FIRST))
     }
 
     pub fn alive(&self, entity: Entity) -> bool {
-        self.entities_generations.get(ix!(entity.index()))
+        self.entities_generations.get(entity.index())
             .is_some_and(|&generation| generation == entity.generation())
     }
 
     pub fn spawn(&mut self) -> Entity {
         match self.unused_head {
             Some(unused_index) => {
-                let generation = self.entities_generations[ix!(unused_index)];
+                let generation = self.entities_generations[unused_index];
 
-                let unused_next = self.entities_unused_next[ix!(unused_index)];
+                let unused_next = self.entities_unused_next[unused_index];
                 debug_assert_ne!(unused_next, UNUSED_NEXT_SENTINEL);
                 self.unused_head = (unused_next != unused_index)
                     .then_some(unused_next);
                 self.unused_count -= 1;
 
-                Entity::new(
-                    EntityIndex(unused_index),
-                    generation,
-                )
+                Entity::new(unused_index, generation)
             },
             None => {
                 let index = u32::try_from(self.entities_generations.len()).expect("Not too much entities");
@@ -199,15 +220,13 @@ impl EntityStorage {
     }
 
     pub fn dispawn(&mut self, entity: Entity) -> bool {
-        let index = ix!(entity.index());
-
-        let Some(generation) = self.entities_generations.get_mut(index)
+        let Some(generation) = self.entities_generations.get_mut(entity.index())
         else { return false };
         if *generation != entity.generation() { return false; }
         *generation = generation.next();
 
         let i = entity.index().into();
-        self.entities_unused_next[index] = self.unused_head.unwrap_or(i);
+        self.entities_unused_next[entity.index()] = self.unused_head.unwrap_or(i);
         self.unused_head = Some(i);
         self.unused_count += 1;
 

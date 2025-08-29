@@ -8,11 +8,15 @@ use utils::prelude::*;
 // best
 /// Stores a 'set' of entities
 #[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EntitySet {
-    entities: SortedSet<Entity>,
+pub struct EntitySet<P = Entity>
+    where P: Ord + Into<Entity> + Default + Copy,
+{
+    entities: SortedSet<P>,
 }
 
-impl EntitySet {
+impl<P> EntitySet<P>
+    where P: Ord + Into<Entity> + Default + Copy,
+{
     pub fn new() -> Self {
         Self::default()
     }
@@ -21,48 +25,52 @@ impl EntitySet {
         self.entities.len()
     }
 
-    pub fn has(&self, entity: Entity) -> bool {
+    pub fn has(&self, entity: P) -> bool {
         self.entities.contains(&entity)
     }
 
-    pub fn index_of(&self, entity: Entity) -> Option<usize> {
+    pub fn index_of(&self, entity: P) -> Option<usize> {
         self.entities.binary_search(&entity).ok()
     }
 
     /// Returns the new element's index
-    pub fn insert(&mut self, entity: Entity) -> usize {
+    pub fn insert(&mut self, entity: P) -> usize {
         self.entities.find_or_insert(entity).index()
     }
 
-    pub fn remove(&mut self, entity: Entity) -> Option<usize> {
+    pub fn remove(&mut self, entity: P) -> Option<usize> {
         let idx = self.entities.binary_search(&entity).ok()?;
         self.entities.remove_index(idx);
         Some(idx)
     }
 
     /// Returns a *sorted* iterator over the contained entities
-    pub fn iter(&self) -> impl Iterator<Item = Entity> + DoubleEndedIterator + ExactSizeIterator + Clone {
+    pub fn iter(&self) -> impl Iterator<Item = P> + DoubleEndedIterator + ExactSizeIterator + Clone {
         self.entities.iter().copied()
     }
 
-    pub fn with(mut self, entity: Entity) -> (usize, Self) {
+    pub fn with(mut self, entity: P) -> (usize, Self) {
         let idx = self.insert(entity);
         (idx, self)
     }
 
-    pub fn without(mut self, entity: Entity) -> (Option<usize>, Self) {
+    pub fn without(mut self, entity: P) -> (Option<usize>, Self) {
         let idx = self.remove(entity);
         (idx, self)
     }
 }
 
-impl From<&[Entity]> for EntitySet {
-    fn from(value: &[Entity]) -> Self {
+impl<P> From<&[P]> for EntitySet<P>
+    where P: Ord + Into<Entity> + Default + Copy,
+{
+    fn from(value: &[P]) -> Self {
         Self {
             entities: SortedSet::from_unsorted(value.into()),
         }
     }
 }
+
+pub type ComponentSet = EntitySet<super::ComponentEntity>;
 
 #[cfg(test)]
 mod tests {

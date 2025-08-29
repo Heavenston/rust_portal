@@ -39,6 +39,13 @@ impl<T, I> IndexMap<T, I> {
         self.vec
     }
 
+    pub fn from_vec(vec: Vec<T>) -> Self {
+        Self {
+            vec,
+            _index: PhantomData,
+        }
+    }
+
     pub fn last(&self) -> Option<&T> {
         self.vec.last()
     }
@@ -98,6 +105,19 @@ impl<T, I> IndexMap<T, I>
     pub fn swap_remove(&mut self, idx: I) -> T {
         self.vec.swap_remove(idx.to_usize())
     }
+}
+
+#[macro_export]
+macro_rules! indexmap {
+    () => (
+        $crate::index_map::IndexMap::new()
+    );
+    ($elem:expr; $n:expr) => (
+        $crate::index_map::IndexMap::from_vec(vec![$elem; $n])
+    );
+    ($($x:expr),+ $(,)?) => (
+        $crate::index_map::IndexMap::from_vec(vec![$($x,)*])
+    );
 }
 
 #[cfg(test)]
