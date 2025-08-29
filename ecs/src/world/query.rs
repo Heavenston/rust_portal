@@ -1,14 +1,22 @@
+mod parameters;
+pub use parameters::*;
+mod modifiers;
+pub use modifiers::*;
+
 use std::marker::PhantomData;
 
-
-pub trait QueryParameters {
-    
+pub trait QueryParameter {
+    type ValueMut<'a>;
 }
 
-pub struct Query<P: QueryParameters> {
+pub trait QueryParameterImmutable: QueryParameter {
+    type Value<'a>;
+}
+
+pub struct Query<P: QueryParameter> {
     _parameters: PhantomData<fn(P) -> P>,
 }
 
-impl<P: QueryParameters> Query<P> {
+impl<P: QueryParameter> Query<P> {
     
 }
