@@ -21,7 +21,7 @@ pub struct MappedNonZero<T, O, M>
 {
     non_zero: NonZero<T>,
     #[derive_where(skip)]
-    _output: PhantomData<*const O>,
+    _output: PhantomData<fn(O) -> O>,
     #[derive_where(skip)]
     mapper: M,
 }

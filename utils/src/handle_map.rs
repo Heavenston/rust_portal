@@ -5,7 +5,8 @@ mod map_id {
     pub struct MapId<T> {
         #[cfg(debug_assertions)]
         map_id: crate::uid::Uid<T>,
-        _private_field: PhantomData<*const T>,
+        /// For when there is no map_id field we still need to use the T parameter
+        _private_field: PhantomData<fn(T) -> T>,
     }
 
     impl<T> std::fmt::Debug for MapId<T> {
@@ -27,7 +28,7 @@ use derive_where::derive_where;
 pub struct Handle<T> {
     id: Uid,
     map_id: MapId<T>,
-    _phantom: PhantomData<*const T>,
+    _phantom: PhantomData<fn(T) -> T>,
 }
 
 #[derive(Debug, Clone)]

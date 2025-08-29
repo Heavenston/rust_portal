@@ -27,7 +27,7 @@ impl<T: Clone, E1, E2> IndexMapIndex for T
 #[derive_where(Default)]
 pub struct IndexMap<T, I = usize> {
     vec: Vec<T>,
-    _index: PhantomData<*const I>,
+    _index: PhantomData<fn(I) -> I>,
 }
 
 impl<T, I> IndexMap<T, I> {

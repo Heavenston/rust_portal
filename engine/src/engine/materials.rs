@@ -36,7 +36,7 @@ impl<F, P> MaterialFactory<P> for F
 }
 
 pub struct EmbeddedShaderFactoryHelper<F, P, E> {
-    parameters: PhantomData<*const (P, E)>,
+    parameters: PhantomData<fn(P, E) -> (P, E)>,
     factory: F,
     file_name: String,
 }
@@ -92,7 +92,7 @@ struct FactoryWrapper<P, F>
     where P: MaterialParameters,
           F: MaterialFactory<P>
 {
-    parameters: PhantomData<*const P>,
+    parameters: PhantomData<fn(P) -> P>,
     factory: F,
 }
 

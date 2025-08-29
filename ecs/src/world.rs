@@ -7,6 +7,8 @@ mod entity_set;
 pub use entity_set::{ EntitySet, ComponentSet };
 pub mod component;
 use component::*;
+mod query;
+pub use query::*;
 mod bundle;
 pub use bundle::*;
 

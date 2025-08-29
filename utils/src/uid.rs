@@ -4,7 +4,7 @@ use std::{ cell::Cell, marker::PhantomData, sync::atomic::{ AtomicU32, Ordering 
 
 #[derive_where::derive_where(Clone, Copy, PartialEq, Eq, Hash)]
 // Byte array to keep alignment of 1
-pub struct Uid<T = ()>([u8; 8], PhantomData<*const T>);
+pub struct Uid<T = ()>([u8; 8], PhantomData<fn(T) -> T>);
 
 impl<T> Uid<T> {
     pub fn new() -> Self {
