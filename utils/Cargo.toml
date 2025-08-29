@@ -12,3 +12,4 @@ glam = { version = "0.30.4", features = ["bytemuck"] }
 sorted-vec = "0.8.8"
 dyn-clone = "1.0.20"
 either = "1.15.0"
+smallvec = { version = "1.15.1", features = ["union", "const_generics", "specialization"] }

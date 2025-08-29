@@ -2241,6 +2241,7 @@ dependencies = [
  "glam 0.30.4",
  "itertools 0.14.0",
  "readonly",
+ "smallvec",
  "sorted-vec",
 ]
 

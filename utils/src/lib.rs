@@ -21,11 +21,13 @@ pub mod prelude {
         axis_direction::AxisDirection,
         sorted_vec::{ SortedVec, SortedSet },
         dyn_clone,
+        smallvec::{ smallvec, SmallVec },
         consume_on_drop::{ ConsumeOnDropExt as _ },
         chain_after::{ ChainAfterExt as _ },
         skip_after::{ SkipAfterExt as _ },
         extract_nth::{ ExtractNthExt as _ },
         either_of, either_of::*,
+        bitset::{ BitSetIndex, BitSet },
     };
 }
 
@@ -34,6 +36,7 @@ pub use itertools;
 pub use either;
 pub use sorted_vec;
 pub use dyn_clone;
+pub use smallvec;
 
 pub mod handle_map;
 pub mod uid;
@@ -47,6 +50,7 @@ pub mod chain_after;
 pub mod skip_after;
 pub mod extract_nth;
 pub mod either_of;
+pub mod bitset;
 
 use std::hash::{ DefaultHasher, Hash, Hasher };
 
