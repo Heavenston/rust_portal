@@ -159,10 +159,9 @@ impl<'a, T, I> SparseSetDenseStorageInput<I> for ComponentDenseStorage
 
 #[cfg(test)]
 mod tests {
-    use super::{ComponentDenseStorage, StorageComponentsRef, StorageComponentsRefMut, ComponentDenseStorageInput};
+    use super::{ ComponentDenseStorage, StorageComponentsRefMut };
     use dynvec::DynVec;
-    use crate::world::EntityIndex;
-    use crate::sparse_set::{SparseSetDenseStorage, SparseSetDenseStorageInput};
+    use crate::sparse_set::{ SparseSetDenseStorage, SparseSetDenseStorageInput };
 
     #[test]
     fn push_get_set_iter_and_swap_remove_cover_paths() {

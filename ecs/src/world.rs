@@ -5,16 +5,22 @@ mod entity_storage;
 pub use entity_storage::{ Entity, EntityIndex, EntityGeneration };
 mod entity_set;
 pub use entity_set::{ EntitySet };
+mod query;
+// TODO: Specify the list of things to re-export
+pub use query::*;
+mod bundle;
+// TODO: Specify the list of things to re-export
+pub use bundle::*;
 
 use crate::{
     component::*,
     dyn_option::DynOption,
-    index_map::{ IndexMap, IndexMapIndex },
+    index_map::IndexMap,
     sparse_set::SparseSet,
 };
 
 use std::{
-    any::{type_name, TypeId},
+    any::{type_name, Any, TypeId},
     borrow::Cow,
     collections::HashMap, iter::{empty, once},
 };
@@ -25,9 +31,9 @@ use dynvec::{ DynVec, DynVecMetadata };
 const RESERVED_ENTITY_COUNT: u32 = 100;
 
 macro_rules! create_id {
-    ($name: ident($ty: ty)) => {
+    ($struct_vis: vis $name: ident($in_vis:vis $ty: ty)) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, From, Into)]
-        struct $name(pub $ty);
+        $struct_vis struct $name($in_vis $ty);
 
         /// Provide a more-than-surely invalid default value
         impl Default for $name {
@@ -37,13 +43,19 @@ macro_rules! create_id {
             }
         }
 
-        impl IndexMapIndex for $name {
-            fn from_usize(usize: usize) -> Self {
-                Self(usize.try_into().expect("No overflow"))
-            }
+        impl TryFrom<usize> for $name {
+            type Error = <$ty as TryFrom<usize>>::Error;
 
-            fn to_usize(&self) -> usize {
-                ix!(self.0)
+            fn try_from(from: usize) -> Result<$name, Self::Error> {
+                Ok($name(<$ty>::try_from(from)?))
+            }
+        }
+
+        impl TryFrom<$name> for usize {
+            type Error = <usize as TryFrom<$ty>>::Error;
+
+            fn try_from(from: $name) -> Result<usize, Self::Error> {
+                Ok(usize::try_from(from.0)?)
             }
         }
     };
@@ -202,10 +214,15 @@ impl World {
 
     /// Returns the entity for the given component, or None if it was never
     /// registred.
-    pub fn try_component<C: Component>(&self) -> Option<Entity> {
-        let type_id = TypeId::of::<C>();
+    pub fn try_component_entity(&self, type_id: TypeId) -> Option<Entity> {
         self.components_typeid_to_entity.get(&type_id)
             .copied()
+    }
+
+    /// Returns the entity for the given component, or None if it was never
+    /// registred.
+    pub fn try_component<C: Component>(&self) -> Option<Entity> {
+        self.try_component_entity(TypeId::of::<C>())
     }
 
     /// Returns the entity of the given component type.
