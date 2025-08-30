@@ -2153,6 +2153,7 @@ dependencies = [
 name = "portal-dynvec"
 version = "0.1.0"
 dependencies = [
+ "portal-utils",
  "thiserror 2.0.16",
 ]
 

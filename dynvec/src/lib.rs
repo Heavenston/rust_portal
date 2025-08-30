@@ -1,6 +1,8 @@
 #![feature(ptr_metadata, ptr_alignment_type)]
 #![feature(ptr_as_ref_unchecked)]
 #![feature(assert_matches)]
+#![feature(type_alias_impl_trait)]
+
 #![warn(missing_docs)]
 //! Type-erased, single-type vector.
 //!
@@ -50,6 +52,8 @@ use std::ptr::{ self, from_raw_parts, from_raw_parts_mut, NonNull };
 use std::slice;
 use std::ptr::Alignment;
 
+use utils::prelude::MaybeDefault;
+
 #[cfg(test)]
 mod tests;
 
@@ -89,6 +93,12 @@ pub struct IndexOutOfBoundError {
     pub len: usize,
 }
 
+/// Error returned when trying to call [`DynVec::push_default`] but the type
+/// doesn't implement Default
+#[derive(thiserror::Error, Debug)]
+#[error("The type in this DynVec doesn't implement Default")]
+pub struct NoDefaultConstructorError;
+
 /// Error returned for insertion where both an incorrect type and index out of bound
 /// is possible.
 #[derive(thiserror::Error, Debug)]
@@ -114,7 +124,7 @@ fn dangling_with_layout(layout: Layout) -> NonNull<u8> {
 ///
 /// All fields are public for transparency and potential interop, but the private
 /// marker field prevents external construction to keep values consistent.
-#[derive(Debug, Clone)]
+#[derive( Clone)]
 pub struct DynVecMetadata {
     /// The `TypeId` of the element type.
     pub type_id: TypeId,
@@ -122,6 +132,8 @@ pub struct DynVecMetadata {
     pub type_name: &'static str,
     /// The vtable metadata for `dyn Any` corresponding to the element type.
     pub dyn_meta: std::ptr::DynMetadata<dyn Any>,
+    /// Initialize the default for the type into the given pointer
+    pub default_fn: Option<unsafe fn(*mut u8)>,
     // Private dummy field to prevent external construction while keeping field reads possible.
     _priv: (),
 }
@@ -135,10 +147,18 @@ impl DynVecMetadata {
         let obj: *const dyn Any = std::ptr::null::<T>() as *const T as *const dyn Any;
         let meta = std::ptr::metadata(obj);
 
+        unsafe fn default_fn<T: 'static>(into: *mut u8) {
+            let maybe_default = <T as MaybeDefault>::maybe_default()
+                .expect("Should exist");
+            unsafe { (into as *mut T).write(maybe_default()) };
+        }
+
         Self {
             type_id: TypeId::of::<T>(),
             type_name: type_name::<T>(),
             dyn_meta: meta,
+            default_fn: <T as MaybeDefault>::maybe_default()
+                .and(Some(default_fn::<T>)),
             _priv: ()
         }
     }
@@ -464,6 +484,21 @@ impl DynVec {
         // Safety: destination is within allocation; `data_ptr` points to a valid T value.
         unsafe { ptr::copy_nonoverlapping(data_ptr, self.idx_ptr(self.len), self.meta.dyn_meta.layout().size()) };
         unsafe { dealloc(data_ptr, self.meta.dyn_meta.layout()) };
+        self.len += 1;
+
+        Ok(())
+    }
+
+    /// If the dynvec's type implements [`Default`] this pushes a new value
+    /// using its default method and returns Ok(()).
+    /// 
+    /// If it doesn't implement [`Default`] this return Err(NoDefaultConstructorError).
+    pub fn push_default(&mut self) -> Result<(), NoDefaultConstructorError> {
+        let Some(write_default) = self.meta.default_fn
+        else { return Err(NoDefaultConstructorError) };
+
+        self.reserve(1);
+        unsafe { write_default(self.idx_ptr(self.len)) };
         self.len += 1;
 
         Ok(())

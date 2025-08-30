@@ -367,3 +367,85 @@ fn test_collect_into_dynvec() {
     let t = v.typed::<i64>().unwrap();
     assert_eq!(t.as_slice(), &[10, 20, 30]);
 }
+
+#[test]
+fn test_push_default_empty() {
+    #[derive(Debug, PartialEq, Eq)]
+    struct MyType {
+        value: String,
+    }
+
+    impl Default for MyType {
+        fn default() -> Self {
+            Self { value: "Feur".into() }
+        }
+    }
+
+    let mut v: DynVec = DynVec::new::<MyType>();
+    assert_matches!(v.push_default(), Ok(()));
+    assert_eq!(v.typed::<MyType>().unwrap().as_slice(), &[MyType {
+        value: "Feur".into(),
+    }]);
+}
+
+#[test]
+fn test_push_default_non_empty() {
+    let mut v: DynVec = [10_i64, 20, 30].into_iter().collect();
+    assert_matches!(v.push_default(), Ok(()));
+    assert_eq!(v.typed::<i64>().unwrap().as_slice(), &[10, 20, 30, 0]);
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn test_push_default_zst() {
+    static DEFAULT_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    static DROP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    struct MyZST;
+
+    impl Drop for MyZST {
+        fn drop(&mut self) {
+            // println!("{}", std::backtrace::Backtrace::force_capture());
+            DROP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    impl Default for MyZST {
+        fn default() -> Self {
+            DEFAULT_COUNTER.fetch_add(1, Ordering::Relaxed);
+            MyZST
+        }
+    }
+
+    let mut v: DynVec = [MyZST, MyZST].into_iter().collect();
+
+    assert_eq!(DEFAULT_COUNTER.load(Ordering::Relaxed), 0);
+    assert_eq!(DROP_COUNTER.load(Ordering::Relaxed), 0);
+
+    assert_matches!(v.push_default(), Ok(()));
+
+    assert_eq!(DEFAULT_COUNTER.load(Ordering::Relaxed), 1);
+    assert_eq!(DROP_COUNTER.load(Ordering::Relaxed), 0);
+
+    assert_eq!(v.typed::<MyZST>().unwrap().as_slice().len(), 3);
+
+    assert_matches!(v.push_default(), Ok(()));
+
+    assert_eq!(DEFAULT_COUNTER.load(Ordering::Relaxed), 2);
+    assert_eq!(DROP_COUNTER.load(Ordering::Relaxed), 0);
+
+    v.pop();
+
+    assert_eq!(DEFAULT_COUNTER.load(Ordering::Relaxed), 2);
+    assert_eq!(DROP_COUNTER.load(Ordering::Relaxed), 1);
+
+    v.pop();
+
+    assert_eq!(DEFAULT_COUNTER.load(Ordering::Relaxed), 2);
+    assert_eq!(DROP_COUNTER.load(Ordering::Relaxed), 2);
+
+    drop(v);
+
+    assert_eq!(DEFAULT_COUNTER.load(Ordering::Relaxed), 2);
+    assert_eq!(DROP_COUNTER.load(Ordering::Relaxed), 4);
+}
