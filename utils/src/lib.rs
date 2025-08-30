@@ -4,6 +4,7 @@
 #![feature(option_zip)]
 #![feature(macro_metavar_expr)]
 #![feature(debug_closure_helpers)]
+#![feature(specialization)]
 
 #![expect(internal_features)]
 #![expect(incomplete_features)]
@@ -29,6 +30,7 @@ pub mod prelude {
         extract_nth::{ ExtractNthExt as _ },
         either_of, either_of::*,
         bitset::{ BitSetIndex, BitSet },
+        maybe_default::{ MaybeDefault },
     };
 }
 
@@ -52,6 +54,7 @@ pub mod skip_after;
 pub mod extract_nth;
 pub mod either_of;
 pub mod bitset;
+pub mod maybe_default;
 
 use std::hash::{ DefaultHasher, Hash, Hasher };
 
