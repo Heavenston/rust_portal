@@ -99,13 +99,23 @@ pub struct IndexOutOfBoundError {
 #[error("The type in this DynVec doesn't implement Default")]
 pub struct NoDefaultConstructorError;
 
-/// Error returned for insertion where both an incorrect type and index out of bound
-/// is possible.
+/// Error returned for [`DynVec::set`] and [`OwnedDynVecValue::set_into`]
 #[derive(thiserror::Error, Debug)]
 pub enum InsertionError {
     /// See [`IncorrectTypeError`]
     #[error(transparent)]
     IncorrectType(#[from] IncorrectTypeError),
+    /// See [`IndexOutOfBoundError`]
+    #[error(transparent)]
+    IndexOutOfBound(#[from] IndexOutOfBoundError),
+}
+
+/// Error returned for [`DynVec::set_default`]
+#[derive(thiserror::Error, Debug)]
+pub enum DefaultInsertionError {
+    /// See [`NoDefaultConstructorError`]
+    #[error(transparent)]
+    NoDefaultConstructor(#[from] NoDefaultConstructorError),
     /// See [`IndexOutOfBoundError`]
     #[error(transparent)]
     IndexOutOfBound(#[from] IndexOutOfBoundError),
@@ -530,6 +540,23 @@ impl DynVec {
         unsafe { self.drop_at(idx) };
         unsafe { ptr::copy_nonoverlapping(data_ptr, self.idx_ptr(idx), self.meta.dyn_meta.layout().size()) };
         unsafe { dealloc(data_ptr, self.meta.dyn_meta.layout()) };
+
+        Ok(())
+    }
+    
+    /// Replaces the element at `idx`, dropping the previous value in place.
+    ///
+    /// Returns an error if `idx` is out of bounds or the boxed value's `TypeId` mismatches.
+    pub fn set_default(&mut self, idx: usize) -> Result<(), DefaultInsertionError> {
+        self.assert_index(idx)?;
+
+        let Some(write_default) = self.meta.default_fn
+        else { return Err(NoDefaultConstructorError.into()) };
+
+        unsafe {
+            self.drop_at(idx);
+            write_default(self.idx_ptr(idx));
+        }
 
         Ok(())
     }

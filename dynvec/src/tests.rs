@@ -1,5 +1,5 @@
 use super::*;
-use std::{ assert_matches::assert_matches, sync::{ atomic::{ AtomicUsize, Ordering }, Arc } };
+use std::{ assert_matches::assert_matches, sync::{ atomic::{ AtomicUsize, Ordering }, Arc, Mutex } };
 
 #[test]
 fn test_dyn_vec_i32() {
@@ -448,4 +448,93 @@ fn test_push_default_zst() {
 
     assert_eq!(DEFAULT_COUNTER.load(Ordering::Relaxed), 2);
     assert_eq!(DROP_COUNTER.load(Ordering::Relaxed), 4);
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn test_set_default() {
+    static LAST_DROPS: Mutex<Vec<u32>> = Mutex::new(vec![]);
+
+    fn drain_last_drop() -> Vec<u32> {
+        LAST_DROPS.lock().unwrap().drain(..).collect::<Vec<_>>()
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    struct MyVal(u32);
+
+    impl Drop for MyVal {
+        fn drop(&mut self) {
+            LAST_DROPS.lock().unwrap().push(self.0);
+        }
+    }
+
+    impl Default for MyVal {
+        fn default() -> Self {
+            Self(142)
+        }
+    }
+
+    let mut v: DynVec = [10, 20, 30, 40, 50].into_iter().map(MyVal).collect();
+    assert_eq!(drain_last_drop(), vec![]);
+    assert_matches!(v.typed::<MyVal>().unwrap().as_slice(), &[
+        MyVal(10), MyVal(20), MyVal(30), MyVal(40), MyVal(50)
+    ]);
+    v.set_default(3).unwrap();
+    assert_eq!(drain_last_drop(), vec![
+        40
+    ]);
+    assert_matches!(v.typed::<MyVal>().unwrap().as_slice(), &[
+        MyVal(10), MyVal(20), MyVal(30), MyVal(142), MyVal(50)
+    ]);
+    drop(v);
+    assert_eq!(drain_last_drop(), vec![
+        10, 20, 30, 142, 50
+    ]);
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn test_set_default_zst() {
+    static LAST_DROPS: AtomicUsize = AtomicUsize::new(0);
+    static LAST_DEFAULTS: AtomicUsize = AtomicUsize::new(0);
+
+    fn drain_last_drop() -> usize {
+        LAST_DROPS.swap(0, Ordering::Relaxed)
+    }
+    fn drain_default() -> usize {
+        LAST_DEFAULTS.swap(0, Ordering::Relaxed)
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    struct MyZST;
+
+    impl Drop for MyZST {
+        fn drop(&mut self) {
+            LAST_DROPS.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    impl Default for MyZST {
+        fn default() -> Self {
+            LAST_DEFAULTS.fetch_add(1, Ordering::Relaxed);
+            Self
+        }
+    }
+
+    let mut v: DynVec = std::iter::repeat_n(MyZST, 5).collect();
+
+    assert_eq!(drain_last_drop(), 0);
+    assert_eq!(drain_default(), 0);
+    assert_matches!(v.typed::<MyZST>().unwrap().len(), 5);
+
+    v.set_default(3).unwrap();
+
+    assert_eq!(drain_last_drop(), 1);
+    assert_eq!(drain_default(), 1);
+    assert_matches!(v.typed::<MyZST>().unwrap().len(), 5);
+
+    drop(v);
+
+    assert_eq!(drain_last_drop(), 5);
+    assert_eq!(drain_default(), 0);
 }
