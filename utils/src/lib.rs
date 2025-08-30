@@ -28,6 +28,7 @@ pub mod prelude {
         chain_after::{ ChainAfterExt as _ },
         skip_after::{ SkipAfterExt as _ },
         extract_nth::{ ExtractNthExt as _ },
+        assert_length::{ AssertLengthExt as _ },
         either_of, either_of::*,
         bitset::{ BitSetIndex, BitSet },
         maybe_default::{ MaybeDefault },
@@ -52,6 +53,7 @@ pub mod consume_on_drop;
 pub mod chain_after;
 pub mod skip_after;
 pub mod extract_nth;
+pub mod assert_length;
 pub mod either_of;
 pub mod bitset;
 pub mod maybe_default;
