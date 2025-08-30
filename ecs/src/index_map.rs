@@ -53,6 +53,10 @@ impl<T, I> IndexMap<T, I> {
     pub fn values(&self) -> impl Iterator<Item = &T> + ExactSizeIterator + DoubleEndedIterator + Clone {
         self.vec.iter()
     }
+
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> + ExactSizeIterator + DoubleEndedIterator {
+        self.vec.iter_mut()
+    }
 }
 
 impl<T, I> IndexMap<T, I>
@@ -104,6 +108,16 @@ impl<T, I> IndexMap<T, I>
 
     pub fn swap_remove(&mut self, idx: I) -> T {
         self.vec.swap_remove(idx.to_usize())
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (I, &T)> + ExactSizeIterator + DoubleEndedIterator + Clone {
+        self.vec.iter().enumerate()
+            .map(|(i, val)| (I::from_usize(i), val))
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (I, &mut T)> + ExactSizeIterator + DoubleEndedIterator {
+        self.vec.iter_mut().enumerate()
+            .map(|(i, val)| (I::from_usize(i), val))
     }
 }
 
