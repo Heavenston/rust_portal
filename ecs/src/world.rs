@@ -162,6 +162,23 @@ pub enum AddComponentError {
     },
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum RemoveComponentError {
+    #[error("Tried to remove a component from a dead entity {entity}")]
+    EntityIsNotAlive {
+        entity: Entity,
+    },
+    #[error("Entity of the component {component} is not alive")]
+    ComponentIsNotAlive {
+        component: ComponentEntity,
+    },
+    #[error("Component from entity {component} is not present in the entity {entity}")]
+    ComponentNotPresent {
+        component: ComponentEntity,
+        entity: Entity,
+    },
+}
+
 #[derive(Debug)]
 pub struct World {
     entity_storage: entity_storage::EntityStorage,
@@ -328,6 +345,12 @@ impl World {
     }
 
     fn table_for(&mut self, table_components: Cow<'_, ComponentSet>) -> TableId {
+        debug_assert!(
+            table_components.iter()
+                .map(|comp| self.component_storage(comp))
+                .all(|storage| storage.is_some_and(|storage| storage.is_table())),
+            "Components given to table_for should all be table components"
+        );
         match self.components_set_to_table.get(table_components.as_ref()) {
             Some(&table_id) => table_id,
             None => {
@@ -359,9 +382,12 @@ impl World {
             Some(&id) => id,
             None => {
                 let component_set = component_set.into_owned();
-                // FIXME: When table components are added this should filters 
-                // to only the table components
-                let table_components = component_set.clone();
+                let table_components: ComponentSet = component_set.iter()
+                    .filter(|&comp| {
+                        self.component_storage(comp)
+                            .is_some_and(|storage| storage.is_table())
+                    })
+                    .collect();
                 let table_id = self.table_for(Cow::Borrowed(&table_components));
                 let archetyp_id = self.archetypes.push(Archetyp {
                     components: component_set.clone(),
@@ -571,7 +597,11 @@ impl World {
     }
 
     /// The component must have no storage or its storage type must implement Default.
-    pub fn add_component(&mut self, entity: impl Into<Entity>, component: ComponentEntity) -> Result<AddComponent<OptionalComponentRef<DynVecValueRefMut<'_>>>, AddComponentError> {
+    pub fn add_component(
+        &mut self,
+        entity: impl Into<Entity>,
+        component: ComponentEntity,
+    ) -> Result<AddComponent<OptionalComponentRef<DynVecValueRefMut<'_>>>, AddComponentError> {
         let entity = entity.into();
 
         if !self.alive(entity) {
@@ -602,16 +632,22 @@ impl World {
         &mut self,
         entity: impl Into<Entity>,
         component: ComponentEntity
-    ) -> Option<OwnedDynVecValue<'_>> {
+    ) -> Result<OwnedDynVecValue<'_>, RemoveComponentError> {
         let entity = entity.into();
 
-        if !self.alive(entity)
-        { return None; }
+        if !self.alive(entity) {
+            return Err(RemoveComponentError::EntityIsNotAlive { entity });
+        }
+
+        if !self.alive(component) {
+            return Err(RemoveComponentError::ComponentIsNotAlive { component });
+        }
 
         let archetyp_id = self.entities_archetypes[entity.index()];
         let archetyp = &mut self.archetypes[archetyp_id];
+
         if !archetyp.components.has(component) {
-            return None;
+            return Err(RemoveComponentError::ComponentNotPresent { component, entity });
         }
 
         let (Some(component_idx), new_component_set) = archetyp.components.clone()
@@ -636,7 +672,7 @@ impl World {
 
         self.entities_archetypes[entity.index()] = new_archtyp_id;
 
-        Some(extracted_component)
+        Ok(extracted_component)
     }
 }
 

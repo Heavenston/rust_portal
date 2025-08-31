@@ -1,5 +1,5 @@
 use crate::{dyn_option::FunDynOption, world::{
-    component::{Component, ComponentDenseStorageInput}, AddComponent, ComponentStorageKind, Entity, GetComponentError, HasComponent, OptionalComponentRef, World
+    component::{Component, ComponentDenseStorageInput}, AddComponent, ComponentStorageKind, Entity, GetComponentError, HasComponent, OptionalComponentRef, RemoveComponentError, World
 }};
 
 use std::{ any::type_name, assert_matches::debug_assert_matches, iter::once };
@@ -26,6 +26,23 @@ pub enum GetComponentTypedError {
 pub enum AddComponentTypedError {
     #[error("Tried to add a component to a dead entity {entity}")]
     EntityIsNotAlive {
+        entity: Entity,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RemoveComponentTypedError {
+    #[error("Tried to remove a component from a dead entity {entity}")]
+    EntityIsNotAlive {
+        entity: Entity,
+    },
+    #[error("Component from type '{type_name}' was never registred")]
+    UnknownComponent {
+        type_name: &'static str,
+    },
+    #[error("Component from type '{type_name}' is not present in the entity {entity}")]
+    ComponentNotPresent {
+        type_name: &'static str,
         entity: Entity,
     },
 }
@@ -136,14 +153,31 @@ impl World {
         })
     }
 
-    pub fn remove<C>(&mut self, entity: impl Into<Entity>) -> Option<C>
+    pub fn remove<C>(&mut self, entity: impl Into<Entity>) -> Result<C, RemoveComponentTypedError>
         where C: Component,
     {
-        let component = self.try_component::<C>()?;
+        let Some(component) = self.try_component::<C>()
+        else {
+            return Err(RemoveComponentTypedError::UnknownComponent {
+                type_name: type_name::<C>(),
+            })
+        };
 
-        Some(
-            self.remove_component(entity, component)?.into_typed::<C>()
-            .expect("Correct component type")
-        )
+        match self.remove_component(entity, component) {
+            Ok(value) => Ok(value.into_typed::<C>().expect("Correct component type")),
+            Err(RemoveComponentError::EntityIsNotAlive { entity }) =>
+                Err(RemoveComponentTypedError::EntityIsNotAlive {
+                    entity
+                }),
+
+            Err(RemoveComponentError::ComponentIsNotAlive { component: _ }) =>
+                unreachable!("World::try_component should not return a dead entity"),
+
+            Err(RemoveComponentError::ComponentNotPresent { component: _, entity }) =>
+                Err(RemoveComponentTypedError::ComponentNotPresent {
+                    type_name: type_name::<C>(),
+                    entity,
+                }),
+        }
     }
 }

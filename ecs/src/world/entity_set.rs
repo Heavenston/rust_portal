@@ -70,6 +70,16 @@ impl<P> From<&[P]> for EntitySet<P>
     }
 }
 
+impl<P> FromIterator<P> for EntitySet<P>
+    where P: Ord + Into<Entity> + Default + Copy,
+{
+    fn from_iter<T: IntoIterator<Item = P>>(iter: T) -> Self {
+        Self {
+            entities: SortedSet::from_iter(iter),
+        }
+    }
+}
+
 pub type ComponentSet = EntitySet<super::ComponentEntity>;
 
 #[cfg(test)]
