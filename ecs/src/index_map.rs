@@ -121,6 +121,24 @@ impl<T, I> IndexMap<T, I>
     }
 }
 
+impl<T, I> Index<I> for IndexMap<T, I>
+    where I: IndexMapIndex,
+{
+    type Output = T;
+
+    fn index(&self, index: I) -> &T {
+        &self.vec[index.to_usize()]
+    }
+}
+
+impl<T, I> IndexMut<I> for IndexMap<T, I>
+    where I: IndexMapIndex,
+{
+    fn index_mut(&mut self, index: I) -> &mut T {
+        &mut self.vec[index.to_usize()]
+    }
+}
+
 #[macro_export]
 macro_rules! indexmap {
     () => (
@@ -185,23 +203,5 @@ mod tests {
             *v = 2;
         }
         assert_eq!(m.get(0usize), Some(&2));
-    }
-}
-
-impl<T, I> Index<I> for IndexMap<T, I>
-    where I: IndexMapIndex,
-{
-    type Output = T;
-
-    fn index(&self, index: I) -> &T {
-        &self.vec[index.to_usize()]
-    }
-}
-
-impl<T, I> IndexMut<I> for IndexMap<T, I>
-    where I: IndexMapIndex,
-{
-    fn index_mut(&mut self, index: I) -> &mut Self::Output {
-        &mut self.vec[index.to_usize()]
     }
 }

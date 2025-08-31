@@ -26,6 +26,34 @@ impl<T: 'static> DynOption for Option<T> {
     }
 }
 
+pub struct FunDynOption<F>(Option<F>);
+
+impl<F> FunDynOption<F> {
+    pub fn new(fun: F) -> Self {
+        Self(Some(fun))
+    }
+}
+
+impl<F, T: 'static> DynOption for FunDynOption<F>
+    where F: FnOnce() -> T,
+{
+    fn take_and_push_into(
+        &mut self, into: &mut DynVec
+    ) -> Option<Result<(), dynvec::IncorrectTypeError>> {
+        let fun = self.0.take()?;
+        let val = fun();
+        Some(try { into.typed_mut::<T>()?.push(val) })
+    }
+
+    fn take_and_set_into(
+        &mut self, idx: usize, into: &mut DynVec
+    ) -> Option<Result<(), dynvec::InsertionError>> {
+        let fun = self.0.take()?;
+        let val = fun();
+        Some(try { into.typed_mut::<T>()?.set(idx, val)? })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::DynOption;

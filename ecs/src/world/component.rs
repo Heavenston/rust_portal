@@ -1,18 +1,21 @@
 mod storage;
-pub use storage::*;
+pub(crate) use storage::*;
 
 use super::{ Entity, EntityGeneration, EntityIndex };
 
-use std::any::Any;
+use std::{ any::Any, fmt::Display };
 use derive_more::{From, Into};
 use dynvec::DynVecMetadata;
 
 pub trait Component: 'static + Any { }
 impl<T: 'static> Component for T { }
 
-/// Component given to all entities of components
+/// When added to entities, describes how to store data for this component
+/// into a DynVec.
+///
+/// Automatically added when registering components through 
 #[derive(Clone)]
-pub struct ComponentComponent {
+pub struct ComponentStorageComponent {
     pub dynvec_meta: DynVecMetadata,
 }
 
@@ -34,5 +37,11 @@ impl ComponentEntity {
 impl<'a> Into<Entity> for &'a ComponentEntity {
     fn into(self) -> Entity {
         self.0
+    }
+}
+
+impl Display for ComponentEntity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Component({})", self.0)
     }
 }

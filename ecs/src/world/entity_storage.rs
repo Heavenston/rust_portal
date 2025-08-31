@@ -101,7 +101,7 @@ mod entity {
 
     impl Display for Entity {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "Entity(0x{:016x})", u64::from(self.index()) | (u64::from(self.generation) << 32))
+            write!(f, "Entity(0x{:08x},0x{:08x})", u32::from(self.index()), u32::from(self.generation))
         }
     }
 
