@@ -113,7 +113,10 @@ impl HasComponent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
 pub enum ComponentStorageKind {
+    /// The component has no storage and thus is stored nowhere
     None,
+    /// The component has table storage and thus is stoired alongside
+    /// other components with table storage for each archetyp
     Table { has_default: bool },
     // TODO
     // Sparse,
@@ -303,6 +306,13 @@ impl World {
     }
 
     pub fn component_storage(&self, component: ComponentEntity) -> Option<ComponentStorageKind> {
+        // fixes infinite recursion
+        if component == self.components_typeid_to_entity[&TypeId::of::<ComponentStorageComponent>()] {
+            return Some(ComponentStorageKind::Table {
+                has_default: false,
+            });
+        }
+
         match self.get::<ComponentStorageComponent>(component) {
             Ok(storage)
                 => Some(ComponentStorageKind::Table {
