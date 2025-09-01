@@ -10,6 +10,8 @@ use crate::world_utils::{
 
 use std::any::TypeId;
 use std::assert_matches::assert_matches;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TestComponent1(u32);
@@ -28,6 +30,15 @@ impl Default for DefaultComponent {
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 struct ZSTComponent;
+
+#[derive(Clone, Debug)]
+struct DropCheckComponent(Arc<AtomicUsize>);
+
+impl Drop for DropCheckComponent {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::Relaxed);
+    }
+}
 
 mod entity_spawning {
     use super::*;
@@ -520,5 +531,64 @@ mod misc {
         assert_matches!(world.get::<TestComponent1>(e), Ok(&TestComponent1(42)));
         world.remove_component(e, c).unwrap();
         assert_matches!(world.get::<TestComponent1>(e), Err(GetComponentTypedError::ComponentNotPresent { .. }));
+    }
+}
+
+mod drops_when_it_should {
+    use super::*;
+
+    #[test]
+    fn drops_component_on_remove() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        let checker = Arc::new(AtomicUsize::new(0));
+
+        world.add(e, DropCheckComponent(Arc::clone(&checker))).unwrap();
+        assert_eq!(checker.load(Ordering::Relaxed), 0);
+        world.remove::<DropCheckComponent>(e).unwrap();
+        assert_eq!(checker.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn drops_component_on_dispawn() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        let checker = Arc::new(AtomicUsize::new(0));
+
+        world.add(e, DropCheckComponent(Arc::clone(&checker))).unwrap();
+        assert_eq!(checker.load(Ordering::Relaxed), 0);
+        world.dispawn(e);
+        assert_eq!(checker.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn drops_component_on_world_drop() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        let checker = Arc::new(AtomicUsize::new(0));
+
+        world.add(e, DropCheckComponent(Arc::clone(&checker))).unwrap();
+        assert_eq!(checker.load(Ordering::Relaxed), 0);
+        drop(world);
+        assert_eq!(checker.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn drops_component_on_unregister() {
+        let mut world = World::new();
+        let e = world.spawn();
+        let c = world.component::<DropCheckComponent>();
+
+        let checker = Arc::new(AtomicUsize::new(0));
+
+        world.add(e, DropCheckComponent(Arc::clone(&checker))).unwrap();
+        assert_eq!(checker.load(Ordering::Relaxed), 0);
+        world.dispawn(c);
+        assert_eq!(checker.load(Ordering::Relaxed), 1);
+        world.dispawn(e);
+        assert_eq!(checker.load(Ordering::Relaxed), 0);
     }
 }
