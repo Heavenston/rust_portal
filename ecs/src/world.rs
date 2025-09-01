@@ -194,6 +194,7 @@ pub struct World {
     tables: IndexMap<Table, TableId>,
 
     components_typeid_to_entity: HashMap<TypeId, ComponentEntity>,
+    components_entity_to_typeid: HashMap<ComponentEntity, TypeId>,
     components_set_to_archetyp: HashMap<ComponentSet, ArchetypId>,
     components_set_to_table: HashMap<ComponentSet, TableId>,
 }
@@ -209,6 +210,7 @@ impl World {
             tables: default(),
 
             components_typeid_to_entity: default(),
+            components_entity_to_typeid: default(),
             components_set_to_archetyp: default(),
             components_set_to_table: default(),
         };
@@ -226,6 +228,7 @@ impl World {
             .unwrap_or_else(|| this.entity_storage.spawn());
         let cc_entity = ComponentEntity(cc_entity);
         this.components_typeid_to_entity.insert(TypeId::of::<ComponentStorageComponent>(), cc_entity);
+        this.components_entity_to_typeid.insert(cc_entity, TypeId::of::<ComponentStorageComponent>());
 
         let cc_set = EntitySet::from(&[cc_entity][..]);
         let cc_table_id = this.tables.push(Table {
@@ -286,7 +289,24 @@ impl World {
 
     /// Returns false if the entity was already dead.
     pub fn dispawn(&mut self, entity: impl Into<Entity>) -> bool {
-        self.entity_storage.dispawn(entity.into())
+        let entity = entity.into();
+
+        let was_alive = self.entity_storage.dispawn(entity.into());
+        if !was_alive {
+            return false;
+        }
+
+        let archtyp: ArchetypId = self.entities_archetypes[entity.index()];
+        let table_id: TableId = self.archetypes[archtyp].table_id;
+
+        self.tables[table_id].sparse_set.remove(entity.index());
+
+        if let Some(type_id) = self.components_entity_to_typeid.remove(&ComponentEntity(entity)) {
+            let val = self.components_typeid_to_entity.remove(&type_id);
+            debug_assert_eq!(val, Some(ComponentEntity(entity)));
+        }
+
+        true
     }
 
     /// Returns the entity for the given component type_id, or None if it was never
@@ -310,11 +330,16 @@ impl World {
         use std::collections::hash_map::Entry;
         let created_entity = match self.components_typeid_to_entity.entry(type_id) {
             Entry::Occupied(o) => return *o.get(),
-            Entry::Vacant(vacant) => *vacant.insert(ComponentEntity(
-                // cannot call self.spawn_component because self is partially-borrowed
-                self.entity_storage.take_next_reserved()
-                    .unwrap_or_else(|| self.entity_storage.spawn())
-            )),
+            Entry::Vacant(vacant) => {
+                let new_entity = *vacant.insert(ComponentEntity(
+                    // cannot call self.spawn_component because self is partially-borrowed
+                    self.entity_storage.take_next_reserved()
+                        .unwrap_or_else(|| self.entity_storage.spawn())
+                ));
+                let previous = self.components_entity_to_typeid.insert(new_entity, type_id);
+                debug_assert_eq!(previous, None);
+                new_entity
+            },
         };
 
         self.add(created_entity, ComponentStorageComponent {
