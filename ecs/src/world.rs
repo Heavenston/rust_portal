@@ -83,11 +83,13 @@ struct Table {
 /// Ref to a component that may or may not have no storage attached in which
 /// case a ref makes no sense. If this is returned this means that the component
 /// **is** attached to the relevant entity.
+#[derive(Debug)]
 pub enum OptionalComponentRef<C> {
     HasStorage(C),
     NoStorage,
 }
 
+#[derive(Debug)]
 pub struct AddComponent<C> {
     pub component_ref: C,
     pub was_added: bool,
@@ -97,8 +99,8 @@ pub struct AddComponent<C> {
 pub enum HasComponent {
     /// The entity is dead
     EntityIsNotAlive,
-    /// The component was never registred
-    UnknownComponent,
+    /// The component's entity is dead
+    ComponentIsNotAlive,
     /// The component is not present in this entity's archetyp
     NotPresent,
     /// The component *is* present in this entity's archtyp
@@ -402,14 +404,13 @@ impl World {
     }
 
     pub fn has_component(&self, entity: impl Into<Entity>, component: ComponentEntity) -> HasComponent {
-        if !self.entity_storage.alive(component.0) {
-            return HasComponent::UnknownComponent;
-        }
-
         let entity = entity.into();
 
-        if !self.entity_storage.alive(entity) {
+        if !self.alive(entity) {
             return HasComponent::EntityIsNotAlive;
+        }
+        if !self.alive(component) {
+            return HasComponent::ComponentIsNotAlive;
         }
 
         let archetyp_id = self.entities_archetypes[entity.index()];
@@ -632,16 +633,17 @@ impl World {
         &mut self,
         entity: impl Into<Entity>,
         component: ComponentEntity
-    ) -> Result<OwnedDynVecValue<'_>, RemoveComponentError> {
+    ) -> Result<OptionalComponentRef<OwnedDynVecValue<'_>>, RemoveComponentError> {
         let entity = entity.into();
 
         if !self.alive(entity) {
             return Err(RemoveComponentError::EntityIsNotAlive { entity });
         }
 
-        if !self.alive(component) {
+        let Some(component_storage) = self.component_storage(component)
+        else {
             return Err(RemoveComponentError::ComponentIsNotAlive { component });
-        }
+        };
 
         let archetyp_id = self.entities_archetypes[entity.index()];
         let archetyp = &mut self.archetypes[archetyp_id];
@@ -659,6 +661,16 @@ impl World {
         let new_archtyp_id = self.archtyp_for(Cow::Borrowed(&new_component_set));
         let new_table_id = self.archetypes[new_archtyp_id].table_id;
 
+        self.entities_archetypes[entity.index()] = new_archtyp_id;
+
+        match component_storage {
+            ComponentStorageKind::None => {
+                debug_assert_eq!(old_table_id, new_table_id);
+                return Ok(OptionalComponentRef::NoStorage);
+            },
+            ComponentStorageKind::Table { .. } => (),
+        }
+
         let [old_table, new_table] = self.tables.get_disjoint_mut([
             old_table_id, new_table_id,
         ]).expect("Old table and new table are not equal");
@@ -670,9 +682,7 @@ impl World {
         new_table.sparse_set.insert(entity.index(), components);
         let extracted_component = extracted_component.expect("Exist in iterator so should have been extracted");
 
-        self.entities_archetypes[entity.index()] = new_archtyp_id;
-
-        Ok(extracted_component)
+        Ok(OptionalComponentRef::HasStorage(extracted_component))
     }
 }
 

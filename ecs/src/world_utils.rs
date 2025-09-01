@@ -3,7 +3,20 @@ use crate::{dyn_option::FunDynOption, world::{
 }};
 
 use std::{ any::type_name, assert_matches::debug_assert_matches, iter::once };
+use derive_more::IsVariant;
 use utils::prelude::*;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+pub enum HasComponentTyped {
+    /// The entity is dead
+    EntityIsNotAlive,
+    /// The component was never registred
+    UnknownComponent,
+    /// The component is not present in this entity's archetyp
+    NotPresent,
+    /// The component *is* present in this entity's archtyp
+    Present,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum GetComponentTypedError {
@@ -48,11 +61,17 @@ pub enum RemoveComponentTypedError {
 }
 
 impl World {
-    pub fn has<C: Component>(&self, entity: impl Into<Entity>) -> HasComponent {
+    pub fn has<C: Component>(&self, entity: impl Into<Entity>) -> HasComponentTyped {
         let Some(component) = self.try_component::<C>()
-        else { return HasComponent::UnknownComponent; };
+        else { return HasComponentTyped::UnknownComponent; };
 
-        self.has_component(entity, component)
+        match self.has_component(entity, component) {
+            HasComponent::EntityIsNotAlive => HasComponentTyped::EntityIsNotAlive,
+            HasComponent::ComponentIsNotAlive
+                => unreachable!("try_component always return alive entities"),
+            HasComponent::NotPresent => HasComponentTyped::NotPresent,
+            HasComponent::Present => HasComponentTyped::Present,
+        }
     }
 
     pub fn get<C: Component>(&self, entity: impl Into<Entity>) -> Result<&C, GetComponentTypedError> {
@@ -164,7 +183,10 @@ impl World {
         };
 
         match self.remove_component(entity, component) {
-            Ok(value) => Ok(value.into_typed::<C>().expect("Correct component type")),
+            Ok(OptionalComponentRef::HasStorage(value)) =>
+                Ok(value.into_typed::<C>().expect("Correct component type")),
+            Ok(OptionalComponentRef::NoStorage) =>
+                unreachable!("Typed components all have storage"),
             Err(RemoveComponentError::EntityIsNotAlive { entity }) =>
                 Err(RemoveComponentTypedError::EntityIsNotAlive {
                     entity
