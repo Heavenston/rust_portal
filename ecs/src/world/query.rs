@@ -10,20 +10,26 @@ use super::*;
 
 use std::marker::PhantomData;
 
-pub trait QueryParameter {
-    type ValueMut<'a>;
-}
+mod private {
+    pub trait QueryParameterImpl {
+        type ValueMut<'a>;
+    }
 
-pub trait QueryParameterImmutable: QueryParameter {
-    type Value<'a>;
+    pub trait QueryParameterImmutableImpl: QueryParameterImpl {
+        type Value<'a>;
+    }
 }
+use private::{ QueryParameterImpl, QueryParameterImmutableImpl };
+
+pub trait QueryParameter = QueryParameterImpl;
+pub trait QueryParameterImmutable = QueryParameterImmutableImpl;
 
 pub struct Query<P: QueryParameter> {
     _parameters: PhantomData<fn(P) -> P>,
     archetypes: Vec<ArchetypId>,
 }
 
-impl<P: QueryParameter> Query<P> {
+impl<P: QueryParameterImpl> Query<P> {
     pub fn new(world: &mut World) -> Self {
         Self {
             _parameters: PhantomData,

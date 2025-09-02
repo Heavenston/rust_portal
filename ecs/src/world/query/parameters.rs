@@ -1,4 +1,4 @@
-use super::{ QueryParameter, QueryParameterImmutable };
+use super::{ QueryParameterImpl, QueryParameterImmutableImpl };
 use crate::world::component::Component;
 
 use std::marker::PhantomData;
@@ -11,13 +11,13 @@ pub struct Ref<C>
     _component: PhantomData<fn(C) -> C>,
 }
 
-impl<C> QueryParameter for Ref<C>
+impl<C> QueryParameterImpl for Ref<C>
     where C: Component,
 {
     type ValueMut<'a> = &'a C;
 }
 
-impl<C> QueryParameterImmutable for Ref<C>
+impl<C> QueryParameterImmutableImpl for Ref<C>
     where C: Component,
 {
     type Value<'a> = &'a C;
@@ -30,7 +30,7 @@ pub struct RefMut<C>
     _component: PhantomData<fn(C) -> C>,
 }
 
-impl<C> QueryParameter for RefMut<C>
+impl<C> QueryParameterImpl for RefMut<C>
     where C: Component,
 {
     type ValueMut<'a> = &'a mut C;
@@ -43,13 +43,13 @@ pub struct Has<C>
     _component: PhantomData<fn(C) -> C>,
 }
 
-impl<C> QueryParameter for Has<C>
+impl<C> QueryParameterImpl for Has<C>
     where C: Component,
 {
     type ValueMut<'a> = ();
 }
 
-impl<C> QueryParameterImmutable for Has<C>
+impl<C> QueryParameterImmutableImpl for Has<C>
     where C: Component,
 {
     type Value<'a> = ();

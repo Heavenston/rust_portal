@@ -1,18 +1,21 @@
 //! Implementing here [`QueryParameter`]s that modify other parameters
 
-use super::{ QueryParameter, QueryParameterImmutable };
+use super::{
+    QueryParameterImpl, QueryParameterImmutableImpl,
+    QueryParameter, QueryParameterImmutable,
+};
 
 use std::marker::PhantomData;
 use derive_where::derive_where;
 use utils::prelude::*;
 
-impl<T> QueryParameter for Option<T>
+impl<T> QueryParameterImpl for Option<T>
     where T: QueryParameter,
 {
     type ValueMut<'a> = Option<T::ValueMut<'a>>;
 }
 
-impl<T> QueryParameterImmutable for Option<T>
+impl<T> QueryParameterImmutableImpl for Option<T>
     where T: QueryParameterImmutable,
 {
     type Value<'a> = Option<T::Value<'a>>;
@@ -25,40 +28,48 @@ pub struct Not<C>
     _child: PhantomData<fn(C) -> C>,
 }
 
-impl<C> QueryParameter for Not<C>
+impl<C> QueryParameterImpl for Not<C>
     where C: QueryParameter,
 {
     type ValueMut<'a> = ();
 }
 
 // Always immutable event with mutable parameter (the value is dropped)
-impl<C> QueryParameterImmutable for Not<C>
+impl<C> QueryParameterImmutableImpl for Not<C>
     where C: QueryParameter,
 {
     type Value<'a> = ();
 }
 
-pub trait QueryParameterTuple {
-    type ValueMut<'a>;
-    type EitherOfMut<'a>: EitherOfN;
-}
+mod private {
+    use super::*;
 
-pub trait QueryParameterTupleImmutable: QueryParameterTuple {
-    type Value<'a>;
-    type EitherOf<'a>: EitherOfN;
+    pub trait QueryParameterTupleImpl {
+        type ValueMut<'a>;
+        type EitherOfMut<'a>: EitherOfN;
+    }
+
+    pub trait QueryParameterTupleImmutableImpl: QueryParameterTupleImpl {
+        type Value<'a>;
+        type EitherOf<'a>: EitherOfN;
+    }
 }
+use private::{ QueryParameterTupleImpl, QueryParameterTupleImmutableImpl };
+
+pub trait QueryParameterTuple = QueryParameterTupleImpl;
+pub trait QueryParameterTupleImmutable = QueryParameterTupleImmutableImpl;
 
 macro_rules! parameters_impl {
     ($($name: ident),*) => {
-        impl<$($name),*> QueryParameterTuple for ($($name,)*)
-            where $($name: QueryParameter,)*
+        impl<$($name),*> QueryParameterTupleImpl for ($($name,)*)
+            where $($name: QueryParameterImpl,)*
         {
             type ValueMut<'a> = ($($name::ValueMut<'a>,)*);
             type EitherOfMut<'a> = either_of!($($name::ValueMut<'a>),*);
         }
 
-        impl<$($name),*> QueryParameterTupleImmutable for ($($name,)*)
-            where $($name: QueryParameterImmutable,)*
+        impl<$($name),*> QueryParameterTupleImmutableImpl for ($($name,)*)
+            where $($name: QueryParameterImmutableImpl,)*
         {
             type Value<'a> = ($($name::Value<'a>,)*);
             type EitherOf<'a> = either_of!($($name::Value<'a>),*);
@@ -90,13 +101,13 @@ pub struct And<P>
     _child: PhantomData<fn(P) -> P>,
 }
 
-impl<P> QueryParameter for And<P>
+impl<P> QueryParameterImpl for And<P>
     where P: QueryParameterTuple,
 {
     type ValueMut<'a> = P::ValueMut<'a>;
 }
 
-impl<P> QueryParameterImmutable for And<P>
+impl<P> QueryParameterImmutableImpl for And<P>
     where P: QueryParameterTupleImmutable,
 {
     type Value<'a> = P::Value<'a>;
@@ -109,13 +120,13 @@ pub struct Or<P>
     _child: PhantomData<fn(P) -> P>,
 }
 
-impl<P> QueryParameter for Or<P>
+impl<P> QueryParameterImpl for Or<P>
     where P: QueryParameterTuple,
 {
     type ValueMut<'a> = P::EitherOfMut<'a>;
 }
 
-impl<P> QueryParameterImmutable for Or<P>
+impl<P> QueryParameterImmutableImpl for Or<P>
     where P: QueryParameterTupleImmutable,
 {
     type Value<'a> = P::EitherOf<'a>;
