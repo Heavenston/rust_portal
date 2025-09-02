@@ -172,6 +172,17 @@ impl World {
         })
     }
 
+    /// Sets the value for the given component on the given entity, overrides
+    /// the component's value if the entity already has it.
+    pub fn set<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> Result<AddComponent<&'_ mut C>, AddComponentTypedError> {
+        let mut value = Some(component);
+        let result = self.add_with::<C, _>(entity, || value.take().expect("Took once"))?;
+        if !result.was_added {
+            *result.component_ref = value.take().expect("Took once");
+        }
+        Ok(result)
+    }
+
     pub fn remove<C>(&mut self, entity: impl Into<Entity>) -> Result<C, RemoveComponentTypedError>
         where C: Component,
     {

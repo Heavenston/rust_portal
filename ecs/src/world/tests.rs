@@ -591,4 +591,35 @@ mod drops_when_it_should {
         world.dispawn(e);
         assert_eq!(checker.load(Ordering::Relaxed), 0);
     }
+
+    #[test]
+    fn get_or_default() {
+        let mut world = World::new();
+        let e1 = world.spawn();
+        let e2 = world.spawn();
+
+        debug_assert_eq!(
+            world.get_or_default::<DefaultComponent>(e1).unwrap(),
+            AddComponent {
+                component_ref: &mut DefaultComponent("default value".into()),
+                was_added: true,
+            },
+        );
+        debug_assert_eq!(
+            world.get_or_default::<DefaultComponent>(e1).unwrap(),
+            AddComponent {
+                component_ref: &mut DefaultComponent("default value".into()),
+                was_added: false,
+            },
+        );
+
+        world.set(e2, DefaultComponent("Custom value".into())).unwrap();
+        debug_assert_eq!(
+            world.get_or_default::<DefaultComponent>(e2).unwrap(),
+            AddComponent {
+                component_ref: &mut DefaultComponent("Custom value".into()),
+                was_added: false,
+            },
+        );
+    }
 }

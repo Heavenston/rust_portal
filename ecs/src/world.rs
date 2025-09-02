@@ -89,7 +89,7 @@ pub enum OptionalComponentRef<C> {
     NoStorage,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct AddComponent<C> {
     pub component_ref: C,
     pub was_added: bool,
@@ -428,6 +428,30 @@ impl World {
         }
     }
 
+    fn get_in_table_internal(
+        &self, table_id: TableId, component: ComponentEntity, entity_index: EntityIndex,
+    ) -> Option<DynVecValueRef<'_>> {
+        let table = &self.tables[table_id];
+
+        let component_idx = table.table_components.index_of(component)?;
+        let component_ref = table.sparse_set.get(entity_index)?
+            .for_component(component_idx);
+
+        Some(component_ref)
+    }
+
+    fn get_mut_in_table_internal(
+        &mut self, table_id: TableId, component: ComponentEntity, entity_index: EntityIndex
+    ) -> Option<DynVecValueRefMut<'_>> {
+        let table = &mut self.tables[table_id];
+
+        let component_idx = table.table_components.index_of(component)?;
+        let component_ref = table.sparse_set.get_mut(entity_index)?
+            .for_component(component_idx);
+
+        Some(component_ref)
+    }
+
     pub fn has_component(&self, entity: impl Into<Entity>, component: ComponentEntity) -> HasComponent {
         let entity = entity.into();
 
@@ -474,16 +498,9 @@ impl World {
             ComponentStorageKind::Table { .. } => (),
         }
 
-        let table_id = archetyp.table_id;
-        let table = &self.tables[table_id];
-
-        let component_idx = table.table_components.index_of(component)
-            .expect("This component should be in this table");
-        let component_ref = table.sparse_set.get(entity.index())
-            .expect("Entity is in this table")
-            .for_component(component_idx);
-
-        Ok(component_ref)
+        Ok(self.get_in_table_internal(
+            archetyp.table_id, component, entity.index()
+        ).expect("Everything checked before"))
     }
 
     pub fn get_component_mut(&mut self, entity: impl Into<Entity>, component: ComponentEntity) -> Result<DynVecValueRefMut<'_>, GetComponentError> {
@@ -512,15 +529,10 @@ impl World {
         }
 
         let table_id = archetyp.table_id;
-        let table = &mut self.tables[table_id];
 
-        let component_idx = table.table_components.index_of(component)
-            .expect("This component should be in this table");
-        let component_ref = table.sparse_set.get_mut(entity.index())
-            .expect("Entity is in this table")
-            .for_component(component_idx);
-
-        Ok(component_ref)
+        Ok(self.get_mut_in_table_internal(
+            table_id, component, entity.index()
+        ).expect("Everything checked before"))
     }
 
     /// The [`input`] function must retrun an iterator with exactly one
@@ -558,15 +570,12 @@ impl World {
             };
 
             let table_id = archetyp.table_id;
-            let table = &mut self.tables[table_id];
-            let component_idx = table.table_components.index_of(component)
-                .expect("is in table");
-            let component_ref = table.sparse_set.get_mut(entity.index())
-                .expect("entity is in table")
-                .for_component(component_idx);
-
             return AddComponent {
-                component_ref: OptionalComponentRef::HasStorage(component_ref),
+                component_ref: OptionalComponentRef::HasStorage(
+                    self.get_mut_in_table_internal(
+                        table_id, component, entity.index()
+                    ).expect("Everything checked before")
+                ),
                 was_added: false,
             };
 
