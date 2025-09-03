@@ -134,7 +134,7 @@ fn dangling_with_layout(layout: Layout) -> NonNull<u8> {
 ///
 /// All fields are public for transparency and potential interop, but the private
 /// marker field prevents external construction to keep values consistent.
-#[derive( Clone)]
+#[derive(Clone)]
 pub struct DynVecMetadata {
     /// The `TypeId` of the element type.
     pub type_id: TypeId,
@@ -176,6 +176,26 @@ impl DynVecMetadata {
     /// Returns the Layout from the pointer metadata
     pub fn layout(&self) -> Layout {
         self.dyn_meta.layout()
+    }
+}
+
+impl std::fmt::Debug for DynVecMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let alternate = f.alternate();
+
+        let mut ds = f.debug_struct("DynVecMetadata");
+        ds.field("type_name", &self.type_name)
+            .field("type_id", &self.type_id)
+            .field("layout", &self.layout());
+
+        if alternate {
+            ds.field("default_fn", &self.default_fn);
+        }
+        else {
+            ds.field("has_default_fn", &self.default_fn.is_some());
+        }
+
+        ds.finish()
     }
 }
 
