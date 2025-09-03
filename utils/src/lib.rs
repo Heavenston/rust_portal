@@ -116,3 +116,27 @@ macro_rules! count_args {
         1 + $crate::count_args!($($tail),*)
     };
 }
+
+#[macro_export]
+macro_rules! count_args_literal {
+    () => { 0 };
+    ($a: tt) => { 1 };
+    ($a: tt, $b: tt) => { 2 };
+    ($a: tt, $b: tt, $c: tt) => { 3 };
+    ($a: tt, $b: tt, $c: tt, $d: tt) => { 4 };
+    ($a: tt, $b: tt, $c: tt, $d: tt, $e: tt) => { 5 };
+    ($a: tt, $b: tt, $c: tt, $d: tt, $e: tt, $f: tt) => { 6 };
+    ($a: tt, $b: tt, $c: tt, $d: tt, $e: tt, $f: tt, $g: tt) => { 7 };
+    ($a: tt, $b: tt, $c: tt, $d: tt, $e: tt, $f: tt, $g: tt, $h: tt) => { 8 };
+    ($a: tt, $b: tt, $c: tt, $d: tt, $e: tt, $f: tt, $g: tt, $h: tt, $i: tt) => { 9 };
+    ($a: tt, $b: tt, $c: tt, $d: tt, $e: tt, $f: tt, $g: tt, $h: tt, $i: tt, $j: tt) => { 10 };
+    ($a: tt, $b: tt, $c: tt, $d: tt, $e: tt, $f: tt, $g: tt, $h: tt, $i: tt, $j: tt, $k: tt) => { 11 };
+    ($a: tt, $b: tt, $c: tt, $d: tt, $e: tt, $f: tt, $g: tt, $h: tt, $i: tt, $j: tt, $k: tt, $l: tt) => { 12 };
+    ($a: tt, $b: tt, $c: tt, $d: tt, $e: tt, $f: tt, $g: tt, $h: tt, $i: tt, $j: tt, $k: tt, $l: tt, $m: tt) => { 13 };
+    ($a: tt, $b: tt, $c: tt, $d: tt, $e: tt, $f: tt, $g: tt, $h: tt, $i: tt, $j: tt, $k: tt, $l: tt, $m: tt, $n: tt) => { 14 };
+    ($a: tt, $b: tt, $c: tt, $d: tt, $e: tt, $f: tt, $g: tt, $h: tt, $i: tt, $j: tt, $k: tt, $l: tt, $m: tt, $n: tt, $o: tt) => { 15 };
+    ($a: tt, $b: tt, $c: tt, $d: tt, $e: tt, $f: tt, $g: tt, $h: tt, $i: tt, $j: tt, $k: tt, $l: tt, $m: tt, $n: tt, $o: tt, $p: tt) => { 16 };
+    ($($arg:tt),*) => {
+        compile_error! {"Too many arguments provided. Maximum is 16."}
+    };
+}

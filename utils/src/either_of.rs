@@ -1,6 +1,6 @@
 #![expect(unreachable_patterns)]
 
-use crate::count_args;
+use crate::{ count_args, count_args_literal };
 
 pub trait EitherOfN {
     const SIZE: usize;
@@ -24,7 +24,7 @@ macro_rules! impl_either_try_into {
     };
 
     ($name: ident ! $($start: ident),* ; $main: ident $(, $rest: ident)*) => {
-        impl<$($start,)* $main $(, $rest)*> EitherFor<{ count_args!($($start),*) }> for $name<$($start,)* $main $(, $rest)*> {
+        impl<$($start,)* $main $(, $rest)*> EitherFor<{ count_args_literal!($($start),*) }> for $name<$($start,)* $main $(, $rest)*> {
             type N = $main;
 
             fn either_from(value: $main) -> Self {
