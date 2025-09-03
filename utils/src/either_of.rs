@@ -59,6 +59,7 @@ macro_rules! impl_either_try_into {
 
 macro_rules! impl_either {
     ($name: ident; $($letter: ident),*) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         pub enum $name<$($letter,)*> {
             $($letter($letter)),*
         }

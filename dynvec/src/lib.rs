@@ -158,9 +158,12 @@ impl DynVecMetadata {
         let meta = std::ptr::metadata(obj);
 
         unsafe fn default_fn<T: 'static>(into: *mut u8) {
-            let maybe_default = <T as MaybeDefault>::maybe_default()
-                .expect("Should exist");
-            unsafe { (into as *mut T).write(maybe_default()) };
+            debug_assert!(<T as MaybeDefault>::maybe_default().is_some(), "This function should only be called when T: Default");
+            unsafe {
+                let maybe_default = <T as MaybeDefault>::maybe_default()
+                    .unwrap_unchecked();
+                (into as *mut T).write(maybe_default())
+            };
         }
 
         Self {

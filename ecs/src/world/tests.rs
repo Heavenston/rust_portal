@@ -176,9 +176,9 @@ mod typed_components_api {
         let e2 = world.component::<TestComponent1>();
         let e3 = world.component::<ZSTComponent>();
 
-        assert_matches!(world.component_storage(e1), Some(ComponentStorageKind::Table { has_default: true, .. }));
-        assert_matches!(world.component_storage(e2), Some(ComponentStorageKind::Table { has_default: false, .. }));
-        assert_matches!(world.component_storage(e3), Some(ComponentStorageKind::Table { has_default: true, .. }));
+        assert_matches!(world.component_storage(e1), Some(ComponentStorageKind::Table { dynvec_meta: DynVecMetadata { default_fn: Some(_), .. }, .. }));
+        assert_matches!(world.component_storage(e2), Some(ComponentStorageKind::Table { dynvec_meta: DynVecMetadata { default_fn: None, .. }, .. }));
+        assert_matches!(world.component_storage(e3), Some(ComponentStorageKind::Table { dynvec_meta: DynVecMetadata { default_fn: Some(_), .. }, .. }));
     }
 
     #[test]
@@ -811,14 +811,61 @@ mod tables_and_archetyps {
         let mut world = World::new();
         let e = world.spawn();
 
-        // let empty_archtyp = world.archtyp_for(Cow::default());
+        let empty_archetyp = world.archtyp_for(Cow::default());
         let c = world.component::<TestComponent1>();
-        // let non_empty_archtyp = world.archtyp_for(Cow::Owned([c].into_iter().collect()));
+        let non_empty_archetyp = world.archtyp_for(Cow::Owned([c].into_iter().collect()));
         
-        // assert_eq!(world.entities_archetypes[e.index()], empty_archtyp);
-        world.add(c, TestComponent1(42)).unwrap();
-        // assert_eq!(world.entities_archetypes[e.index()], non_empty_archtyp);
-        world.remove::<TestComponent1>(c).unwrap();
-        // assert_eq!(world.entities_archetypes[e.index()], empty_archtyp);
+        assert_eq!(world.entities_archetypes[e.index()], empty_archetyp);
+        world.add(e, TestComponent1(42)).unwrap();
+        assert_eq!(world.entities_archetypes[e.index()], non_empty_archetyp);
+        world.remove::<TestComponent1>(e).unwrap();
+        assert_eq!(world.entities_archetypes[e.index()], empty_archetyp);
+    }
+
+    #[test]
+    fn move_after_unregister_component() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        let empty_archetyp = world.archtyp_for(Cow::default());
+        let c = world.component::<TestComponent1>();
+        let non_empty_archetyp = world.archtyp_for(Cow::Owned([c].into_iter().collect()));
+
+        assert_eq!(world.entities_archetypes[e.index()], empty_archetyp);
+        world.add(e, TestComponent1(42)).unwrap();
+        assert_eq!(world.entities_archetypes[e.index()], non_empty_archetyp);
+        world.dispawn(c);
+        assert_eq!(world.entities_archetypes[e.index()], empty_archetyp);
+    }
+
+    #[test]
+    fn non_storage_still_split_table() {
+        trait TableOf {
+            fn table_of(&self, entity: Entity) -> TableId;
+        }
+
+        impl TableOf for World {
+            fn table_of(&self, entity: Entity) -> TableId {
+                assert!(self.alive(entity));
+                self.archetypes[self.entities_archetypes[entity.index()]].table_id
+            }
+        }
+
+        let mut world = World::new();
+        let e = world.spawn();
+        let c = world.spawn_component();
+
+        assert_matches!(world.component_storage(c), Some(ComponentStorageKind::None));
+
+        let empty_archetyp = world.archtyp_for(Cow::default());
+        let empty_table = world.archetypes[empty_archetyp].table_id;
+        let non_empty_archetyp = world.archtyp_for(Cow::Owned([c].into_iter().collect()));
+        let non_empty_table = world.archetypes[non_empty_archetyp].table_id;
+
+        assert_eq!(world.table_of(e), empty_table);
+        world.add_component(e, c).unwrap();
+        assert_eq!(world.table_of(e), non_empty_table);
+        world.remove_component(e, c).unwrap();
+        assert_eq!(world.table_of(e), empty_table);
     }
 }

@@ -1,10 +1,9 @@
 //! Implementing here [`QueryParameter`]s that modify other parameters
 
 use super::{
-    QueryParameterImpl, QueryParameterImmutableImpl,
-    QueryParameter, QueryParameterImmutable,
+    QueryParameterImpl, QueryParameterImmutableImpl, QueryParameter,
 };
-use crate::world::{ ArchetypId, World };
+use crate::world::{ ArchetypId, EntityIndex, World };
 
 use utils::prelude::*;
 use std::ops::ControlFlow;
@@ -17,9 +16,10 @@ pub struct Optional<C>
 }
 
 impl<C> QueryParameterImpl for Optional<C>
-    where C: QueryParameter,
+    where C: QueryParameterImpl,
 {
     type ValueMut<'a> = Option<C::ValueMut<'a>>;
+    type ArchetypMatch = Option<C::ArchetypMatch>;
 
     fn new(world: &World) -> Self {
         Self {
@@ -27,16 +27,45 @@ impl<C> QueryParameterImpl for Optional<C>
         }
     }
 
-    /// always matches all archtyps
-    fn match_archetyp(&self, world: &World, archtyp_id: ArchetypId) -> bool {
-        true
+    fn requires_per_entity_matching(&self) -> bool {
+        // we never need to check per entity as we always match it (but return None)
+        false
+    }
+
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Option<C::ArchetypMatch>> {
+        Some(self.child.match_archetyp(world, archetyp_id))
+    }
+
+    fn match_entity(
+        &self, world: &World,
+        archetyp_match: &Self::ArchetypMatch,
+        entity: EntityIndex,
+    ) -> bool {
+        // should not be called
+        unreachable!();
     }
 }
 
 impl<C> QueryParameterImmutableImpl for Optional<C>
-    where C: QueryParameterImmutable,
+    where C: QueryParameterImmutableImpl,
 {
     type Value<'a> = Option<C::Value<'a>>;
+
+    fn get<'s, 'a>(
+        &'s self,
+        world: &'a World,
+        archetyp_match: &Option<C::ArchetypMatch>,
+        archetyp_id: ArchetypId,
+        entity: EntityIndex,
+    ) -> Option<C::Value<'a>> {
+        let child_archetyp_match = archetyp_match.as_ref()?;
+
+        if self.child.requires_per_entity_matching() && !self.child.match_entity(world, child_archetyp_match, entity){
+            return None;
+        }
+
+        Some(self.child.get(world, child_archetyp_match, archetyp_id, entity))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -47,9 +76,10 @@ pub struct Not<C>
 }
 
 impl<C> QueryParameterImpl for Not<C>
-    where C: QueryParameter,
+    where C: QueryParameterImpl,
 {
     type ValueMut<'a> = ();
+    type ArchetypMatch = Option<C::ArchetypMatch>;
 
     fn new(world: &World) -> Self {
         Self {
@@ -57,16 +87,59 @@ impl<C> QueryParameterImpl for Not<C>
         }
     }
 
-    fn match_archetyp(&self, world: &World, archtyp_id: ArchetypId) -> bool {
-        !self.child.match_archetyp(world, archtyp_id)
+    fn requires_per_entity_matching(&self) -> bool {
+        self.child.requires_per_entity_matching()
     }
+
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Option<C::ArchetypMatch>> {
+        // We cannot make any assumption about the whole archetyp if it requires
+        // fined-grain filtering
+        if self.child.requires_per_entity_matching() {
+            Some(self.child.match_archetyp(world, archetyp_id))
+        }
+        else {
+            match self.child.match_archetyp(world, archetyp_id) {
+                // If the whole archetyp matches we can skip the whole thing
+                Some(_) => None,
+                // If it does not match we must go through it
+                None => Some(None),
+            }
+        }
+    }
+
+    fn match_entity(
+        &self,
+        world: &World,
+        archetyp_match: &Self::ArchetypMatch,
+        entity: EntityIndex,
+    ) -> bool {
+        match archetyp_match {
+            Some(child_match) => !self.child.match_entity(world, child_match, entity),
+            // the child did not match the whole archetyp so the whole archtyp matches
+            None => true,
+        }
+    }
+
+    // fn match_archetyp(&self, world: &World, archtyp_id: ArchetypId) -> bool {
+    //     !self.child.match_archetyp(world, archtyp_id)
+    // }
 }
 
 // Always immutable event with mutable parameter (the value is dropped)
 impl<C> QueryParameterImmutableImpl for Not<C>
-    where C: QueryParameter,
+    where C: QueryParameterImpl,
 {
     type Value<'a> = ();
+
+    fn get<'s, 'a>(
+        &'s self,
+        world: &'a World,
+        archetyp_match: &Self::ArchetypMatch,
+        archetyp_id: ArchetypId,
+        entity: EntityIndex,
+    ) -> Self::Value<'a> {
+        todo!()
+    }
 }
 
 mod private {
@@ -85,8 +158,8 @@ mod private {
     }
 
     pub trait QueryParameterTupleImmutableImpl: QueryParameterTupleImpl {
-        type Value<'a>;
-        type EitherOf<'a>: EitherOfN;
+        type Value<'a>: Copy;
+        type EitherOf<'a>: Copy + EitherOfN;
     }
 }
 use private::{ QueryParameterVisiter, QueryParameterTupleImpl, QueryParameterTupleImmutableImpl };
@@ -161,30 +234,30 @@ impl<Tuple> QueryParameterImpl for And<Tuple>
         }
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> bool {
-        struct Reducer<'a> {
-            world: &'a World,
-            archetyp_id: ArchetypId,
-            matches: bool,
-        }
+    // fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> bool {
+    //     struct Reducer<'a> {
+    //         world: &'a World,
+    //         archetyp_id: ArchetypId,
+    //         matches: bool,
+    //     }
 
-        impl<'a> QueryParameterVisiter for Reducer<'a> {
-            fn reduce(&mut self, current: &impl QueryParameter) -> ControlFlow<()> {
-                self.matches = self.matches && current.match_archetyp(self.world, self.archetyp_id);
+    //     impl<'a> QueryParameterVisiter for Reducer<'a> {
+    //         fn reduce(&mut self, current: &impl QueryParameter) -> ControlFlow<()> {
+    //             self.matches = self.matches && current.match_archetyp(self.world, self.archetyp_id);
 
-                if self.matches {
-                    ControlFlow::Continue(())
-                }
-                else {
-                    ControlFlow::Break(())
-                }
-            }
-        }
+    //             if self.matches {
+    //                 ControlFlow::Continue(())
+    //             }
+    //             else {
+    //                 ControlFlow::Break(())
+    //             }
+    //         }
+    //     }
 
-        let mut reducer = Reducer { world, archetyp_id, matches: true };
-        self.tuple.reduce(&mut reducer);
-        reducer.matches
-    }
+    //     let mut reducer = Reducer { world, archetyp_id, matches: true };
+    //     self.tuple.reduce(&mut reducer);
+    //     reducer.matches
+    // }
 }
 
 impl<Tuple> QueryParameterImmutableImpl for And<Tuple>
@@ -211,30 +284,30 @@ impl<Tuple> QueryParameterImpl for Or<Tuple>
         }
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> bool {
-        struct Reducer<'a> {
-            world: &'a World,
-            archetyp_id: ArchetypId,
-            matches: bool,
-        }
+    // fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> bool {
+    //     struct Reducer<'a> {
+    //         world: &'a World,
+    //         archetyp_id: ArchetypId,
+    //         matches: bool,
+    //     }
 
-        impl<'a> QueryParameterVisiter for Reducer<'a> {
-            fn reduce(&mut self, current: &impl QueryParameter) -> ControlFlow<()> {
-                self.matches = self.matches && current.match_archetyp(self.world, self.archetyp_id);
+    //     impl<'a> QueryParameterVisiter for Reducer<'a> {
+    //         fn reduce(&mut self, current: &impl QueryParameter) -> ControlFlow<()> {
+    //             self.matches = self.matches && current.match_archetyp(self.world, self.archetyp_id);
 
-                if self.matches {
-                    ControlFlow::Continue(())
-                }
-                else {
-                    ControlFlow::Break(())
-                }
-            }
-        }
+    //             if self.matches {
+    //                 ControlFlow::Continue(())
+    //             }
+    //             else {
+    //                 ControlFlow::Break(())
+    //             }
+    //         }
+    //     }
 
-        let mut reducer = Reducer { world, archetyp_id, matches: true };
-        self.tuple.reduce(&mut reducer);
-        reducer.matches
-    }
+    //     let mut reducer = Reducer { world, archetyp_id, matches: true };
+    //     self.tuple.reduce(&mut reducer);
+    //     reducer.matches
+    // }
 }
 
 impl<Tuple> QueryParameterImmutableImpl for Or<Tuple>

@@ -39,8 +39,19 @@ impl<T> BitSet<T>
     where T: BitSetIndex,
 {
     #[inline]
-    pub fn new() -> Self {
-        Self::default()
+    pub const fn new() -> Self {
+        Self {
+            _type: PhantomData,
+            words: SmallVec::new_const(),
+        }
+    }
+
+    pub fn from_array<const N: usize>(vals: [T; N]) -> Self {
+        vals.into_iter().collect()
+    }
+
+    pub fn from_slice(vals: &[T]) -> Self {
+        vals.iter().copied().collect()
     }
 
     #[inline]
@@ -171,6 +182,24 @@ impl<T> Debug for BitSet<T>
                     .finish()
             })
             .finish()
+    }
+}
+
+impl<I: BitSetIndex> FromIterator<I> for BitSet<I> {
+    fn from_iter<T: IntoIterator<Item = I>>(iter: T) -> Self {
+        let mut result = Self::new();
+        for val in iter {
+            result.insert(val);
+        }
+        result
+    }
+}
+
+impl<I: BitSetIndex> Extend<I> for BitSet<I> {
+    fn extend<T: IntoIterator<Item = I>>(&mut self, iter: T) {
+        for val in iter {
+            self.insert(val);
+        }
     }
 }
 

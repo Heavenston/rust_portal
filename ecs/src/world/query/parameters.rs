@@ -1,6 +1,7 @@
 use super::{ QueryParameterImpl, QueryParameterImmutableImpl };
 use crate::world::{
-    component::{ Component, ComponentEntity }, ArchetypId, World
+    component::{ Component, ComponentEntity },
+    World
 };
 
 use std::marker::PhantomData;
@@ -18,6 +19,7 @@ impl<C> QueryParameterImpl for Ref<C>
     where C: Component,
 {
     type ValueMut<'a> = &'a C;
+    type ArchetypMatch = ();
 
     fn new(world: &World) -> Self {
         Self {
@@ -26,11 +28,28 @@ impl<C> QueryParameterImpl for Ref<C>
         }
     }
 
-    fn match_archetyp(&self, world: &World, archtyp_id: ArchetypId) -> bool {
-        self.component.is_some_and(|component|
-            world.archetypes[archtyp_id].components.has(component)
-        )
+    fn requires_per_entity_matching(&self) -> bool {
+        todo!()
     }
+
+    fn match_archetyp(&self, world: &World, archetyp_id: crate::world::ids::ArchetypId) -> Option<Self::ArchetypMatch> {
+        todo!()
+    }
+
+    fn match_entity(
+        &self,
+        world: &World,
+        archetyp_match: &Self::ArchetypMatch,
+        entity: crate::world::EntityIndex,
+    ) -> bool {
+        todo!()
+    }
+
+    // fn match_archetyp(&self, world: &World, archtyp_id: ArchetypId) -> bool {
+    //     self.component.is_some_and(|component|
+    //         world.archetypes[archtyp_id].components.has(component)
+    //     )
+    // }
 }
 
 impl<C> QueryParameterImmutableImpl for Ref<C>
@@ -59,11 +78,11 @@ impl<C> QueryParameterImpl for RefMut<C>
         }
     }
 
-    fn match_archetyp(&self, world: &World, archtyp_id: ArchetypId) -> bool {
-        self.component.is_some_and(|component|
-            world.archetypes[archtyp_id].components.has(component)
-        )
-    }
+    // fn match_archetyp(&self, world: &World, archtyp_id: ArchetypId) -> bool {
+    //     self.component.is_some_and(|component|
+    //         world.archetypes[archtyp_id].components.has(component)
+    //     )
+    // }
 }
 
 #[derive_where(Debug, Clone, Copy)]
@@ -86,11 +105,11 @@ impl<C> QueryParameterImpl for Has<C>
         }
     }
 
-    fn match_archetyp(&self, world: &World, archtyp_id: ArchetypId) -> bool {
-        self.component.is_some_and(|component|
-            world.archetypes[archtyp_id].components.has(component)
-        )
-    }
+    // fn match_archetyp(&self, world: &World, archtyp_id: ArchetypId) -> bool {
+    //     self.component.is_some_and(|component|
+    //         world.archetypes[archtyp_id].components.has(component)
+    //     )
+    // }
 }
 
 impl<C> QueryParameterImmutableImpl for Has<C>

@@ -13,16 +13,13 @@ mod bundle;
 pub use bundle::*;
 
 use crate::{
-    dyn_option::{DynOption, FunDynOption},
+    dyn_option::FunDynOption,
     index_map::IndexMap,
     sparse_set::SparseSet, world_utils::GetComponentTypedError,
 };
 
 use std::{
-    any::{Any, TypeId},
-    borrow::Cow,
-    collections::HashMap,
-    iter::{ empty, once },
+    any::{Any, TypeId}, assert_matches::debug_assert_matches, borrow::Cow, collections::HashMap, iter::{ empty, once }
 };
 use utils::prelude::*;
 use derive_more::{ IsVariant };
@@ -58,6 +55,12 @@ macro_rules! create_id {
                 Ok(usize::try_from(from.0)?)
             }
         }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}({})", stringify!($name), self.0)
+            }
+        }
     };
 }
 
@@ -69,6 +72,7 @@ use ids::{ ArchetypId, TableId };
 
 #[derive(Default, Debug, Clone)]
 struct Archetyp {
+    entities: BitSet<EntityIndex>,
     components: ComponentSet,
     /// Table used for storing the table components of this archetyp.
     /// Multiple Archtyps could point to the same tables if they have the same
@@ -78,6 +82,10 @@ struct Archetyp {
 
 #[derive(Default, Debug)]
 struct Table {
+    /// NOTE: This is a subset of the components used to find this table,
+    /// as only components that have table storage are stored in this set
+    /// but components that have no storage or are stored in sparse sets
+    /// may still 'fragment' tables.
     table_components: ComponentSet,
     sparse_set: SparseSet<ComponentDenseStorage>,
 }
@@ -115,16 +123,16 @@ impl HasComponent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+#[derive(Debug, Clone, IsVariant)]
 pub enum ComponentStorageKind {
     /// The component has no storage and thus is stored nowhere
     None,
     /// The component has table storage and thus is stoired alongside
-    /// other components with table storage for each archetyp
+    /// other components with table storage for each archetyp.
+    ///
+    /// This is the only storage kind that always fragment tables
     Table {
-        type_id: TypeId,
-        type_name: &'static str,
-        has_default: bool,
+        dynvec_meta: DynVecMetadata,
     },
     // TODO
     // Sparse,
@@ -228,6 +236,10 @@ pub struct World {
     components_typeid_to_entity: HashMap<TypeId, ComponentEntity>,
     components_entity_to_typeid: HashMap<ComponentEntity, TypeId>,
     components_set_to_archetyp: HashMap<ComponentSet, ArchetypId>,
+    /// The [`ComponentSet`] used as keys must only be components that
+    /// fragments tables, and may contain components that do not have table
+    /// storage, thus this is not the same as the corresponding
+    /// [`Table::table_components`]
     components_set_to_table: HashMap<ComponentSet, TableId>,
 }
 
@@ -255,38 +267,9 @@ impl World {
                 .sparse_set.insert(reserved.index(), empty::<ComponentDenseStorageInput>());
         }
 
-        // Hard-code the first table for the ComponentComponent's component entity
-        let cc_entity = this.entity_storage.take_next_reserved()
-            .unwrap_or_else(|| this.entity_storage.spawn());
-        let cc_entity = ComponentEntity(cc_entity);
-        this.components_typeid_to_entity.insert(TypeId::of::<ComponentStorageComponent>(), cc_entity);
-        this.components_entity_to_typeid.insert(cc_entity, TypeId::of::<ComponentStorageComponent>());
-
-        let cc_set = EntitySet::from(&[cc_entity][..]);
-        let cc_table_id = this.tables.push(Table {
-            table_components: cc_set.clone(),
-            sparse_set: SparseSet::new(ComponentDenseStorage::new(
-                vec![DynVec::new::<ComponentStorageComponent>()]
-                    .into_boxed_slice()
-            )),
-        });
-        this.components_set_to_table.insert(cc_set.clone(), cc_table_id);
-
-        let cc_archetype_id = this.archetypes.push(Archetyp {
-            components: cc_set.clone(),
-            table_id: cc_table_id,
-        });
-        this.components_set_to_archetyp.insert(cc_set.clone(), cc_archetype_id);
-
-        // Move the entity from the empty table to the ComponentComponent table and seed its own ComponentComponent
-        let empty_table_id = this.archetypes[empty_archetyp].table_id;
-        let _ = this.tables[empty_table_id].sparse_set.remove(cc_entity.index());
-        this.entities_archetypes.set_or_push(cc_entity.index(), cc_archetype_id);
-        this.tables[cc_table_id].sparse_set.insert(cc_entity.index(), vec![
-            &mut Some(ComponentStorageComponent {
-                dynvec_meta: DynVecMetadata::new::<ComponentStorageComponent>(),
-            }) as &mut dyn DynOption
-        ]);
+        // Register this component first as it is required in the code paths
+        // for other components
+        this.component::<ComponentStorageComponent>();
 
         this
     }
@@ -383,20 +366,18 @@ impl World {
 
     pub fn component_storage(&self, component: ComponentEntity) -> Option<ComponentStorageKind> {
         // fixes infinite recursion
+        // NOTE: This does not mean the component entity for ComponentStorageComponent
+        // does not have itself as component.
         if component == self.components_typeid_to_entity[&TypeId::of::<ComponentStorageComponent>()] {
             return Some(ComponentStorageKind::Table {
-                has_default: false,
-                type_id: TypeId::of::<ComponentStorageComponent>(),
-                type_name: std::any::type_name::<ComponentStorageComponent>(),
+                dynvec_meta: DynVecMetadata::new::<ComponentStorageComponent>(),
             });
         }
 
         match self.get::<ComponentStorageComponent>(component) {
             Ok(storage)
                 => Some(ComponentStorageKind::Table {
-                    has_default: storage.dynvec_meta.default_fn.is_some(),
-                    type_id: storage.dynvec_meta.type_id,
-                    type_name: storage.dynvec_meta.type_name,
+                    dynvec_meta: storage.dynvec_meta.clone(),
                 }),
             Err(GetComponentTypedError::EntityIsNotAlive { .. })
                 => None,
@@ -407,33 +388,44 @@ impl World {
         }
     }
 
-    fn table_for(&mut self, table_components: Cow<'_, ComponentSet>) -> TableId {
+    /// Dummy function for now just to mark everywhere this will change things
+    fn component_fragments_tables(&self, component: ComponentEntity) -> bool {
+        let _ = component;
+        true
+    }
+
+    fn table_for(&mut self, components: Cow<'_, ComponentSet>) -> TableId {
         debug_assert!(
-            table_components.iter()
-                .map(|comp| self.component_storage(comp))
-                .all(|storage| storage.is_some_and(|storage| storage.is_table())),
-            "Components given to table_for should all be table components"
+            components.iter()
+                .all(|comp| self.component_fragments_tables(comp)),
+            "Components given to table_for should all fragment tables"
         );
-        match self.components_set_to_table.get(table_components.as_ref()) {
+        match self.components_set_to_table.get(components.as_ref()) {
             Some(&table_id) => table_id,
             None => {
-                let comp_set = table_components.into_owned();
+                let components = components.into_owned();
+                let table_components: ComponentSet = components.iter()
+                    .filter(|&comp| {
+                        self.component_storage(comp)
+                            .is_some_and(|storage| storage.is_table())
+                    })
+                    .collect();
                 let table_id = self.tables.push(Table {
-                    table_components: comp_set.clone(),
+                    table_components: table_components.clone(),
                     sparse_set: SparseSet::new(ComponentDenseStorage::new(
-                        comp_set.iter()
+                        table_components.iter()
                             .map(|component| {
-                                let component_metadata = self.get::<ComponentStorageComponent>(component)
-                                    .expect("Entity is component");
+                                let Some(ComponentStorageKind::Table { dynvec_meta }) = self.component_storage(component)
+                                else { unreachable!("Filtered before"); };
 
-                                DynVec::new_with_meta(component_metadata.dynvec_meta.clone())
+                                DynVec::new_with_meta(dynvec_meta)
                             })
                             .collect::<Vec<_>>()
                             .into_boxed_slice()
                     )),
                 });
 
-                self.components_set_to_table.insert(comp_set, table_id);
+                self.components_set_to_table.insert(components, table_id);
 
                 table_id
             },
@@ -453,6 +445,7 @@ impl World {
                     .collect();
                 let table_id = self.table_for(Cow::Borrowed(&table_components));
                 let archetyp_id = self.archetypes.push(Archetyp {
+                    entities: BitSet::new(),
                     components: component_set.clone(),
                     table_id,
                 });
@@ -466,26 +459,34 @@ impl World {
 
     fn get_in_table_internal(
         &self, table_id: TableId, component: ComponentEntity, entity_index: EntityIndex,
-    ) -> Option<DynVecValueRef<'_>> {
+    ) -> DynVecValueRef<'_> {
+        debug_assert_matches!(self.component_storage(component), Some(ComponentStorageKind::Table { .. }));
+
         let table = &self.tables[table_id];
 
-        let component_idx = table.table_components.index_of(component)?;
-        let component_ref = table.sparse_set.get(entity_index)?
+        let component_idx = table.table_components.index_of(component)
+            .expect("Tried to get component in table where it is not present");
+        let component_ref = table.sparse_set.get(entity_index)
+            .expect("Tried to get an entity's component in a table where it is not present")
             .for_component(component_idx);
 
-        Some(component_ref)
+        component_ref
     }
 
     fn get_mut_in_table_internal(
         &mut self, table_id: TableId, component: ComponentEntity, entity_index: EntityIndex
-    ) -> Option<DynVecValueRefMut<'_>> {
+    ) -> DynVecValueRefMut<'_> {
+        debug_assert_matches!(self.component_storage(component), Some(ComponentStorageKind::Table { .. }));
+
         let table = &mut self.tables[table_id];
 
-        let component_idx = table.table_components.index_of(component)?;
-        let component_ref = table.sparse_set.get_mut(entity_index)?
+        let component_idx = table.table_components.index_of(component)
+            .expect("Tried to get component in table where it is not present");
+        let component_ref = table.sparse_set.get_mut(entity_index)
+            .expect("Tried to get an entity's component in a table where it is not present")
             .for_component(component_idx);
 
-        Some(component_ref)
+        component_ref
     }
 
     pub fn has_component(&self, entity: impl Into<Entity>, component: ComponentEntity) -> HasComponent {
@@ -536,7 +537,7 @@ impl World {
 
         Ok(self.get_in_table_internal(
             archetyp.table_id, component, entity.index()
-        ).expect("Everything checked before"))
+        ))
     }
 
     pub fn get_component_mut(&mut self, entity: impl Into<Entity>, component: ComponentEntity) -> Result<DynVecValueRefMut<'_>, GetComponentError> {
@@ -568,7 +569,7 @@ impl World {
 
         Ok(self.get_mut_in_table_internal(
             table_id, component, entity.index()
-        ).expect("Everything checked before"))
+        ))
     }
 
     /// The [`input`] function must retrun an iterator with exactly one
@@ -589,7 +590,8 @@ impl World {
         // things that should be checked before calling this function
         debug_assert!(self.alive(entity));
         debug_assert!(self.alive(component));
-        debug_assert_eq!(self.component_storage(component), Some(component_storage));
+        // In theory (it does not implement Eq)
+        // debug_assert_eq!(self.component_storage(component), Some(component_storage));
 
         let archetyp_id = self.entities_archetypes[entity.index()];
         let archetyp = &mut self.archetypes[archetyp_id];
@@ -607,7 +609,7 @@ impl World {
                 component_ref: OptionalComponentRef::HasStorage(
                     self.get_mut_in_table_internal(
                         table_id, component, entity.index()
-                    ).expect("Everything checked before")
+                    )
                 ),
                 was_added: false,
             };
@@ -618,11 +620,19 @@ impl World {
 
         let (new_component_idx, new_component_set) = archetyp.components.clone().with(component);
         let old_archetyp_id = self.entities_archetypes[entity.index()];
-        let old_table_id = self.archetypes[old_archetyp_id].table_id;
-        let new_archtyp_id = self.archtyp_for(Cow::Borrowed(&new_component_set));
-        let new_table_id = self.archetypes[new_archtyp_id].table_id;
+        let old_archetyp = &mut self.archetypes[old_archetyp_id];
 
+        old_archetyp.entities.remove(entity.index());
+        
+        let old_table_id = self.archetypes[old_archetyp_id].table_id;
+
+        let new_archtyp_id = self.archtyp_for(Cow::Borrowed(&new_component_set));
+        let new_archtyp = &mut self.archetypes[new_archtyp_id];
+
+        new_archtyp.entities.insert(entity.index());
         self.entities_archetypes[entity.index()] = new_archtyp_id;
+
+        let new_table_id = self.archetypes[new_archtyp_id].table_id;
 
         match component_storage {
             ComponentStorageKind::None => {
@@ -679,9 +689,9 @@ impl World {
         let component_storage = self.component_storage(component).expect("Entity is alive");
         match component_storage {
             ComponentStorageKind::None |
-            ComponentStorageKind::Table { has_default: true, .. } => (),
+            ComponentStorageKind::Table { dynvec_meta: DynVecMetadata { default_fn: Some(_), .. }, .. } => (),
 
-            ComponentStorageKind::Table { has_default: false, .. } => {
+            ComponentStorageKind::Table { dynvec_meta: DynVecMetadata { default_fn: None, .. }, .. } => {
                 return Err(AddComponentError::ComponentNeedsValue { component });
             },
         }
@@ -715,7 +725,7 @@ impl World {
                     component,
                 }),
             ComponentStorageKind::Table {
-                type_id, type_name: expected, ..
+                dynvec_meta: DynVecMetadata { type_id, type_name: expected, .. }, ..
             } if type_id != TypeId::of::<V>() =>
                 return Err(AddComponentWithError::TypeMismatched {
                     component,
@@ -779,11 +789,19 @@ impl World {
         else { unreachable!("Component is inside the set") };
 
         let old_archetyp_id = self.entities_archetypes[entity.index()];
-        let old_table_id = self.archetypes[old_archetyp_id].table_id;
-        let new_archtyp_id = self.archtyp_for(Cow::Borrowed(&new_component_set));
-        let new_table_id = self.archetypes[new_archtyp_id].table_id;
+        let old_archetyp = &mut self.archetypes[old_archetyp_id];
 
+        old_archetyp.entities.remove(entity.index());
+        
+        let old_table_id = self.archetypes[old_archetyp_id].table_id;
+
+        let new_archtyp_id = self.archtyp_for(Cow::Borrowed(&new_component_set));
+        let new_archtyp = &mut self.archetypes[new_archtyp_id];
+
+        new_archtyp.entities.insert(entity.index());
         self.entities_archetypes[entity.index()] = new_archtyp_id;
+        
+        let new_table_id = self.archetypes[new_archtyp_id].table_id;
 
         match component_storage {
             ComponentStorageKind::None => {
