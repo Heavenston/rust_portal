@@ -5,6 +5,7 @@
 #![feature(macro_metavar_expr)]
 #![feature(debug_closure_helpers)]
 #![feature(specialization)]
+#![feature(assert_matches)]
 
 #![expect(internal_features)]
 #![expect(incomplete_features)]
@@ -32,6 +33,7 @@ pub mod prelude {
         either_of, either_of::*,
         bitset::{ BitSetIndex, BitSet },
         maybe_default::{ MaybeDefault },
+        tuple_trait,
     };
 }
 
@@ -57,6 +59,7 @@ pub mod assert_length;
 pub mod either_of;
 pub mod bitset;
 pub mod maybe_default;
+pub mod tuple_trait;
 
 use std::hash::{ DefaultHasher, Hash, Hasher };
 

@@ -18,6 +18,10 @@ pub trait EitherFor<const IDX: usize> {
     fn either_for_into(self) -> Option<Self::N>;
 }
 
+macro_rules! ignore {
+    ($i: ident, $b: ident) => { $b };
+}
+
 macro_rules! impl_either_try_into {
     ($name: ident ! $($start: ident),* ; ) => {
         
@@ -64,6 +68,16 @@ macro_rules! impl_either {
             $($letter($letter)),*
         }
 
+        impl<S> $name<$(ignore!($letter, S)),*> {
+            pub fn into_inner(self) -> S {
+                match self {
+                    $(
+                        Self::$letter(val) => val,
+                    )*
+                }
+            }
+        }
+
         impl<$($letter,)*> EitherOfN for $name<$($letter,)*> {
             const SIZE: usize = count_args!($($letter,)*);
 
@@ -81,7 +95,8 @@ macro_rules! impl_either {
 
 }
 
-impl_either!(EitherOf0 ; );
+// FIXME
+// impl_either!(EitherOf0 ; );
 impl_either!(EitherOf1 ; A);
 impl_either!(EitherOf2 ; A, B);
 impl_either!(EitherOf3 ; A, B, C);
@@ -102,23 +117,23 @@ impl_either!(EitherOf16; A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P);
 #[macro_export]
 macro_rules! either_of {
     () => { EitherOf0 };
-    ($a:ty) => { EitherOf1<$a> };
-    ($a:ty, $b:ty) => { EitherOf2<$a, $b> };
-    ($a:ty, $b:ty, $c:ty) => { EitherOf3<$a, $b, $c> };
-    ($a:ty, $b:ty, $c:ty, $d:ty) => { EitherOf4<$a, $b, $c, $d> };
-    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty) => { EitherOf5<$a, $b, $c, $d, $e> };
-    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty) => { EitherOf6<$a, $b, $c, $d, $e, $f> };
-    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty) => { EitherOf7<$a, $b, $c, $d, $e, $f, $g> };
-    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty) => { EitherOf8<$a, $b, $c, $d, $e, $f, $g, $h> };
-    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty) => { EitherOf9<$a, $b, $c, $d, $e, $f, $g, $h, $i> };
-    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty, $j:ty) => { EitherOf10<$a, $b, $c, $d, $e, $f, $g, $h, $i, $j> };
-    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty, $j:ty, $k:ty) => { EitherOf11<$a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k> };
-    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty, $j:ty, $k:ty, $l:ty) => { EitherOf12<$a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k, $l> };
-    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty, $j:ty, $k:ty, $l:ty, $m:ty) => { EitherOf13<$a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k, $l, $m> };
-    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty, $j:ty, $k:ty, $l:ty, $m:ty, $n:ty) => { EitherOf14<$a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k, $l, $m, $n> };
-    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty, $j:ty, $k:ty, $l:ty, $m:ty, $n:ty, $o:ty) => { EitherOf15<$a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k, $l, $m, $n, $o> };
+    ($a:ty) => { $crate::either_of::EitherOf1<$a> };
+    ($a:ty, $b:ty) => { $crate::either_of::EitherOf2<$a, $b> };
+    ($a:ty, $b:ty, $c:ty) => { $crate::either_of::EitherOf3<$a, $b, $c> };
+    ($a:ty, $b:ty, $c:ty, $d:ty) => { $crate::either_of::EitherOf4<$a, $b, $c, $d> };
+    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty) => { $crate::either_of::EitherOf5<$a, $b, $c, $d, $e> };
+    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty) => { $crate::either_of::EitherOf6<$a, $b, $c, $d, $e, $f> };
+    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty) => { $crate::either_of::EitherOf7<$a, $b, $c, $d, $e, $f, $g> };
+    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty) => { $crate::either_of::EitherOf8<$a, $b, $c, $d, $e, $f, $g, $h> };
+    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty) => { $crate::either_of::EitherOf9<$a, $b, $c, $d, $e, $f, $g, $h, $i> };
+    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty, $j:ty) => { $crate::either_of::EitherOf10<$a, $b, $c, $d, $e, $f, $g, $h, $i, $j> };
+    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty, $j:ty, $k:ty) => { $crate::either_of::EitherOf11<$a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k> };
+    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty, $j:ty, $k:ty, $l:ty) => { $crate::either_of::EitherOf12<$a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k, $l> };
+    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty, $j:ty, $k:ty, $l:ty, $m:ty) => { $crate::either_of::EitherOf13<$a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k, $l, $m> };
+    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty, $j:ty, $k:ty, $l:ty, $m:ty, $n:ty) => { $crate::either_of::EitherOf14<$a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k, $l, $m, $n> };
+    ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty, $j:ty, $k:ty, $l:ty, $m:ty, $n:ty, $o:ty) => { $crate::either_of::EitherOf15<$a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k, $l, $m, $n, $o> };
     ($a:ty, $b:ty, $c:ty, $d:ty, $e:ty, $f:ty, $g:ty, $h:ty, $i:ty, $j:ty, $k:ty, $l:ty, $m:ty, $n:ty, $o:ty, $p:ty) => {
-        EitherOf16<$a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k, $l, $m, $n, $o, $p>
+        $crate::either_of::EitherOf16<$a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k, $l, $m, $n, $o, $p>
     };
     ($($args: ty),*) => { compile_error!("EitherOfN only goes up to 16") };
 }
