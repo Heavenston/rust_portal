@@ -575,15 +575,13 @@ impl World {
     /// will be a panic internally.
     // TODO: Be able to insert mutliple components at once, what would be the
     // best api for this ? (something like bevy's bundles I guess)
-    fn add_component_internal<'a, 'b, O>(
+    fn add_component_internal<'a, 'b>(
         &'a mut self,
         entity: Entity,
         component_storage: ComponentStorageKind,
         component: ComponentEntity,
-        input: O,
-    ) -> AddComponent<OptionalComponentRef<DynVecValueRefMut<'a>>>
-        where O: Iterator<Item = ComponentDenseStorageInput<'a, 'b>>,
-    {
+        input: ComponentDenseStorageInput<'a, 'b>,
+    ) -> AddComponent<OptionalComponentRef<DynVecValueRefMut<'a>>> {
         // things that should be checked before calling this function
         debug_assert!(self.alive(entity));
         debug_assert!(self.alive(component));
@@ -637,19 +635,11 @@ impl World {
             old_table_id, new_table_id,
         ]).expect("Old table and new table are not equal");
 
-        #[cfg(debug_assertions)]
-        let input_additional_iterator = input
-            .assert_length(|length| assert_eq!(length, 1,
-                "When inserting a component only a single value should be provided through the iterator"
-            ));
-        #[cfg(not(debug_assertions))]
-        let input_additional_iterator = input;
-
         let components = old_table.sparse_set.remove(entity.index())
             .expect("Entity is in table")
             .map(ComponentDenseStorageInput::DynVecValue)
             // inserts the component into the list at its index
-            .chain_after(new_component_idx, input_additional_iterator);
+            .chain_after(new_component_idx, once(input));
         new_table.sparse_set.insert(entity.index(), components);
 
         let r#ref = new_table.sparse_set.get_mut(entity.index())
@@ -690,7 +680,7 @@ impl World {
 
         Ok(self.add_component_internal(
             entity, component_storage, component,
-            once(ComponentDenseStorageInput::Default),
+            ComponentDenseStorageInput::Default,
         ))
     }
 
@@ -728,9 +718,10 @@ impl World {
         }
 
         let mut fun_dyn_option = FunDynOption::new(f);
-        let input = once(ComponentDenseStorageInput::DynOption(&mut fun_dyn_option));
-
-        let result = self.add_component_internal(entity, component_storage, component, input);
+        let result = self.add_component_internal(
+            entity, component_storage, component,
+            ComponentDenseStorageInput::DynOption(&mut fun_dyn_option),
+        );
 
         Ok(AddComponent {
             component_ref: match result.component_ref {
