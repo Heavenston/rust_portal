@@ -62,6 +62,10 @@ pub enum RemoveComponentTypedError {
         type_name: &'static str,
         entity: Entity,
     },
+    #[error("Removing this component from this entity is forbidden by the implementation: {reason}")]
+    Forbidden {
+        reason: &'static str,
+    },
 }
 
 impl World {
@@ -197,12 +201,13 @@ impl World {
 
             Err(RemoveComponentError::ComponentIsNotAlive { component: _ }) =>
                 unreachable!("World::try_component should not return a dead entity"),
-
             Err(RemoveComponentError::ComponentNotPresent { component: _, entity }) =>
                 Err(RemoveComponentTypedError::ComponentNotPresent {
                     type_name: type_name::<C>(),
                     entity,
                 }),
+            Err(RemoveComponentError::Forbidden { reason }) =>
+                Err(RemoveComponentTypedError::Forbidden { reason }),
         }
     }
 }

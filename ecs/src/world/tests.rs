@@ -6,6 +6,7 @@ use crate::world::{
 };
 use crate::world_utils::{
     HasComponentTyped,
+    RemoveComponentTypedError,
 };
 
 use std::any::TypeId;
@@ -393,7 +394,7 @@ mod torturing_components {
         // like that
         assert_matches!(
             world.remove::<ComponentStorageComponent>(c),
-            Err(_)
+            Err(RemoveComponentTypedError::Forbidden { reason: _ })
         );
 
         world.add(e, TestComponent1(42)).unwrap();
@@ -456,14 +457,27 @@ mod torturing_components {
     #[test]
     fn removing_storage_component_on_custom_component_before_usage() {
         let mut world = World::new();
-        let e = world.spawn();
+        let c = world.spawn_component();
 
-        world.add(e, ComponentStorageComponent {
-            dynvec_meta: DynVecMetadata::new::<u32>(),
+        world.add(c, ComponentStorageComponent {
+            dynvec_meta: DynVecMetadata::new::<TestComponent1>(),
         }).unwrap();
 
         // Should be allowed because nobody uses the storage of this entity
-        world.remove::<ComponentStorageComponent>(e).unwrap();
+        world.remove::<ComponentStorageComponent>(c).unwrap();
+
+        let e = world.spawn();
+
+        // can still use the component, it has no storage
+
+        assert!(matches!(
+            world.add_component(e, c).unwrap(),
+            AddComponent { component_ref: OptionalComponentRef::NoStorage, was_added: true },
+        ));
+        assert!(matches!(
+            world.get_component(e, c),
+            Err(GetComponentError::ComponentHasNoStorage { .. }),
+        ));
     }
 
     #[test]
@@ -487,6 +501,7 @@ mod torturing_components {
         assert_eq!(drops.load(Ordering::Relaxed), 1);
         assert_eq!(world.has_component(e, c), HasComponent::Present);
         assert!(matches!(world.get_component(e, c), Err(GetComponentError::ComponentHasNoStorage { .. })));
+        assert_eq!(world.try_component::<DropCheckComponent>(), None);
     }
 }
 

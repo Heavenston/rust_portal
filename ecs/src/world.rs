@@ -207,6 +207,10 @@ pub enum RemoveComponentError {
         component: ComponentEntity,
         entity: Entity,
     },
+    #[error("Removing this component from this entity is forbidden by the implementation: {reason}")]
+    Forbidden {
+        reason: &'static str,
+    },
 }
 
 #[derive(Debug)]
@@ -623,6 +627,10 @@ impl World {
         match component_storage {
             ComponentStorageKind::None => {
                 debug_assert_eq!(old_table_id, new_table_id);
+                debug_assert!(
+                    matches!(input, ComponentDenseStorageInput::Default),
+                    "No need to actually provide a value",
+                );
                 return AddComponent {
                     component_ref: OptionalComponentRef::NoStorage,
                     was_added: true,
@@ -750,7 +758,13 @@ impl World {
         };
 
         if component == self.components_typeid_to_entity[&TypeId::of::<ComponentStorageComponent>()] {
-            todo!();
+            if self.components_entity_to_typeid.contains_key(&ComponentEntity(entity)) {
+                return Err(RemoveComponentError::Forbidden {
+                    reason: "Cannot remove the componentStorageComponent from an internal component entity.",
+                });
+            }
+
+            todo!("Remove the storage from all tables");
         }
 
         let archetyp_id = self.entities_archetypes[entity.index()];
