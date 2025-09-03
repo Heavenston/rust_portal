@@ -5,6 +5,7 @@
 #![feature(macro_metavar_expr)]
 #![feature(assert_matches)]
 #![feature(trait_alias)]
+#![feature(debug_closure_helpers)]
 
 pub mod sparse_set;
 mod world_utils;

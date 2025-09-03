@@ -175,9 +175,9 @@ mod typed_components_api {
         let e2 = world.component::<TestComponent1>();
         let e3 = world.component::<ZSTComponent>();
 
-        assert_eq!(world.component_storage(e1), Some(ComponentStorageKind::Table { has_default: true }));
-        assert_eq!(world.component_storage(e2), Some(ComponentStorageKind::Table { has_default: false }));
-        assert_eq!(world.component_storage(e3), Some(ComponentStorageKind::Table { has_default: true }));
+        assert_matches!(world.component_storage(e1), Some(ComponentStorageKind::Table { has_default: true, .. }));
+        assert_matches!(world.component_storage(e2), Some(ComponentStorageKind::Table { has_default: false, .. }));
+        assert_matches!(world.component_storage(e3), Some(ComponentStorageKind::Table { has_default: true, .. }));
     }
 
     #[test]
@@ -359,6 +359,134 @@ mod untyped_component_apis {
         assert_matches!(world.component_storage(e), Some(ComponentStorageKind::None));
         world.dispawn(e);
         assert_matches!(world.component_storage(e), None);
+    }
+}
+
+mod torturing_components {
+    use super::*;
+
+    #[test]
+    fn add_components_to_components() {
+        let mut world = World::new();
+        let c = world.component::<TestComponent1>();
+
+        world.add(c, TestComponent1(42)).unwrap();
+        assert_matches!(world.get::<TestComponent1>(c), Ok(TestComponent1(42)));
+        world.add(c, TestComponent2(42.0)).unwrap();
+        assert_matches!(world.get::<TestComponent2>(c), Ok(TestComponent2(42.0)));
+
+        world.remove::<TestComponent1>(c).unwrap();
+        assert_matches!(world.get::<TestComponent1>(c), Err(GetComponentTypedError::ComponentNotPresent { .. }));
+        assert_matches!(world.get::<TestComponent2>(c), Ok(TestComponent2(42.0)));
+        world.remove::<TestComponent2>(c).unwrap();
+        assert_matches!(world.get::<TestComponent1>(c), Err(GetComponentTypedError::ComponentNotPresent { .. }));
+        assert_matches!(world.get::<TestComponent2>(c), Err(GetComponentTypedError::ComponentNotPresent { .. }));
+    }
+
+    #[test]
+    fn removing_storage_compenent_before_usage() {
+        let mut world = World::new();
+        let c = world.component::<TestComponent1>();
+        let e = world.spawn();
+
+        // C is an internal entity and thus should not be allowed to be changed
+        // like that
+        assert_matches!(
+            world.remove::<ComponentStorageComponent>(c),
+            Err(_)
+        );
+
+        world.add(e, TestComponent1(42)).unwrap();
+        assert_matches!(world.get::<TestComponent1>(e), Ok(TestComponent1(42)));
+    }
+
+    #[test]
+    fn adding_storage_to_custom_component_entity() {
+        let mut world = World::new();
+        let e = world.spawn();
+        let c = world.spawn_component();
+
+        world.component::<u32>();
+
+        world.add(c, ComponentStorageComponent {
+            dynvec_meta: DynVecMetadata::new::<u32>(),
+        }).unwrap();
+
+        assert_matches!(
+            world.add_component_with(e, c, || 53u32).unwrap(),
+            AddComponent { component_ref: &mut 53u32, was_added: true },
+        );
+
+        assert_eq!(
+            world.get_component(e, c).unwrap().as_typed::<u32>().unwrap(),
+            &53u32,
+        );
+        assert_matches!(
+            world.get::<u32>(e),
+            Err(GetComponentTypedError::ComponentNotPresent { .. }),
+        );
+        world.set(e, 1288u32).unwrap();
+        assert_matches!(
+            world.get::<u32>(e),
+            Ok(&1288u32),
+        );
+        assert_eq!(
+            world.get_component(e, c).unwrap().as_typed::<u32>().unwrap(),
+            &53u32,
+        );
+    }
+
+    #[test]
+    fn add_component_with_wrong_type() {
+        let mut world = World::new();
+        let e = world.spawn();
+        let c = world.spawn_component();
+
+        world.component::<u32>();
+
+        world.add(c, ComponentStorageComponent {
+            dynvec_meta: DynVecMetadata::new::<u32>(),
+        }).unwrap();
+        assert_matches!(
+            world.add_component_with(e, c, || format!("Fail!")),
+            Err(AddComponentWithError::TypeMismatched { .. }),
+        );
+    }
+
+    #[test]
+    fn removing_storage_component_on_custom_component_before_usage() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        world.add(e, ComponentStorageComponent {
+            dynvec_meta: DynVecMetadata::new::<u32>(),
+        }).unwrap();
+
+        // Should be allowed because nobody uses the storage of this entity
+        world.remove::<ComponentStorageComponent>(e).unwrap();
+    }
+
+    #[test]
+    fn removing_storage_component_on_custom_component_after_usage() {
+        let mut world = World::new();
+        let e = world.spawn();
+        let c = world.spawn_component();
+
+        let drops = Arc::new(AtomicUsize::new(0));
+
+        world.add(c, ComponentStorageComponent {
+            dynvec_meta: DynVecMetadata::new::<DropCheckComponent>(),
+        }).unwrap();
+        world.add_component_with(
+            e, c,
+            || DropCheckComponent(Arc::clone(&drops))
+        ).unwrap();
+        assert_eq!(world.has_component(e, c), HasComponent::Present);
+        assert_eq!(drops.load(Ordering::Relaxed), 0);
+        assert_matches!(world.remove::<ComponentStorageComponent>(c), Ok(..));
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(world.has_component(e, c), HasComponent::Present);
+        assert!(matches!(world.get_component(e, c), Err(GetComponentError::ComponentHasNoStorage { .. })));
     }
 }
 
@@ -598,14 +726,14 @@ mod drops_when_it_should {
         let e1 = world.spawn();
         let e2 = world.spawn();
 
-        debug_assert_eq!(
+        assert_eq!(
             world.get_or_default::<DefaultComponent>(e1).unwrap(),
             AddComponent {
                 component_ref: &mut DefaultComponent("default value".into()),
                 was_added: true,
             },
         );
-        debug_assert_eq!(
+        assert_eq!(
             world.get_or_default::<DefaultComponent>(e1).unwrap(),
             AddComponent {
                 component_ref: &mut DefaultComponent("default value".into()),
@@ -614,12 +742,45 @@ mod drops_when_it_should {
         );
 
         world.set(e2, DefaultComponent("Custom value".into())).unwrap();
-        debug_assert_eq!(
+        assert_eq!(
             world.get_or_default::<DefaultComponent>(e2).unwrap(),
             AddComponent {
                 component_ref: &mut DefaultComponent("Custom value".into()),
                 was_added: false,
             },
         );
+    }
+}
+
+mod tables_and_archetyps {
+    use super::*;
+
+    #[test]
+    fn simple_empty_at_start() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        let empty_archtyp = world.archtyp_for(Cow::default());
+        
+        assert_eq!(
+            world.entities_archetypes[e.index()],
+            empty_archtyp,
+        );
+    }
+
+    #[test]
+    fn simple_adding_to_move() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        // let empty_archtyp = world.archtyp_for(Cow::default());
+        let c = world.component::<TestComponent1>();
+        // let non_empty_archtyp = world.archtyp_for(Cow::Owned([c].into_iter().collect()));
+        
+        // assert_eq!(world.entities_archetypes[e.index()], empty_archtyp);
+        world.add(c, TestComponent1(42)).unwrap();
+        // assert_eq!(world.entities_archetypes[e.index()], non_empty_archtyp);
+        world.remove::<TestComponent1>(c).unwrap();
+        // assert_eq!(world.entities_archetypes[e.index()], empty_archtyp);
     }
 }

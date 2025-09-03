@@ -13,26 +13,26 @@ mod bundle;
 pub use bundle::*;
 
 use crate::{
-    dyn_option::DynOption,
+    dyn_option::{DynOption, FunDynOption},
     index_map::IndexMap,
     sparse_set::SparseSet, world_utils::GetComponentTypedError,
 };
 
 use std::{
-    any::TypeId,
+    any::{Any, TypeId},
     borrow::Cow,
     collections::HashMap,
     iter::{ empty, once },
 };
 use utils::prelude::*;
-use derive_more::{ From, Into, IsVariant };
+use derive_more::{ IsVariant };
 use dynvec::{ DynVec, DynVecMetadata, DynVecValueRef, DynVecValueRefMut, OwnedDynVecValue };
 
 const RESERVED_ENTITY_COUNT: u32 = 100;
 
 macro_rules! create_id {
     ($struct_vis: vis $name: ident($in_vis:vis $ty: ty)) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, From, Into)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ::derive_more::From, ::derive_more::Into)]
         $struct_vis struct $name($in_vis $ty);
 
         /// Provide a more-than-surely invalid default value
@@ -61,7 +61,11 @@ macro_rules! create_id {
     };
 }
 
-create_id!(ArchetypId(u32));
+mod ids {
+    create_id!(pub ArchetypId(u32));
+    create_id!(pub TableId(u32));
+}
+use ids::{ ArchetypId, TableId };
 
 #[derive(Default, Debug, Clone)]
 struct Archetyp {
@@ -71,8 +75,6 @@ struct Archetyp {
     /// (table) components.
     table_id: TableId,
 }
-
-create_id!(TableId(u32));
 
 #[derive(Default, Debug)]
 struct Table {
@@ -119,7 +121,11 @@ pub enum ComponentStorageKind {
     None,
     /// The component has table storage and thus is stoired alongside
     /// other components with table storage for each archetyp
-    Table { has_default: bool },
+    Table {
+        type_id: TypeId,
+        type_name: &'static str,
+        has_default: bool,
+    },
     // TODO
     // Sparse,
 }
@@ -160,6 +166,28 @@ pub enum AddComponentError {
     },
     #[error("The component {component} needs a value when inserting (Has a storage attached with a type that does not implement Default)")]
     ComponentNeedsValue {
+        component: ComponentEntity,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AddComponentWithError {
+    #[error("Tried to add a component to a dead entity {entity}")]
+    EntityIsNotAlive {
+        entity: Entity,
+    },
+    #[error("The type given does not match the type used for storage of {component}. Expected: '{expected}', given: '{given}'")]
+    TypeMismatched {
+        component: ComponentEntity,
+        given: &'static str,
+        expected: &'static str,
+    },
+    #[error("{component} is not alive")]
+    ComponentIsNotAlive {
+        component: ComponentEntity,
+    },
+    #[error("{component} does NOT have storage. (Does not have a ComponentStorageComponent)")]
+    ComponentDoesNotHaveStorage {
         component: ComponentEntity,
     },
 }
@@ -252,7 +280,7 @@ impl World {
         this.entities_archetypes.set_or_push(cc_entity.index(), cc_archetype_id);
         this.tables[cc_table_id].sparse_set.insert(cc_entity.index(), vec![
             &mut Some(ComponentStorageComponent {
-                dynvec_meta: DynVecMetadata::new::<DynVecMetadata>(),
+                dynvec_meta: DynVecMetadata::new::<ComponentStorageComponent>(),
             }) as &mut dyn DynOption
         ]);
 
@@ -354,6 +382,8 @@ impl World {
         if component == self.components_typeid_to_entity[&TypeId::of::<ComponentStorageComponent>()] {
             return Some(ComponentStorageKind::Table {
                 has_default: false,
+                type_id: TypeId::of::<ComponentStorageComponent>(),
+                type_name: std::any::type_name::<ComponentStorageComponent>(),
             });
         }
 
@@ -361,6 +391,8 @@ impl World {
             Ok(storage)
                 => Some(ComponentStorageKind::Table {
                     has_default: storage.dynvec_meta.default_fn.is_some(),
+                    type_id: storage.dynvec_meta.type_id,
+                    type_name: storage.dynvec_meta.type_name,
                 }),
             Err(GetComponentTypedError::EntityIsNotAlive { .. })
                 => None,
@@ -543,8 +575,7 @@ impl World {
     /// will be a panic internally.
     // TODO: Be able to insert mutliple components at once, what would be the
     // best api for this ? (something like bevy's bundles I guess)
-    // NOTE: unfortunate internal helper required for typed apis, to find a great way to provide a public api like that would be ideal
-    pub(crate) fn add_component_internal<'a, 'b, O>(
+    fn add_component_internal<'a, 'b, O>(
         &'a mut self,
         entity: Entity,
         component_storage: ComponentStorageKind,
@@ -650,9 +681,9 @@ impl World {
         let component_storage = self.component_storage(component).expect("Entity is alive");
         match component_storage {
             ComponentStorageKind::None |
-            ComponentStorageKind::Table { has_default: true } => (),
+            ComponentStorageKind::Table { has_default: true, .. } => (),
 
-            ComponentStorageKind::Table { has_default: false } => {
+            ComponentStorageKind::Table { has_default: false, .. } => {
                 return Err(AddComponentError::ComponentNeedsValue { component });
             },
         }
@@ -661,6 +692,54 @@ impl World {
             entity, component_storage, component,
             once(ComponentDenseStorageInput::Default),
         ))
+    }
+
+    pub fn add_component_with<V: Any>(
+        &mut self,
+        entity: impl Into<Entity>,
+        component: ComponentEntity,
+        f: impl FnOnce() -> V,
+    ) -> Result<AddComponent<&'_ mut V>, AddComponentWithError> {
+        let entity = entity.into();
+
+        if !self.alive(entity) {
+            return Err(AddComponentWithError::EntityIsNotAlive { entity });
+        }
+
+        let Some(component_storage) = self.component_storage(component)
+        else {
+            return Err(AddComponentWithError::ComponentIsNotAlive { component });
+        };
+
+        match component_storage {
+            ComponentStorageKind::None =>
+                return Err(AddComponentWithError::ComponentDoesNotHaveStorage {
+                    component,
+                }),
+            ComponentStorageKind::Table {
+                type_id, type_name: expected, ..
+            } if type_id != TypeId::of::<V>() =>
+                return Err(AddComponentWithError::TypeMismatched {
+                    component,
+                    given: std::any::type_name::<V>(),
+                    expected,
+                }),
+            _ => (),
+        }
+
+        let mut fun_dyn_option = FunDynOption::new(f);
+        let input = once(ComponentDenseStorageInput::DynOption(&mut fun_dyn_option));
+
+        let result = self.add_component_internal(entity, component_storage, component, input);
+
+        Ok(AddComponent {
+            component_ref: match result.component_ref {
+                OptionalComponentRef::HasStorage(mut r) => r.as_typed::<V>()
+                    .expect("Correctly typed"),
+                OptionalComponentRef::NoStorage => unreachable!("Created from type so must have storage"),
+            },
+            was_added: result.was_added,
+        })
     }
 
     pub fn remove_component(
@@ -678,6 +757,10 @@ impl World {
         else {
             return Err(RemoveComponentError::ComponentIsNotAlive { component });
         };
+
+        if component == self.components_typeid_to_entity[&TypeId::of::<ComponentStorageComponent>()] {
+            todo!();
+        }
 
         let archetyp_id = self.entities_archetypes[entity.index()];
         let archetyp = &mut self.archetypes[archetyp_id];

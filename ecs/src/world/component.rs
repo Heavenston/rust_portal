@@ -1,5 +1,5 @@
 mod storage;
-pub(crate) use storage::*;
+pub(super) use storage::*;
 
 use super::{ Entity, EntityGeneration, EntityIndex };
 
@@ -14,7 +14,7 @@ impl<T: 'static> Component for T { }
 /// into a DynVec.
 ///
 /// Automatically added when registering components through 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ComponentStorageComponent {
     pub dynvec_meta: DynVecMetadata,
 }

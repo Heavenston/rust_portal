@@ -1,8 +1,12 @@
-use crate::{dyn_option::FunDynOption, world::{
-    component::{Component, ComponentDenseStorageInput}, AddComponent, ComponentStorageKind, Entity, GetComponentError, HasComponent, OptionalComponentRef, RemoveComponentError, World
-}};
+use crate::{
+    world::{
+        component::Component,
+        AddComponent, AddComponentWithError, Entity,
+        GetComponentError, HasComponent, OptionalComponentRef, RemoveComponentError, World
+    }
+};
 
-use std::{ any::type_name, assert_matches::debug_assert_matches, iter::once };
+use std::any::type_name;
 use derive_more::IsVariant;
 use utils::prelude::*;
 
@@ -131,13 +135,7 @@ impl World {
     pub fn get_or_default<C: Component + Default>(&mut self, entity: Entity) -> Result<AddComponent<&'_ mut C>, AddComponentTypedError> {
         self.add_with(entity, default)
     }
-
-    /// Gets the component of the given type for the given entity, if the entity
-    /// does not have the component, it is inserted with the given value.
-    pub fn add<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> Result<AddComponent<&'_ mut C>, AddComponentTypedError> {
-        self.add_with(entity, || component)
-    }
-
+    
     /// Gets the component of the given type for the given entity, if the entity
     /// does not have the component, then the given function is called
     /// for adding the component to the entity.
@@ -145,31 +143,24 @@ impl World {
         where F: FnOnce() -> C,
               C: Component,
     {
-        let entity = entity.into();
-
-        if !self.alive(entity) {
-            return Err(AddComponentTypedError::EntityIsNotAlive { entity });
-        }
-
-        let mut fun_dyn_option = FunDynOption::new(f);
-        let input = once(ComponentDenseStorageInput::DynOption(&mut fun_dyn_option));
-
         let component = self.component::<C>();
-        let component_storage = self.component_storage(component)
-            .expect("World::component should not return a dead entity.");
 
-        debug_assert_matches!(component_storage, ComponentStorageKind::Table { has_default: _ });
+        match self.add_component_with(entity, component, f) {
+            Ok(result) => Ok(result),
+            Err(AddComponentWithError::EntityIsNotAlive { entity }) =>
+                Err(AddComponentTypedError::EntityIsNotAlive { entity }),
+            Err(AddComponentWithError::TypeMismatched { .. }) |
+            Err(AddComponentWithError::ComponentDoesNotHaveStorage { .. }) =>
+                unreachable!("World::component should return an entity with the correct storage"),
+            Err(AddComponentWithError::ComponentIsNotAlive { .. }) =>
+                unreachable!("World::component should not return a dead entity"),
+        }
+    }
 
-        let result = self.add_component_internal(entity, component_storage, component, input);
-
-        Ok(AddComponent {
-            component_ref: match result.component_ref {
-                OptionalComponentRef::HasStorage(mut r) => r.as_typed::<C>()
-                    .expect("Correctly typed"),
-                OptionalComponentRef::NoStorage => unreachable!("Created from type so must have storage"),
-            },
-            was_added: result.was_added,
-        })
+    /// Gets the component of the given type for the given entity, if the entity
+    /// does not have the component, it is inserted with the given value.
+    pub fn add<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> Result<AddComponent<&'_ mut C>, AddComponentTypedError> {
+        self.add_with(entity, || component)
     }
 
     /// Sets the value for the given component on the given entity, overrides
@@ -177,8 +168,9 @@ impl World {
     pub fn set<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> Result<AddComponent<&'_ mut C>, AddComponentTypedError> {
         let mut value = Some(component);
         let result = self.add_with::<C, _>(entity, || value.take().expect("Took once"))?;
-        if !result.was_added {
-            *result.component_ref = value.take().expect("Took once");
+        if let Some(value) = value {
+            debug_assert_eq!(result.was_added, false);
+            *result.component_ref = value;
         }
         Ok(result)
     }

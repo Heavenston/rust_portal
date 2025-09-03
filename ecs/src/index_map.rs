@@ -110,9 +110,12 @@ impl<T, I> IndexMap<T, I>
         self.vec.swap_remove(idx.to_usize())
     }
 
+    pub fn indices(&self) -> impl Iterator<Item = I> + ExactSizeIterator + DoubleEndedIterator + Clone {
+        (0..self.vec.len()).map(|i| I::from_usize(i))
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (I, &T)> + ExactSizeIterator + DoubleEndedIterator + Clone {
-        self.vec.iter().enumerate()
-            .map(|(i, val)| (I::from_usize(i), val))
+        self.indices().zip(self.values())
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (I, &mut T)> + ExactSizeIterator + DoubleEndedIterator {
