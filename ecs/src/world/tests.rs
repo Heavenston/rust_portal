@@ -503,6 +503,29 @@ mod torturing_components {
         assert!(matches!(world.get_component(e, c), Err(GetComponentError::ComponentHasNoStorage { .. })));
         assert_eq!(world.try_component::<DropCheckComponent>(), None);
     }
+
+    #[test]
+    fn dispawning_custom_component_with_storage_drops_it() {
+        let mut world = World::new();
+        let e = world.spawn();
+        let c = world.spawn_component();
+
+        let drops = Arc::new(AtomicUsize::new(0));
+
+        world.add(c, ComponentStorageComponent {
+            dynvec_meta: DynVecMetadata::new::<DropCheckComponent>(),
+        }).unwrap();
+        world.add_component_with(
+            e, c,
+            || DropCheckComponent(Arc::clone(&drops))
+        ).unwrap();
+        assert_eq!(world.has_component(e, c), HasComponent::Present);
+        assert_eq!(drops.load(Ordering::Relaxed), 0);
+        world.dispawn(c);
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(world.has_component(e, c), HasComponent::ComponentIsNotAlive);
+        assert_eq!(world.try_component::<DropCheckComponent>(), None);
+    }
 }
 
 mod entities_with_untyped_components {
