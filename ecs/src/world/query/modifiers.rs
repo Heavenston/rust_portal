@@ -7,7 +7,6 @@ use super::{
 use crate::world::{ ArchetypId, EntityIndex, World };
 
 use utils::prelude::*;
-use std::marker::PhantomData;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Optional<C>
@@ -120,10 +119,6 @@ impl<C> QueryParameterImpl for Not<C>
             None => true,
         }
     }
-
-    // fn match_archetyp(&self, world: &World, archtyp_id: ArchetypId) -> bool {
-    //     !self.child.match_archetyp(world, archtyp_id)
-    // }
 }
 
 // Always immutable event with mutable parameter (the value is dropped)
@@ -146,101 +141,154 @@ impl<C> QueryParameterImmutableImpl for Not<C>
 mod private {
     use super::*;
 
-    pub struct QueryParameterTupleAccepter;
-    impl<T: QueryParameter> tuple_trait::AcceptTupleValue<T> for QueryParameterTupleAccepter
-    { }
+    pub trait QueryParameterTupleImpl {
+        type AndValueMut<'a>;
+        type AndArchetypMatch;
 
-    pub struct QueryParameterImmutableTupleAccepter;
-    impl<T: QueryParameterImmutable> tuple_trait::AcceptTupleValue<T> for QueryParameterImmutableTupleAccepter
-    { }
+        type OrValueMut<'a>: EitherOfN;
+        type OrArchetypMatch;
 
-    pub struct NewByWorld<'a> {
-        pub world: &'a World,
-    }
-    impl<'a, const N: usize, T> tuple_trait::TupleCreator<N, T> for NewByWorld<'a>
-        where T: QueryParameterImpl,
-    {
-        fn create(&mut self) -> T {
-            T::new(self.world)
-        }
-    }
+        fn new(world: &World) -> Self;
 
-    pub struct AndValueMutTupleMapper<'a>(PhantomData<fn(&'a ()) -> &'a ()>);
-    impl<'a, const N: usize, T> tuple_trait::TupleMapper<N, T> for AndValueMutTupleMapper<'a>
-        where T: QueryParameterImpl,
-    {
-        type Output = T::ValueMut<'a>;
+        fn requires_per_entity_matching(&self) -> bool;
 
-        fn map(&mut self, current: T) -> Self::Output {
-            unimplemented!()
-        }
-    }
+        fn and_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::AndArchetypMatch>;
+        fn or_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::OrArchetypMatch>;
 
-    pub struct AndValueTupleMapper<'a>(PhantomData<fn(&'a ()) -> &'a ()>);
-    impl<'a, const N: usize, T> tuple_trait::TupleMapper<N, T> for AndValueTupleMapper<'a>
-        where T: QueryParameterImmutableImpl,
-    {
-        type Output = T::Value<'a>;
+        fn and_match_entity(
+            &self,
+            world: &World,
+            archetyp_match: &Self::AndArchetypMatch,
+            entity: EntityIndex,
+        ) -> bool;
 
-        fn map(&mut self, current: T) -> Self::Output {
-            unimplemented!()
-        }
+        fn or_match_entity(
+            &self,
+            orld: &World,
+            archetyp_match: &Self::OrArchetypMatch,
+            entity: EntityIndex,
+        ) -> bool;
     }
 
-    pub struct AndRequiresPerEntityMatchingTupleSelecter {
-        pub requires: bool,
+    macro_rules! impl_query_parameter_tuple {
+        ($($T:ident),*) => {
+            impl<$($T),*> QueryParameterTupleImpl for ($($T,)*)
+                where $($T: QueryParameter,)*
+            {
+                type AndValueMut<'a> = ($($T::ValueMut::<'a>,)*);
+                type AndArchetypMatch = ($($T::ArchetypMatch,)*);
+
+                type OrValueMut<'a> = either_of!($($T::ValueMut::<'a>),*);
+                type OrArchetypMatch = either_of!($($T::ArchetypMatch),*);
+
+                fn new(world: &World) -> Self {
+                    ($($T::new(world),)*)
+                }
+
+                fn requires_per_entity_matching(&self) -> bool {
+                    ($($T::requires_per_entity_matching(&self.${index()}))||*)
+                }
+
+                fn and_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::AndArchetypMatch> {
+                    Some(($($T::match_archetyp(&self.${index()}, world, archetyp_id)?,)*))
+                }
+
+                fn or_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::OrArchetypMatch> {
+                    $(if let Some(matching) = $T::match_archetyp(&self.${index()}, world, archetyp_id) {
+                        Some(EitherFor::<${index()}>::either_from(matching))
+                    } else )* {
+                        None
+                    }
+                }
+
+                fn and_match_entity(
+                    &self,
+                    world: &World,
+                    archetyp_match: &Self::AndArchetypMatch,
+                    entity: EntityIndex,
+                ) -> bool {
+                    $($T::match_entity(&self.${index()}, world, &archetyp_match.${index()}, entity))&&*
+                }
+
+                fn or_match_entity(
+                    &self,
+                    world: &World,
+                    archetyp_match: &Self::OrArchetypMatch,
+                    entity: EntityIndex,
+                ) -> bool {
+                    $(if let Some(matching) = EitherFor::<${index()}>::either_for(archetyp_match) {
+                        $T::match_entity(&self.${index()}, world, matching, entity)
+                    } else )* {
+                        unreachable!()
+                    }
+                }
+            }
+        };
     }
-    impl<'a, const N: usize, T> tuple_trait::TupleSelecter<N, &'a T> for AndRequiresPerEntityMatchingTupleSelecter
-        where T: QueryParameterImmutableImpl,
-    {
-        type Output = ();
+    variadics_please::all_tuples!(impl_query_parameter_tuple, 1, 15, T);
 
-        fn select(&mut self, current: &'a T) -> Option<Self::Output> {
-            self.requires |= current.requires_per_entity_matching();
-            
-            self.requires.then_some(())
-        }
+    pub trait QueryParameterTupleImmutableImpl: QueryParameterTupleImpl {
+        type AndValue<'a>: Copy;
+        type OrValue<'a>: Copy + EitherOfN;
+
+        fn and_get<'s, 'a>(
+            &'s self,
+            world: &'a World,
+            archetyp_match: &Self::AndArchetypMatch,
+            archetyp_id: ArchetypId,
+            entity: EntityIndex,
+        ) -> Self::AndValue<'a>;
+
+        fn or_get<'s, 'a>(
+            &'s self,
+            world: &'a World,
+            archetyp_match: &Self::OrArchetypMatch,
+            archetyp_id: ArchetypId,
+            entity: EntityIndex,
+        ) -> Self::OrValue<'a>;
     }
 
-    pub struct OrValueMutTupleSelecter<'a>(PhantomData<fn(&'a ()) -> &'a ()>);
-    impl<'a, const N: usize, T> tuple_trait::TupleSelecter<N, T> for OrValueMutTupleSelecter<'a>
-        where T: QueryParameterImpl,
-    {
-        type Output = T::ValueMut<'a>;
+    macro_rules! impl_query_parameter_tuple_immutable {
+        ($($T:ident),*) => {
+            impl<$($T),*> QueryParameterTupleImmutableImpl for ($($T,)*)
+                where $($T: QueryParameterImmutable,)*
+            {
+                type AndValue<'a> = ($($T::Value::<'a>,)*);
+                type OrValue<'a> = either_of!($($T::Value::<'a>),*);
 
-        fn select(&mut self, current: T) -> Option<Self::Output> {
-            unimplemented!()
-        }
+                fn and_get<'s, 'a>(
+                    &'s self,
+                    world: &'a World,
+                    archetyp_match: &Self::AndArchetypMatch,
+                    archetyp_id: ArchetypId,
+                    entity: EntityIndex,
+                ) -> Self::AndValue<'a> {
+                    ($($T::get(&self.${index()}, world, &archetyp_match.${index()}, archetyp_id, entity),)*)
+                }
+
+                fn or_get<'s, 'a>(
+                    &'s self,
+                    world: &'a World,
+                    archetyp_match: &Self::OrArchetypMatch,
+                    archetyp_id: ArchetypId,
+                    entity: EntityIndex,
+                ) -> Self::OrValue<'a> {
+                    $(if let Some(matching) = EitherFor::<${index()}>::either_for(archetyp_match) {
+                        EitherFor::<${index()}>::either_from($T::get(&self.${index()}, world, matching, archetyp_id, entity))
+                    } else )* {
+                        unreachable!()
+                    }
+                }
+            }
+        };
     }
+    variadics_please::all_tuples!(impl_query_parameter_tuple_immutable, 1, 15, T);
 
-    pub struct OrValueTupleSelecter<'a>(PhantomData<fn(&'a ()) -> &'a ()>);
-    impl<'a, const N: usize, T> tuple_trait::TupleSelecter<N, T> for OrValueTupleSelecter<'a>
-        where T: QueryParameterImmutableImpl,
-    {
-        type Output = T::Value<'a>;
-
-        fn select(&mut self, current: T) -> Option<Self::Output> {
-            unimplemented!()
-        }
-    }
 }
 use private::*;
 
-pub trait QueryParameterTuple = 'static +
-    tuple_trait::AcceptedTuple<QueryParameterTupleAccepter> +
-
-    tuple_trait::SelectableTuple<AndRequiresPerEntityMatchingTupleSelecter> +
-
-    for<'a> tuple_trait::MappableTuple<AndValueMutTupleMapper<'a>> +
-    for<'a> tuple_trait::SelectableTuple<OrValueMutTupleSelecter<'a>> +
-    for<'a> tuple_trait::CreatableTuple<NewByWorld<'a>>
-;
-pub trait QueryParameterTupleImmutable =
-    QueryParameterTuple +
-    tuple_trait::AcceptedTuple<QueryParameterImmutableTupleAccepter> +
-    for<'a> tuple_trait::MappableTuple<AndValueTupleMapper<'a>> +
-    for<'a> tuple_trait::SelectableTuple<OrValueTupleSelecter<'a>>
-;
+pub trait QueryParameterTuple = 'static + QueryParameterTupleImpl;
+pub trait QueryParameterTupleImmutable = QueryParameterTuple + QueryParameterTupleImmutableImpl;
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct And<Tuple>
@@ -252,25 +300,21 @@ pub struct And<Tuple>
 impl<Tuple> QueryParameterImpl for And<Tuple>
     where Tuple: QueryParameterTuple,
 {
-    type ValueMut<'a> = <&'a Tuple as tuple_trait::MappableTuple<AndValueMutTupleMapper<'a>>>::Output;
-    type ArchetypMatch = ();
+    type ValueMut<'a> = Tuple::AndValueMut<'a>;
+    type ArchetypMatch = Tuple::AndArchetypMatch;
 
     fn new(world: &World) -> Self {
         Self {
-            tuple: tuple_trait::CreatableTuple::create_tuple(&mut NewByWorld { world }),
+            tuple: Tuple::new(world),
         }
     }
 
     fn requires_per_entity_matching(&self) -> bool {
-        let mut requires = AndRequiresPerEntityMatchingTupleSelecter {
-            requires: false,
-        };
-        tuple_trait::SelectableTuple::select_tuple(&self.tuple, &mut requires);
-        requires.requires
+        self.tuple.requires_per_entity_matching()
     }
 
     fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::ArchetypMatch> {
-        todo!()
+        self.tuple.and_match_archetyp(world, archetyp_id)
     }
 
     fn match_entity(
@@ -280,100 +324,78 @@ impl<Tuple> QueryParameterImpl for And<Tuple>
         entity: EntityIndex,
     ) -> bool {
         debug_assert!(self.requires_per_entity_matching());
-        todo!()
+
+        self.tuple.and_match_entity(world, archetyp_match, entity)
     }
 }
 
-// impl<Tuple> QueryParameterImmutableImpl for And<Tuple>
-//     where Tuple: QueryParameterTupleImmutable,
-// {
-//     type Value<'a> = Tuple::Value<'a>;
+impl<Tuple> QueryParameterImmutableImpl for And<Tuple>
+    where Tuple: QueryParameterTupleImmutable,
+{
+    type Value<'a> = Tuple::AndValue<'a>;
 
-//     fn get<'s, 'a>(
-//         &'s self,
-//         world: &'a World,
-//         archetyp_match: &Self::ArchetypMatch,
-//         archetyp_id: ArchetypId,
-//         entity: EntityIndex,
-//     ) -> Self::Value<'a> {
-//         todo!()
-//     }
-// }
+    fn get<'s, 'a>(
+        &'s self,
+        world: &'a World,
+        archetyp_match: &Self::ArchetypMatch,
+        archetyp_id: ArchetypId,
+        entity: EntityIndex,
+    ) -> Self::Value<'a> {
+        self.tuple.and_get(world, archetyp_match, archetyp_id, entity)
+    }
+}
 
-// #[derive(Default, Debug, Clone, Copy)]
-// pub struct Or<Tuple>
-//     where Tuple: QueryParameterTuple,
-// {
-//     tuple: Tuple,
-// }
+#[derive(Default, Debug, Clone, Copy)]
+pub struct Or<Tuple>
+    where Tuple: QueryParameterTuple,
+{
+    tuple: Tuple,
+}
 
-// impl<Tuple> QueryParameterImpl for Or<Tuple>
-//     where Tuple: QueryParameterTuple,
-// {
-//     type ValueMut<'a> = Tuple::EitherOfMut<'a>;
-//     type ArchetypMatch = Tuple::OrArchetypMatch;
+impl<Tuple> QueryParameterImpl for Or<Tuple>
+    where Tuple: QueryParameterTuple,
+{
+    type ValueMut<'a> = Tuple::OrValueMut<'a>;
+    type ArchetypMatch = Tuple::OrArchetypMatch;
 
-//     fn new(world: &World) -> Self {
-//         Self {
-//             tuple: Tuple::new(world),
-//         }
-//     }
+    fn new(world: &World) -> Self {
+        Self {
+            tuple: Tuple::new(world),
+        }
+    }
 
-//     fn requires_per_entity_matching(&self) -> bool {
-//         todo!()
-//     }
+    fn requires_per_entity_matching(&self) -> bool {
+        self.tuple.requires_per_entity_matching()
+    }
 
-//     fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::ArchetypMatch> {
-//         todo!()
-//     }
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::ArchetypMatch> {
+        self.tuple.or_match_archetyp(world, archetyp_id)
+    }
 
-//     fn match_entity(
-//         &self,
-//         world: &World,
-//         archetyp_match: &Self::ArchetypMatch,
-//         entity: EntityIndex,
-//     ) -> bool {
-//         todo!()
-//     }
+    fn match_entity(
+        &self,
+        world: &World,
+        archetyp_match: &Self::ArchetypMatch,
+        entity: EntityIndex,
+    ) -> bool {
+        debug_assert!(self.requires_per_entity_matching());
 
-//     // fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> bool {
-//     //     struct Reducer<'a> {
-//     //         world: &'a World,
-//     //         archetyp_id: ArchetypId,
-//     //         matches: bool,
-//     //     }
+        self.tuple.or_match_entity(world, archetyp_match, entity)
+    }
+}
 
-//     //     impl<'a> QueryParameterVisiter for Reducer<'a> {
-//     //         fn reduce(&mut self, current: &impl QueryParameter) -> ControlFlow<()> {
-//     //             self.matches = self.matches && current.match_archetyp(self.world, self.archetyp_id);
+impl<Tuple> QueryParameterImmutableImpl for Or<Tuple>
+    where Tuple: QueryParameterTupleImmutable,
+{
+    type Value<'a> = Tuple::OrValue<'a>;
 
-//     //             if self.matches {
-//     //                 ControlFlow::Continue(())
-//     //             }
-//     //             else {
-//     //                 ControlFlow::Break(())
-//     //             }
-//     //         }
-//     //     }
-
-//     //     let mut reducer = Reducer { world, archetyp_id, matches: true };
-//     //     self.tuple.reduce(&mut reducer);
-//     //     reducer.matches
-//     // }
-// }
-
-// impl<Tuple> QueryParameterImmutableImpl for Or<Tuple>
-//     where Tuple: QueryParameterTupleImmutable,
-// {
-//     type Value<'a> = Tuple::EitherOf<'a>;
-
-//     fn get<'s, 'a>(
-//         &'s self,
-//         world: &'a World,
-//         archetyp_match: &Self::ArchetypMatch,
-//         archetyp_id: ArchetypId,
-//         entity: EntityIndex,
-//     ) -> Self::Value<'a> {
-//         todo!()
-//     }
-// }
+    fn get<'s, 'a>(
+        &'s self,
+        world: &'a World,
+        archetyp_match: &Self::ArchetypMatch,
+        archetyp_id: ArchetypId,
+        entity: EntityIndex,
+    ) -> Self::Value<'a> {
+        self.tuple.or_get(world, archetyp_match, archetyp_id, entity)
+    }
+}
