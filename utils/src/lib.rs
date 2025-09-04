@@ -33,7 +33,6 @@ pub mod prelude {
         either_of, either_of::*,
         bitset::{ BitSetIndex, BitSet },
         maybe_default::{ MaybeDefault },
-        tuple_trait,
     };
 }
 
@@ -59,7 +58,6 @@ pub mod assert_length;
 pub mod either_of;
 pub mod bitset;
 pub mod maybe_default;
-pub mod tuple_trait;
 
 use std::hash::{ DefaultHasher, Hash, Hasher };
 
