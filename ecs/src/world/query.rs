@@ -13,17 +13,13 @@ mod private {
 
     pub trait QueryParameterImpl {
         type ValueMut<'a>;
-        type ArchetypMatch = ();
+        type ArchetypMatch;
 
         fn new(world: &World) -> Self;
 
-        fn requires_per_entity_matching(&self) -> bool {
-            unimplemented!()
-        }
+        fn requires_per_entity_matching(&self) -> bool;
 
-        fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::ArchetypMatch> {
-            unimplemented!()
-        }
+        fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::ArchetypMatch>;
 
         /// Only called if the entity's archetypes matches (giving the value back).
         /// The entity is guarenteed to be alive.
@@ -32,9 +28,7 @@ mod private {
             world: &World,
             archetyp_match: &Self::ArchetypMatch,
             entity: EntityIndex,
-        ) -> bool {
-            unimplemented!()
-        }
+        ) -> bool;
 
         // TODO
         // /// The entity is guarenteed to be alive a matching
@@ -58,9 +52,7 @@ mod private {
             archetyp_match: &Self::ArchetypMatch,
             archetyp_id: ArchetypId,
             entity: EntityIndex,
-        ) -> Self::Value<'a> {
-            unimplemented!()
-        }
+        ) -> Self::Value<'a>;
     }
 }
 use private::{ QueryParameterImpl, QueryParameterImmutableImpl };

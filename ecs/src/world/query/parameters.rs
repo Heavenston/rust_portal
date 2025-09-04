@@ -1,7 +1,7 @@
 use super::{ QueryParameterImpl, QueryParameterImmutableImpl };
 use crate::world::{
     component::{ Component, ComponentEntity },
-    World
+    ArchetypId, EntityIndex, World
 };
 
 use std::marker::PhantomData;
@@ -13,49 +13,65 @@ pub struct Ref<C>
 {
     _component_type: PhantomData<fn(C) -> C>,
     component: Option<ComponentEntity>,
+    requires_per_entity_matching: bool,
 }
 
 impl<C> QueryParameterImpl for Ref<C>
     where C: Component,
 {
     type ValueMut<'a> = &'a C;
-    type ArchetypMatch = ();
+    type ArchetypMatch = usize;
 
     fn new(world: &World) -> Self {
+        let comp = world.try_component::<C>();
         Self {
             _component_type: PhantomData,
-            component: world.try_component::<C>(),
+            component: comp,
+            requires_per_entity_matching: comp.is_some_and(|comp|
+                !world.component_fragments_tables(comp)),
         }
     }
 
     fn requires_per_entity_matching(&self) -> bool {
-        todo!()
+        self.requires_per_entity_matching
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: crate::world::ids::ArchetypId) -> Option<Self::ArchetypMatch> {
-        todo!()
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<usize> {
+        let comp = self.component?;
+        let index = world.archetypes[archetyp_id].components.index_of(comp)?;
+
+        Some(index)
     }
 
     fn match_entity(
         &self,
         world: &World,
-        archetyp_match: &Self::ArchetypMatch,
-        entity: crate::world::EntityIndex,
+        _: &usize,
+        entity: EntityIndex,
     ) -> bool {
-        todo!()
+        debug_assert!(self.requires_per_entity_matching);
+        let comp = self.component.expect("Only sets requires_per_entity_matching if the component exists");
+        world.archetypes[world.entities_archetypes[entity]].components.has(comp)
     }
-
-    // fn match_archetyp(&self, world: &World, archtyp_id: ArchetypId) -> bool {
-    //     self.component.is_some_and(|component|
-    //         world.archetypes[archtyp_id].components.has(component)
-    //     )
-    // }
 }
 
 impl<C> QueryParameterImmutableImpl for Ref<C>
     where C: Component,
 {
     type Value<'a> = &'a C;
+
+    fn get<'s, 'a>(
+        &'s self,
+        world: &'a World,
+        &component_index: &Self::ArchetypMatch,
+        archetyp_id: ArchetypId,
+        entity: EntityIndex,
+    ) -> Self::Value<'a> {
+        world.tables[world.archetypes[archetyp_id].table_id].sparse_set
+            .get(entity).expect("Is inside")
+            .for_component(component_index)
+            .as_typed::<C>().expect("Must be the correct type")
+    }
 }
 
 #[derive_where(Debug, Clone, Copy)]
@@ -64,25 +80,46 @@ pub struct RefMut<C>
 {
     _component_type: PhantomData<fn(C) -> C>,
     component: Option<ComponentEntity>,
+    requires_per_entity_matching: bool,
 }
 
 impl<C> QueryParameterImpl for RefMut<C>
     where C: Component,
 {
     type ValueMut<'a> = &'a mut C;
+    type ArchetypMatch = usize;
 
     fn new(world: &World) -> Self {
+        let comp = world.try_component::<C>();
         Self {
             _component_type: PhantomData,
-            component: world.try_component::<C>(),
+            component: comp,
+            requires_per_entity_matching: comp.is_some_and(|comp|
+                !world.component_fragments_tables(comp)),
         }
     }
 
-    // fn match_archetyp(&self, world: &World, archtyp_id: ArchetypId) -> bool {
-    //     self.component.is_some_and(|component|
-    //         world.archetypes[archtyp_id].components.has(component)
-    //     )
-    // }
+    fn requires_per_entity_matching(&self) -> bool {
+        self.requires_per_entity_matching
+    }
+
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::ArchetypMatch> {
+        let comp = self.component?;
+        let index = world.archetypes[archetyp_id].components.index_of(comp)?;
+
+        Some(index)
+    }
+
+    fn match_entity(
+        &self,
+        world: &World,
+        archetyp_match: &Self::ArchetypMatch,
+        entity: EntityIndex,
+    ) -> bool {
+        debug_assert!(self.requires_per_entity_matching);
+        let comp = self.component.expect("Only sets requires_per_entity_matching if the component exists");
+        world.archetypes[world.entities_archetypes[entity]].components.has(comp)
+    }
 }
 
 #[derive_where(Debug, Clone, Copy)]
@@ -91,29 +128,60 @@ pub struct Has<C>
 {
     _component_type: PhantomData<fn(C) -> C>,
     component: Option<ComponentEntity>,
+    requires_per_entity_matching: bool,
 }
 
 impl<C> QueryParameterImpl for Has<C>
     where C: Component,
 {
-    type ValueMut<'a> = ();
+    type ValueMut<'a> = &'a mut C;
+    type ArchetypMatch = usize;
 
     fn new(world: &World) -> Self {
+        let comp = world.try_component::<C>();
         Self {
             _component_type: PhantomData,
-            component: world.try_component::<C>(),
+            component: comp,
+            requires_per_entity_matching: comp.is_some_and(|comp|
+                !world.component_fragments_tables(comp)),
         }
     }
 
-    // fn match_archetyp(&self, world: &World, archtyp_id: ArchetypId) -> bool {
-    //     self.component.is_some_and(|component|
-    //         world.archetypes[archtyp_id].components.has(component)
-    //     )
-    // }
+    fn requires_per_entity_matching(&self) -> bool {
+        self.requires_per_entity_matching
+    }
+
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::ArchetypMatch> {
+        let comp = self.component?;
+        let index = world.archetypes[archetyp_id].components.index_of(comp)?;
+
+        Some(index)
+    }
+
+    fn match_entity(
+        &self,
+        world: &World,
+        archetyp_match: &Self::ArchetypMatch,
+        entity: EntityIndex,
+    ) -> bool {
+        debug_assert!(self.requires_per_entity_matching);
+        let comp = self.component.expect("Only sets requires_per_entity_matching if the component exists");
+        world.archetypes[world.entities_archetypes[entity]].components.has(comp)
+    }
 }
 
 impl<C> QueryParameterImmutableImpl for Has<C>
     where C: Component,
 {
     type Value<'a> = ();
+
+    fn get<'s, 'a>(
+        &'s self,
+        world: &'a World,
+        archetyp_match: &Self::ArchetypMatch,
+        archetyp_id: ArchetypId,
+        entity: EntityIndex,
+    ) -> Self::Value<'a> {
+        ()
+    }
 }
