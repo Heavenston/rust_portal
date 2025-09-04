@@ -69,6 +69,56 @@ impl<C> QueryParameterImmutableImpl for Optional<C>
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct NoFetch<C>
+    where C: QueryParameter,
+{
+    child: C,
+}
+
+impl<C> QueryParameterImpl for NoFetch<C>
+    where C: QueryParameterImpl,
+{
+    type ValueMut<'a> = C::ValueMut<'a>;
+    type ArchetypMatch = C::ArchetypMatch;
+
+    fn new(world: &World) -> Self {
+        Self {
+            child: C::new(world),
+        }
+    }
+
+    fn requires_per_entity_matching(&self) -> bool {
+        self.child.requires_per_entity_matching()
+    }
+
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<C::ArchetypMatch> {
+        self.child.match_archetyp(world, archetyp_id)
+    }
+
+    fn match_entity(
+        &self, world: &World,
+        archetyp_match: &Self::ArchetypMatch,
+        entity: EntityIndex,
+    ) -> bool {
+        self.child.match_entity(world, archetyp_match, entity)
+    }
+}
+
+impl<C> QueryParameterImmutableImpl for NoFetch<C>
+    where C: QueryParameterImmutableImpl,
+{
+    type Value<'a> = ();
+
+    fn get<'s, 'a>(
+        &'s self,
+        world: &'a World,
+        archetyp_match: &C::ArchetypMatch,
+        archetyp_id: ArchetypId,
+        entity: EntityIndex,
+    ) { }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct Not<C>
     where C: QueryParameter,
 {
@@ -399,3 +449,5 @@ impl<Tuple> QueryParameterImmutableImpl for Or<Tuple>
         self.tuple.or_get(world, archetyp_match, archetyp_id, entity)
     }
 }
+
+pub type Xor<Tuple> = And<(Or<Tuple>, Not<And<Tuple>>)>;

@@ -6,6 +6,7 @@
 #![feature(assert_matches)]
 #![feature(trait_alias)]
 #![feature(debug_closure_helpers)]
+#![feature(never_type)]
 
 pub mod sparse_set;
 mod world_utils;

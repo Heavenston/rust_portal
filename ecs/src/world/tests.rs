@@ -869,3 +869,160 @@ mod tables_and_archetyps {
         assert_eq!(world.table_of(e), empty_table);
     }
 }
+
+mod queries {
+    use super::*;
+
+    use query as q;
+
+    struct Ctx {
+        world: World,
+        components: Vec<Entity>,
+        with_nothing: Vec<Entity>,
+        with_test_1: Vec<Entity>,
+        with_test_2: Vec<Entity>,
+        with_both: Vec<Entity>,
+    }
+
+    fn create_ctx() -> Ctx {
+        let mut world = World::new();
+
+        // We try to include any internally created entity here
+        let components = vec![
+            world.component::<ComponentStorageComponent>().0,
+            world.component::<TestComponent1>().0,
+            world.component::<TestComponent2>().0,
+        ];
+        let with_nothing = (0..8).map(|_| world.spawn()).collect_vec();
+        let with_test_1 = (0..3).map(|_| {
+            let e = world.spawn();
+            world.add(e, TestComponent1(42)).unwrap();
+            e
+        }).collect_vec();
+        let with_test_2 = (0..5).map(|_| {
+            let e = world.spawn();
+            world.add(e, TestComponent2(88.)).unwrap();
+            e
+        }).collect_vec();
+        let with_both = (0..5).map(|_| {
+            let e = world.spawn();
+            world.add(e, TestComponent1(50)).unwrap();
+            world.add(e, TestComponent2(99.)).unwrap();
+            e
+        }).collect_vec();
+
+        Ctx {
+            world,
+            components,
+            with_nothing,
+            with_test_1,
+            with_test_2,
+            with_both,
+        }
+    }
+
+    #[test]
+    fn always() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::Always>::new(&ctx.world);
+
+        assert_eq!(
+            query.entities(&ctx.world)
+            .sorted()
+            .collect_vec(),
+            empty::<Entity>()
+                .chain(ctx.components).chain(ctx.with_nothing)
+                .chain(ctx.with_test_1).chain(ctx.with_test_2).chain(ctx.with_both)
+            .sorted().collect_vec(),
+        );
+    }
+
+    #[test]
+    fn never() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::Never>::new(&ctx.world);
+
+        assert_eq!(
+            query.entities(&ctx.world)
+            .sorted()
+            .collect_vec(),
+            empty::<Entity>()
+            .sorted().collect_vec(),
+        );
+    }
+
+    #[test]
+    fn simple_has_1() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::Has<TestComponent1>>::new(&ctx.world);
+
+        assert_eq!(
+            query.entities(&ctx.world)
+            .sorted()
+            .collect_vec(),
+            empty::<Entity>()
+                .chain(ctx.with_test_1).chain(ctx.with_both)
+            .sorted().collect_vec(),
+        );
+    }
+
+    #[test]
+    fn simple_has_2() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::Has<TestComponent2>>::new(&ctx.world);
+
+        assert_eq!(
+            query.entities(&ctx.world)
+            .sorted()
+            .collect_vec(),
+            empty::<Entity>()
+                .chain(ctx.with_test_2).chain(ctx.with_both)
+            .sorted().collect_vec(),
+        );
+    }
+
+    #[test]
+    fn has_or() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::Or<(q::Has<TestComponent1>, q::Has<TestComponent2>)>>::new(&ctx.world);
+
+        assert_eq!(
+            query.entities(&ctx.world)
+            .sorted()
+            .collect_vec(),
+            empty::<Entity>()
+                .chain(ctx.with_test_1).chain(ctx.with_test_2).chain(ctx.with_both)
+            .sorted().collect_vec(),
+        );
+    }
+
+    #[test]
+    fn has_not() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::Not<q::Has<TestComponent1>>>::new(&ctx.world);
+
+        assert_eq!(
+            query.entities(&ctx.world)
+            .sorted()
+            .collect_vec(),
+            empty::<Entity>()
+                .chain(ctx.components).chain(ctx.with_nothing).chain(ctx.with_test_2)
+            .sorted().collect_vec(),
+        );
+    }
+
+    #[test]
+    fn has_xor() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::Xor<(q::Has<TestComponent1>, q::Has<TestComponent2>)>>::new(&ctx.world);
+
+        assert_eq!(
+            query.entities(&ctx.world)
+            .sorted()
+            .collect_vec(),
+            empty::<Entity>()
+                .chain(ctx.with_test_1).chain(ctx.with_test_2)
+            .sorted().collect_vec(),
+        );
+    }
+}

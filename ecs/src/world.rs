@@ -7,8 +7,7 @@ mod entity_set;
 pub use entity_set::{ EntitySet, ComponentSet };
 pub mod component;
 use component::*;
-mod query;
-pub use query::*;
+pub mod query;
 mod bundle;
 pub use bundle::*;
 
@@ -285,8 +284,11 @@ impl World {
     pub fn spawn(&mut self) -> Entity {
         let empty_archetyp = self.archtyp_for(Cow::Owned(EntitySet::default()));
         let entity = self.entity_storage.spawn();
+
         self.entities_archetypes.set_or_push(entity.index(), empty_archetyp);
-        self.tables[self.archetypes[empty_archetyp].table_id]
+        let archetyp = &mut self.archetypes[empty_archetyp];
+        archetyp.entities.insert(entity.index());
+        self.tables[archetyp.table_id]
             .sparse_set.insert(entity.index(), empty::<ComponentDenseStorageInput>());
         entity
     }
