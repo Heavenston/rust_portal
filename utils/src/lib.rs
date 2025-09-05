@@ -12,7 +12,7 @@
 #![expect(internal_features)]
 #![expect(incomplete_features)]
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 pub mod prelude {
     pub use crate::{
@@ -37,6 +37,7 @@ pub mod prelude {
         either_of, either_of::*,
         bitset::{ BitSetIndex, BitSet },
         maybe_default::{ MaybeDefault },
+        tuple_traits::{ HomogeneousTuple, Tuple, TupleAt, TupleIteratorExt },
     };
 }
 
@@ -62,6 +63,7 @@ pub mod assert_is_sorted;
 pub mod either_of;
 pub mod bitset;
 pub mod maybe_default;
+pub mod tuple_traits;
 
 use std::hash::{ DefaultHasher, Hash, Hasher };
 

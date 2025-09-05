@@ -2245,6 +2245,7 @@ dependencies = [
  "readonly",
  "smallvec",
  "sorted-vec",
+ "variadics_please",
 ]
 
 [[package]]

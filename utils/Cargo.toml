@@ -13,3 +13,4 @@ sorted-vec = "0.8.8"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 smallvec = { version = "1.15.1", features = ["union", "const_generics", "specialization", "const_new"] }
+variadics_please = "1.1.0"
