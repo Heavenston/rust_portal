@@ -16,11 +16,23 @@ use utils::prelude::*;
 mod private {
     use super::*;
 
+    /// Implemented for all tuples of values that all implement OnlyUnit
+    pub trait OnlyUnit { }
+    macro_rules! impl_only_unit {
+        ($($T: ident),*) => {
+            impl<$($T,)*> OnlyUnit for ($($T,)*)
+                where $($T: OnlyUnit,)*
+            { }
+        };
+    }
+    variadics_please::all_tuples!(impl_only_unit, 0, 16, T);
+
     pub trait QueryParameterImpl {
+        type CreationConfig;
         type ValueMut<'a>;
         type ArchetypMatch: Clone;
 
-        fn new(world: &World) -> Self;
+        fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self;
 
         fn requires_per_entity_matching(&self) -> bool;
 
@@ -60,7 +72,7 @@ mod private {
         ) -> Self::Value<'a>;
     }
 }
-use private::{ QueryParameterImpl, QueryParameterImmutableImpl };
+use private::{ OnlyUnit, QueryParameterImpl, QueryParameterImmutableImpl };
 
 trait_alias!(pub trait QueryParameter = QueryParameterImpl);
 trait_alias!(pub trait QueryParameterImmutable = QueryParameterImmutableImpl);
@@ -88,11 +100,15 @@ pub struct Query<P: QueryParameter> {
 }
 
 impl<P: QueryParameterImpl> Query<P> {
-    pub fn new(world: &World) -> Self {
-        let parameters = P::new(world);
+    pub fn new(world: &World) -> Self
+        where P::CreationConfig: OnlyUnit + Default,
+    {
+        Self::new_with_config(world, default())
+    }
 
+    pub fn new_with_config(world: &World, config: P::CreationConfig) -> Self {
         Self {
-            parameters: P::new(&*world),
+            parameters: P::new(world, config),
             cache: None,
         }
     }

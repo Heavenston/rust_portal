@@ -18,12 +18,13 @@ pub struct Optional<C>
 impl<C> QueryParameterImpl for Optional<C>
     where C: QueryParameterImpl,
 {
+    type CreationConfig = C::CreationConfig;
     type ValueMut<'a> = Option<C::ValueMut<'a>>;
     type ArchetypMatch = Option<C::ArchetypMatch>;
 
-    fn new(world: &World) -> Self {
+    fn new(world: &World, config: C::CreationConfig) -> Self {
         Self {
-            child: C::new(world),
+            child: C::new(world, config),
         }
     }
 
@@ -78,12 +79,13 @@ pub struct NoFetch<C>
 impl<C> QueryParameterImpl for NoFetch<C>
     where C: QueryParameterImpl,
 {
+    type CreationConfig = C::CreationConfig;
     type ValueMut<'a> = C::ValueMut<'a>;
     type ArchetypMatch = C::ArchetypMatch;
 
-    fn new(world: &World) -> Self {
+    fn new(world: &World, config: C::CreationConfig) -> Self {
         Self {
-            child: C::new(world),
+            child: C::new(world, config),
         }
     }
 
@@ -128,12 +130,13 @@ pub struct Not<C>
 impl<C> QueryParameterImpl for Not<C>
     where C: QueryParameterImpl,
 {
+    type CreationConfig = C::CreationConfig;
     type ValueMut<'a> = ();
     type ArchetypMatch = Option<C::ArchetypMatch>;
 
-    fn new(world: &World) -> Self {
+    fn new(world: &World, config: C::CreationConfig) -> Self {
         Self {
-            child: C::new(world),
+            child: C::new(world, config),
         }
     }
 
@@ -192,13 +195,15 @@ mod private {
     use super::*;
 
     pub trait QueryParameterTupleImpl {
+        type CreationConfig;
+
         type AndValueMut<'a>;
         type AndArchetypMatch: Clone;
 
         type OrValueMut<'a>: EitherOfN;
         type OrArchetypMatch: Clone;
 
-        fn new(world: &World) -> Self;
+        fn new(world: &World, cfg: Self::CreationConfig) -> Self;
 
         fn requires_per_entity_matching(&self) -> bool;
 
@@ -225,14 +230,16 @@ mod private {
             impl<$($T),*> QueryParameterTupleImpl for ($($T,)*)
                 where $($T: QueryParameter,)*
             {
+                type CreationConfig = ($($T::CreationConfig,)*);
+
                 type AndValueMut<'a> = ($($T::ValueMut::<'a>,)*);
                 type AndArchetypMatch = ($($T::ArchetypMatch,)*);
 
                 type OrValueMut<'a> = either_of!($($T::ValueMut::<'a>),*);
                 type OrArchetypMatch = either_of!($($T::ArchetypMatch),*);
 
-                fn new(world: &World) -> Self {
-                    ($($T::new(world),)*)
+                fn new(world: &World, config: Self::CreationConfig) -> Self {
+                    ($($T::new(world, config.${index()}),)*)
                 }
 
                 fn requires_per_entity_matching(&self) -> bool {
@@ -350,12 +357,13 @@ pub struct And<Tuple>
 impl<Tuple> QueryParameterImpl for And<Tuple>
     where Tuple: QueryParameterTuple,
 {
+    type CreationConfig = Tuple::CreationConfig;
     type ValueMut<'a> = Tuple::AndValueMut<'a>;
     type ArchetypMatch = Tuple::AndArchetypMatch;
 
-    fn new(world: &World) -> Self {
+    fn new(world: &World, config: Self::CreationConfig) -> Self {
         Self {
-            tuple: Tuple::new(world),
+            tuple: Tuple::new(world, config),
         }
     }
 
@@ -405,12 +413,13 @@ pub struct Or<Tuple>
 impl<Tuple> QueryParameterImpl for Or<Tuple>
     where Tuple: QueryParameterTuple,
 {
+    type CreationConfig = Tuple::CreationConfig;
     type ValueMut<'a> = Tuple::OrValueMut<'a>;
     type ArchetypMatch = Tuple::OrArchetypMatch;
 
-    fn new(world: &World) -> Self {
+    fn new(world: &World, config: Tuple::CreationConfig) -> Self {
         Self {
-            tuple: Tuple::new(world),
+            tuple: Tuple::new(world, config),
         }
     }
 

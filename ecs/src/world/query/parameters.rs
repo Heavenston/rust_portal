@@ -10,10 +10,11 @@ use utils::prelude::*;
 #[derive(Debug, Clone, Copy)]
 pub struct Always;
 impl QueryParameterImpl for Always {
+    type CreationConfig = ();
     type ValueMut<'a> = ();
     type ArchetypMatch = ();
 
-    fn new(world: &World) -> Always {
+    fn new(world: &World, (): ()) -> Always {
         Always
     }
 
@@ -52,10 +53,11 @@ impl QueryParameterImmutableImpl for Always {
 #[derive(Debug, Clone, Copy)]
 pub struct Never;
 impl QueryParameterImpl for Never {
+    type CreationConfig = ();
     type ValueMut<'a> = ();
     type ArchetypMatch = !;
 
-    fn new(world: &World) -> Never {
+    fn new(world: &World, (): ()) -> Never {
         Never
     }
 
@@ -103,10 +105,11 @@ pub struct Ref<C>
 impl<C> QueryParameterImpl for Ref<C>
     where C: Component,
 {
+    type CreationConfig = ();
     type ValueMut<'a> = &'a C;
     type ArchetypMatch = usize;
 
-    fn new(world: &World) -> Self {
+    fn new(world: &World, (): ()) -> Self {
         let comp = world.try_component::<C>();
         Self {
             _component_type: PhantomData,
@@ -170,10 +173,11 @@ pub struct RefMut<C>
 impl<C> QueryParameterImpl for RefMut<C>
     where C: Component,
 {
+    type CreationConfig = ();
     type ValueMut<'a> = &'a mut C;
     type ArchetypMatch = usize;
 
-    fn new(world: &World) -> Self {
+    fn new(world: &World, (): ()) -> Self {
         let comp = world.try_component::<C>();
         Self {
             _component_type: PhantomData,
@@ -209,10 +213,11 @@ impl<C> QueryParameterImpl for RefMut<C>
 pub type Has<C> = super::NoFetch<Ref<C>>;
 
 impl QueryParameterImpl for Entity {
+    type CreationConfig = ();
     type ValueMut<'a> = Entity;
     type ArchetypMatch = ();
 
-    fn new(world: &World) -> Self {
+    fn new(world: &World, (): ()) -> Self {
         default()
     }
 
