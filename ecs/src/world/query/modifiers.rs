@@ -183,8 +183,8 @@ impl<C> QueryParameterImmutableImpl for Not<C>
         archetyp_match: &Self::ArchetypMatch,
         archetyp_id: ArchetypId,
         entity: EntityIndex,
-    ) -> Self::Value<'a> {
-        todo!()
+    ) -> () {
+        ()
     }
 }
 
@@ -337,8 +337,8 @@ mod private {
 }
 use private::*;
 
-pub trait QueryParameterTuple = 'static + QueryParameterTupleImpl;
-pub trait QueryParameterTupleImmutable = QueryParameterTuple + QueryParameterTupleImmutableImpl;
+trait_alias!(pub trait QueryParameterTuple = 'static + QueryParameterTupleImpl);
+trait_alias!(pub trait QueryParameterTupleImmutable = QueryParameterTuple + QueryParameterTupleImmutableImpl);
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct And<Tuple>

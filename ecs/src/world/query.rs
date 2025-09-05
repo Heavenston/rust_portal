@@ -2,9 +2,12 @@
 #![allow(unused_variables)]
 
 mod parameters;
+use std::iter::repeat;
+
 pub use parameters::*;
 mod modifiers;
 pub use modifiers::*;
+use utils::itertools::izip;
 
 use super::*;
 
@@ -57,8 +60,8 @@ mod private {
 }
 use private::{ QueryParameterImpl, QueryParameterImmutableImpl };
 
-pub trait QueryParameter = QueryParameterImpl;
-pub trait QueryParameterImmutable = QueryParameterImmutableImpl;
+trait_alias!(pub trait QueryParameter = QueryParameterImpl);
+trait_alias!(pub trait QueryParameterImmutable = QueryParameterImmutableImpl);
 
 #[derive(Debug, thiserror::Error)]
 pub enum QueryGetError {
@@ -74,7 +77,6 @@ pub enum QueryGetError {
 
 pub struct Query<P: QueryParameter> {
     parameters: P,
-    requires_per_entity_matching: bool,
     archetypes_matches: Vec<P::ArchetypMatch>,
     archetypes: BitSet<ArchetypId>,
 }
@@ -88,11 +90,8 @@ impl<P: QueryParameterImpl> Query<P> {
             .filter_map(|archetyp_id| Some(archetyp_id).zip(parameters.match_archetyp(world, archetyp_id)))
             .unzip();
 
-        let requires_per_entity_matching = parameters.requires_per_entity_matching();
-
         Self {
             parameters: P::new(&*world),
-            requires_per_entity_matching,
             archetypes_matches,
             archetypes,
         }
@@ -102,26 +101,49 @@ impl<P: QueryParameterImpl> Query<P> {
         self.archetypes.iter()
     }
 
-    pub fn entities(&self, world: &World) -> impl Iterator<Item = Entity> {
-        let entities = self.archetypes.iter().enumerate()
-            .flat_map(|(archetyp_index, archetyp_id)| world.archetypes[archetyp_id].entities.iter()
-                .zip(std::iter::repeat(archetyp_index)));
+    /// Internal iterator into archetypes and entities that matches this query
+    fn matched_entities<'s, 'w, 'c>(
+        &'s self,
+        world: &'w World
+    ) -> impl Iterator<Item = (ArchetypId, &'s P::ArchetypMatch, EntityIndex)> + 'c
+        where 's: 'c, 'w: 'c,
+    {
+        let requires_per_entity_matching = self.parameters.requires_per_entity_matching();
 
-        // an attempt at an optimization but should change nothing from just
-        // checking `self.requires_per_entity_matching` in the function of the filter
-        let filter_entities = if self.requires_per_entity_matching {
-            Either::Left(entities
-                .filter(|&(index, archetyp_index)| {
-                    self.parameters.match_entity(world, &self.archetypes_matches[archetyp_index], index)
-                }))
-        }
-        else {
-            Either::Right(entities)
-        };
+        self.archetypes.iter().enumerate()
+            .flat_map(move |(archetyp_index, archetyp_id)| izip!(
+                repeat(archetyp_id),
+                repeat(&self.archetypes_matches[archetyp_index]),
+                world.archetypes[archetyp_id].entities.iter(),
+            ))
+            .filter(move |&(archetyp_id, arch_match, entity)|
+                !requires_per_entity_matching ||
+                    self.parameters.match_entity(world, arch_match, entity)
+            )
+    }
 
-        filter_entities
-            .map(|(index, _)| index)
-            .map(|entity_index| Entity::new(entity_index, world.generation_at_index(entity_index)))
+    pub fn entities<'s, 'w, 'c>(&'s self, world: &'w World) -> impl Iterator<Item = Entity> + 'c
+        where 's: 'c, 'w: 'c,
+    {
+        self.matched_entities(world)
+            .map(|(_, _, entity_index)|
+                Entity::new(entity_index, world.generation_at_index(entity_index))
+            )
+    }
+
+    pub fn iter<'s, 'w, 'c>(&'s self, world: &'w World) -> impl Iterator<Item = P::Value<'w>> + 'c
+        where P: QueryParameterImmutable,
+              's: 'c, 'w: 'c,
+    {
+        self.matched_entities(world)
+            .map(|(archetyp_id, archetyp_match, entity)|
+                self.parameters.get(world, archetyp_match, archetyp_id, entity)
+            )
+    }
+
+    pub fn iter_mut<'w>(&self, world: &'w World) -> impl Iterator<Item = P::ValueMut<'w>> {
+        todo!();
+        empty()
     }
 
     pub fn get<'a, 'b>(&'a self, world: &'b World, entity: Entity) -> Result<P::Value<'b>, QueryGetError>
@@ -138,7 +160,9 @@ impl<P: QueryParameterImpl> Query<P> {
 
         let archetyp_match = &self.archetypes_matches[self.archetypes.index_of(archetyp_id)];
 
-        if self.requires_per_entity_matching && !self.parameters.match_entity(world, archetyp_match, entity.index()) {
+        if self.parameters.requires_per_entity_matching() &&
+            !self.parameters.match_entity(world, archetyp_match, entity.index())
+        {
             return Err(QueryGetError::NotMatched { entity });
         }
 

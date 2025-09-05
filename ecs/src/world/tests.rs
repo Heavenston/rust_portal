@@ -1,23 +1,19 @@
-use super::*;
-
-use crate::world::{
-    EntityGeneration,
-    HasComponent, AddComponentError
-};
-use crate::world_utils::{
-    HasComponentTyped,
-    RemoveComponentTypedError,
-};
+use crate::world::*;
+use crate::world_utils::*;
 
 use std::any::TypeId;
 use std::assert_matches::assert_matches;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::iter::{repeat, zip};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+use utils::prelude::*;
+use utils::itertools::izip;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct TestComponent1(u32);
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 struct TestComponent2(f32);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -928,12 +924,14 @@ mod queries {
 
         assert_eq!(
             query.entities(&ctx.world)
+            .assert_is_sorted_by_key(|entity| (ctx.world.entities_archetypes[entity.index()], entity.index()))
             .sorted()
             .collect_vec(),
             empty::<Entity>()
                 .chain(ctx.components).chain(ctx.with_nothing)
-                .chain(ctx.with_test_1).chain(ctx.with_test_2).chain(ctx.with_both)
-            .sorted().collect_vec(),
+                .chain(ctx.with_test_1).chain(ctx.with_test_2)
+                .chain(ctx.with_both)
+            .collect_vec(),
         );
     }
 
@@ -943,11 +941,8 @@ mod queries {
         let query = q::Query::<q::Never>::new(&ctx.world);
 
         assert_eq!(
-            query.entities(&ctx.world)
-            .sorted()
-            .collect_vec(),
-            empty::<Entity>()
-            .sorted().collect_vec(),
+            query.entities(&ctx.world).collect_vec(),
+            vec![],
         );
     }
 
@@ -958,11 +953,12 @@ mod queries {
 
         assert_eq!(
             query.entities(&ctx.world)
+            .assert_is_sorted_by_key(|entity| (ctx.world.entities_archetypes[entity.index()], entity.index()))
             .sorted()
             .collect_vec(),
             empty::<Entity>()
                 .chain(ctx.with_test_1).chain(ctx.with_both)
-            .sorted().collect_vec(),
+            .collect_vec(),
         );
     }
 
@@ -973,11 +969,12 @@ mod queries {
 
         assert_eq!(
             query.entities(&ctx.world)
+            .assert_is_sorted_by_key(|entity| (ctx.world.entities_archetypes[entity.index()], entity.index()))
             .sorted()
             .collect_vec(),
             empty::<Entity>()
                 .chain(ctx.with_test_2).chain(ctx.with_both)
-            .sorted().collect_vec(),
+            .collect_vec(),
         );
     }
 
@@ -988,11 +985,12 @@ mod queries {
 
         assert_eq!(
             query.entities(&ctx.world)
+            .assert_is_sorted_by_key(|entity| (ctx.world.entities_archetypes[entity.index()], entity.index()))
             .sorted()
             .collect_vec(),
             empty::<Entity>()
                 .chain(ctx.with_test_1).chain(ctx.with_test_2).chain(ctx.with_both)
-            .sorted().collect_vec(),
+            .collect_vec(),
         );
     }
 
@@ -1003,6 +1001,7 @@ mod queries {
 
         assert_eq!(
             query.entities(&ctx.world)
+            .assert_is_sorted_by_key(|entity| (ctx.world.entities_archetypes[entity.index()], entity.index()))
             .sorted()
             .collect_vec(),
             empty::<Entity>()
@@ -1018,11 +1017,73 @@ mod queries {
 
         assert_eq!(
             query.entities(&ctx.world)
-            .sorted()
+            .assert_is_sorted_by_key(|entity| (ctx.world.entities_archetypes[entity.index()], entity.index()))
             .collect_vec(),
             empty::<Entity>()
                 .chain(ctx.with_test_1).chain(ctx.with_test_2)
-            .sorted().collect_vec(),
+            .collect_vec(),
+        );
+    }
+
+    #[test]
+    fn ref_simple_1() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::And<(Entity, q::Ref<TestComponent1>)>>::new(&ctx.world);
+
+        assert_eq!(
+            query.iter(&ctx.world)
+            .assert_is_sorted_by_key(|&(entity, _)| (ctx.world.entities_archetypes[entity.index()], entity.index()))
+            .collect_vec(),
+            empty::<(Entity, &TestComponent1)>()
+                .chain(zip(ctx.with_test_1, repeat(&TestComponent1(42))))
+                .chain(zip(ctx.with_both, repeat(&TestComponent1(50))))
+            .collect_vec(),
+        );
+    }
+
+    #[test]
+    fn ref_simple_2() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::And<(Entity, q::Ref<TestComponent2>)>>::new(&ctx.world);
+
+        assert_eq!(
+            query.iter(&ctx.world)
+            .assert_is_sorted_by_key(|&(entity, _)| (ctx.world.entities_archetypes[entity.index()], entity.index()))
+            .collect_vec(),
+            empty::<(Entity, &TestComponent2)>()
+                .chain(zip(ctx.with_test_2, repeat(&TestComponent2(88.))))
+                .chain(zip(ctx.with_both, repeat(&TestComponent2(99.))))
+            .collect_vec(),
+        );
+    }
+
+    #[test]
+    fn ref_and_has() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::And<(Entity, q::Has<TestComponent1>, q::Ref<TestComponent2>)>>::new(&ctx.world);
+
+        assert_eq!(
+            query.iter(&ctx.world)
+            .assert_is_sorted_by_key(|&(entity, _, _)| (ctx.world.entities_archetypes[entity.index()], entity.index()))
+            .collect_vec(),
+            empty::<(Entity, (), &TestComponent2)>()
+                .chain(izip!(ctx.with_both, repeat(()), repeat(&TestComponent2(99.))))
+            .collect_vec(),
+        );
+    }
+
+    #[test]
+    fn ref_and_not_has() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::And<(Entity, q::Not<q::Has<TestComponent1>>, q::Ref<TestComponent2>)>>::new(&ctx.world);
+
+        assert_eq!(
+            query.iter(&ctx.world)
+            .assert_is_sorted_by_key(|&(entity, _, _)| (ctx.world.entities_archetypes[entity.index()], entity.index()))
+            .collect_vec(),
+            empty::<(Entity, (), &TestComponent2)>()
+                .chain(izip!(ctx.with_test_2, repeat(()), repeat(&TestComponent2(88.))))
+            .collect_vec(),
         );
     }
 }

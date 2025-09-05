@@ -1,11 +1,11 @@
 use super::{ QueryParameterImpl, QueryParameterImmutableImpl };
 use crate::world::{
-    component::{ Component, ComponentEntity },
-    ArchetypId, EntityIndex, World
+    component::{ Component, ComponentEntity }, ArchetypId, Entity, EntityIndex, World
 };
 
 use std::marker::PhantomData;
 use derive_where::derive_where;
+use utils::prelude::*;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Always;
@@ -207,3 +207,43 @@ impl<C> QueryParameterImpl for RefMut<C>
 }
 
 pub type Has<C> = super::NoFetch<Ref<C>>;
+
+impl QueryParameterImpl for Entity {
+    type ValueMut<'a> = Entity;
+    type ArchetypMatch = ();
+
+    fn new(world: &World) -> Self {
+        default()
+    }
+
+    fn requires_per_entity_matching(&self) -> bool {
+        false
+    }
+
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<()> {
+        Some(())
+    }
+
+    fn match_entity(
+        &self,
+        world: &World,
+        archetyp_match: &Self::ArchetypMatch,
+        entity: EntityIndex,
+    ) -> bool {
+        true
+    }
+}
+
+impl QueryParameterImmutableImpl for Entity {
+    type Value<'a> = Entity;
+
+    fn get<'s, 'a>(
+        &'s self,
+        world: &'a World,
+        archetyp_match: &Self::ArchetypMatch,
+        archetyp_id: ArchetypId,
+        entity_index: EntityIndex,
+    ) -> Self::Value<'a> {
+        Entity::new(entity_index, world.generation_at_index(entity_index))
+    }
+}

@@ -28,7 +28,7 @@ const RESERVED_ENTITY_COUNT: u32 = 100;
 
 macro_rules! create_id {
     ($struct_vis: vis $name: ident($in_vis:vis $ty: ty)) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ::derive_more::From, ::derive_more::Into)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ::derive_more::From, ::derive_more::Into)]
         $struct_vis struct $name($in_vis $ty);
 
         /// Provide a more-than-surely invalid default value
