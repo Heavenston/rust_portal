@@ -6,13 +6,14 @@
 #![feature(debug_closure_helpers)]
 #![feature(specialization)]
 #![feature(assert_matches)]
+#![feature(type_alias_impl_trait)]
 
 #![expect(internal_features)]
 #![expect(incomplete_features)]
 
 pub mod prelude {
     pub use crate::{
-        ix, dix,
+        ix, dix, trait_alias,
         uid::Uid,
         default, concat_arrays, flatten_array, hash_value,
         itertools::Itertools as _,
@@ -29,7 +30,7 @@ pub mod prelude {
         chain_after::{ ChainAfterExt as _ },
         skip_after::{ SkipAfterExt as _ },
         extract_nth::{ ExtractNthExt as _ },
-        assert_length::{ AssertLengthExt as _ },
+        assert_is_sorted::{ AssertIsSortedExt as _ },
         either_of, either_of::*,
         bitset::{ BitSetIndex, BitSet },
         maybe_default::{ MaybeDefault },
@@ -54,7 +55,7 @@ pub mod consume_on_drop;
 pub mod chain_after;
 pub mod skip_after;
 pub mod extract_nth;
-pub mod assert_length;
+pub mod assert_is_sorted;
 pub mod either_of;
 pub mod bitset;
 pub mod maybe_default;
@@ -139,5 +140,13 @@ macro_rules! count_args_literal {
     ($a: tt, $b: tt, $c: tt, $d: tt, $e: tt, $f: tt, $g: tt, $h: tt, $i: tt, $j: tt, $k: tt, $l: tt, $m: tt, $n: tt, $o: tt, $p: tt) => { 16 };
     ($($arg:tt),*) => {
         compile_error! {"Too many arguments provided. Maximum is 16."}
+    };
+}
+
+#[macro_export]
+macro_rules! trait_alias {
+    ($vis: vis trait $name: ident = $($cond: tt)+) => {
+        $vis trait $name: $($cond)+ { }
+        impl<T: $($cond)+> $name for T { }
     };
 }
