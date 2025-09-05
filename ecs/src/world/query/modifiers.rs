@@ -193,10 +193,10 @@ mod private {
 
     pub trait QueryParameterTupleImpl {
         type AndValueMut<'a>;
-        type AndArchetypMatch;
+        type AndArchetypMatch: Clone;
 
         type OrValueMut<'a>: EitherOfN;
-        type OrArchetypMatch;
+        type OrArchetypMatch: Clone;
 
         fn new(world: &World) -> Self;
 

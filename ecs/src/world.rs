@@ -313,8 +313,12 @@ impl World {
             return false;
         }
 
-        let archtyp: ArchetypId = self.entities_archetypes[entity.index()];
-        let table_id: TableId = self.archetypes[archtyp].table_id;
+        let archetyp: ArchetypId = self.entities_archetypes[entity.index()];
+        let archetyp: &mut Archetyp = &mut self.archetypes[archetyp];
+
+        archetyp.entities.remove(entity.index());
+
+        let table_id: TableId = archetyp.table_id;
 
         self.tables[table_id].sparse_set.remove(entity.index());
 

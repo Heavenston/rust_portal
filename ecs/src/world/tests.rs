@@ -1086,4 +1086,60 @@ mod queries {
             .collect_vec(),
         );
     }
+
+    #[test]
+    fn stays_up_to_date() {
+        let mut ctx = create_ctx();
+        let query = q::Query::<q::And<(Entity, q::Ref<TestComponent1>)>>::new(&ctx.world);
+
+        assert_eq!(
+            query.iter(&ctx.world)
+                .assert_is_sorted_by_key(|&(entity, ..)| (ctx.world.entities_archetypes[entity.index()], entity.index()))
+                .collect_vec(),
+            empty::<(Entity, &TestComponent1)>()
+                .chain(zip(ctx.with_test_1.iter().copied(), repeat(&TestComponent1(42))))
+                .chain(zip(ctx.with_both.iter().copied(), repeat(&TestComponent1(50))))
+            .collect_vec(),
+        );
+
+        let new_entity = ctx.world.spawn();
+        ctx.world.add(new_entity, TestComponent1(88)).unwrap();
+
+        assert_eq!(
+            query.iter(&ctx.world)
+                .assert_is_sorted_by_key(|&(entity, ..)| (ctx.world.entities_archetypes[entity.index()], entity.index()))
+                .collect_vec(),
+            empty::<(Entity, &TestComponent1)>()
+                .chain(zip(ctx.with_test_1.iter().copied(), repeat(&TestComponent1(42))))
+                .chain(once((new_entity, &TestComponent1(88))))
+                .chain(zip(ctx.with_both.iter().copied(), repeat(&TestComponent1(50))))
+            .collect_vec(),
+        );
+
+        ctx.world.dispawn(new_entity);
+
+        assert_eq!(
+            query.iter(&ctx.world)
+                .assert_is_sorted_by_key(|&(entity, ..)| (ctx.world.entities_archetypes[entity.index()], entity.index()))
+                .collect_vec(),
+            empty::<(Entity, &TestComponent1)>()
+                .chain(zip(ctx.with_test_1.iter().copied(), repeat(&TestComponent1(42))))
+                .chain(zip(ctx.with_both.iter().copied(), repeat(&TestComponent1(50))))
+            .collect_vec(),
+        );
+
+        for &c in &ctx.with_test_1 {
+            ctx.world.add(c, DefaultComponent("feur".into())).unwrap();
+        }
+
+        assert_eq!(
+            query.iter(&ctx.world)
+                .assert_is_sorted_by_key(|&(entity, ..)| (ctx.world.entities_archetypes[entity.index()], entity.index()))
+                .collect_vec(),
+            empty::<(Entity, &TestComponent1)>()
+                .chain(zip(ctx.with_both.iter().copied(), repeat(&TestComponent1(50))))
+                .chain(zip(ctx.with_test_1.iter().copied(), repeat(&TestComponent1(42))))
+            .collect_vec(),
+        );
+    }
 }

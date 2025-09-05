@@ -2,21 +2,23 @@
 #![allow(unused_variables)]
 
 mod parameters;
-use std::iter::repeat;
+use std::iter::{repeat, zip};
 
 pub use parameters::*;
 mod modifiers;
 pub use modifiers::*;
-use utils::itertools::izip;
 
 use super::*;
+
+use utils::itertools::izip;
+use utils::prelude::*;
 
 mod private {
     use super::*;
 
     pub trait QueryParameterImpl {
         type ValueMut<'a>;
-        type ArchetypMatch;
+        type ArchetypMatch: Clone;
 
         fn new(world: &World) -> Self;
 
@@ -75,50 +77,74 @@ pub enum QueryGetError {
     },
 }
 
+struct CachedQueryData<P: QueryParameter> {
+    matching_archetypes: BitSet<ArchetypId>,
+    match_parameters: Vec<P::ArchetypMatch>,
+}
+
 pub struct Query<P: QueryParameter> {
     parameters: P,
-    archetypes_matches: Vec<P::ArchetypMatch>,
-    archetypes: BitSet<ArchetypId>,
+    cache: Option<CachedQueryData<P>>,
 }
 
 impl<P: QueryParameterImpl> Query<P> {
     pub fn new(world: &World) -> Self {
         let parameters = P::new(world);
 
-        // FIXME: With lots of archtyps this could get slow
-        let (archetypes, archetypes_matches) = world.archetypes.indices()
-            .filter_map(|archetyp_id| Some(archetyp_id).zip(parameters.match_archetyp(world, archetyp_id)))
-            .unzip();
-
         Self {
             parameters: P::new(&*world),
-            archetypes_matches,
-            archetypes,
+            cache: None,
         }
     }
 
-    pub(in crate::world) fn archetypes(&self) -> impl Iterator<Item = ArchetypId> {
-        self.archetypes.iter()
+    fn generate_archetypes(&self, world: &World) -> impl Iterator<Item = (ArchetypId, P::ArchetypMatch)> {
+        // FIXME: With lots of archtyps this could get slow
+        world.archetypes.indices()
+            .filter_map(|archetyp_id| Some(archetyp_id).zip(self.parameters.match_archetyp(world, archetyp_id)))
+    }
+
+    pub fn cache_matches(&mut self, world: &World) {
+        if self.cache.is_some() { return }
+
+        let (matching_archetypes, match_parameters) = self.generate_archetypes(world).unzip();
+
+        self.cache = Some(CachedQueryData {
+            matching_archetypes,
+            match_parameters,
+        });
+    }
+
+    fn archetypes(&self, world: &World) -> impl Iterator<Item = (ArchetypId, Cow<'_, P::ArchetypMatch>)> {
+        if let Some(cache) = &self.cache {
+            Either::Left(zip(
+                &cache.matching_archetypes,
+                &cache.match_parameters,
+            ).tuple_map_nth::<1, _, _>(Cow::Borrowed))
+        }
+        else {
+            Either::Right(self.generate_archetypes(world)
+                .tuple_map_nth::<1, _, _>(Cow::Owned))
+        }
     }
 
     /// Internal iterator into archetypes and entities that matches this query
     fn matched_entities<'s, 'w, 'c>(
         &'s self,
         world: &'w World
-    ) -> impl Iterator<Item = (ArchetypId, &'s P::ArchetypMatch, EntityIndex)> + 'c
+    ) -> impl Iterator<Item = (ArchetypId, Cow<'s, P::ArchetypMatch>, EntityIndex)> + 'c
         where 's: 'c, 'w: 'c,
     {
         let requires_per_entity_matching = self.parameters.requires_per_entity_matching();
 
-        self.archetypes.iter().enumerate()
-            .flat_map(move |(archetyp_index, archetyp_id)| izip!(
+        self.archetypes(world)
+            .flat_map(move |(archetyp_id, matched)| izip!(
                 repeat(archetyp_id),
-                repeat(&self.archetypes_matches[archetyp_index]),
+                repeat(matched),
                 world.archetypes[archetyp_id].entities.iter(),
             ))
-            .filter(move |&(archetyp_id, arch_match, entity)|
+            .filter(move |&(archetyp_id, ref matched, entity)|
                 !requires_per_entity_matching ||
-                    self.parameters.match_entity(world, arch_match, entity)
+                    self.parameters.match_entity(world, &matched, entity)
             )
     }
 
@@ -137,7 +163,7 @@ impl<P: QueryParameterImpl> Query<P> {
     {
         self.matched_entities(world)
             .map(|(archetyp_id, archetyp_match, entity)|
-                self.parameters.get(world, archetyp_match, archetyp_id, entity)
+                self.parameters.get(world, &archetyp_match, archetyp_id, entity)
             )
     }
 
@@ -154,21 +180,28 @@ impl<P: QueryParameterImpl> Query<P> {
         }
 
         let archetyp_id = world.entities_archetypes[entity.index()];
-        if !self.archetypes.has(archetyp_id) {
-            return Err(QueryGetError::NotMatched { entity });
-        }
 
-        let archetyp_match = &self.archetypes_matches[self.archetypes.index_of(archetyp_id)];
+        let Some(archetyp_match) = (if let Some(cache) = &self.cache {
+            cache.matching_archetypes.has(archetyp_id)
+                .then(|| Cow::Borrowed(
+                    &cache.match_parameters[cache.matching_archetypes.index_of(archetyp_id)]
+                ))
+        } else {
+            self.parameters.match_archetyp(world, archetyp_id)
+                .map(Cow::Owned)
+        }) else {
+            return Err(QueryGetError::NotMatched { entity });
+        };
 
         if self.parameters.requires_per_entity_matching() &&
-            !self.parameters.match_entity(world, archetyp_match, entity.index())
+            !self.parameters.match_entity(world, &archetyp_match, entity.index())
         {
             return Err(QueryGetError::NotMatched { entity });
         }
 
         Ok(self.parameters.get(
             world,
-            archetyp_match,
+            &archetyp_match,
             archetyp_id,
             entity.index(),
         ))
