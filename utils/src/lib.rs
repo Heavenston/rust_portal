@@ -8,6 +8,8 @@
 #![feature(assert_matches)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(auto_traits)]
+#![feature(negative_impls)]
 
 #![expect(internal_features)]
 #![expect(incomplete_features)]

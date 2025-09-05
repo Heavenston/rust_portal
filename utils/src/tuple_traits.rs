@@ -36,6 +36,8 @@ pub trait TypeMapper {
 pub trait Tuple {
     const SIZE: usize;
     type Map<Mapper: TypeMapper>: Tuple;
+    type Append<V>: Tuple;
+    type Prepend<V>: Tuple;
 
     fn map<M: TypeMapper>(self, mapper: M) -> Self::Map<M>;
 }
@@ -54,9 +56,10 @@ pub trait HomogeneousTuple: Tuple {
     fn into_iter(self) -> impl Iterator<Item = Self::Item> + ExactSizeIterator + DoubleEndedIterator;
 }
 
-pub trait TupleAt<const N: usize> {
+pub trait TupleAt<const N: usize>: Tuple {
     type Item;
     type Mapped<O>: TupleAt<N, Item = O>;
+    type Removed: Tuple;
 
     fn tuple_into_at(self) -> Self::Item;
     fn tuple_get_at(&self) -> &Self::Item;
@@ -64,6 +67,12 @@ pub trait TupleAt<const N: usize> {
 
     fn tuple_map_at<F, NI>(self, fun: F) -> Self::Mapped<NI>
         where F: FnOnce(Self::Item) -> NI;
+}
+
+pub trait TupleConcat<Rhs> {
+    type Out;
+
+    fn tuple_concat(self, rhs: Rhs) -> Self::Out;
 }
 
 pub trait TupleIteratorExt
@@ -105,6 +114,43 @@ macro_rules! ignore_first {
     ($f: tt $($rest: tt)*) => { $($rest)* };
 }
 
+macro_rules! prepend_unless_at_max {
+    ($V: ident ! $A:ident, $B:ident, $C:ident, $D:ident, $E:ident, $F:ident, $G:ident, $H:ident, $I:ident, $J:ident, $K:ident, $L:ident, $M:ident, $N:ident, $O:ident, $P:ident) =>  {
+        ($V, $B, $C, $D, $E, $F, $G, $H, $I, $J, $K, $L, $M, $N, $O, $P)
+    };
+    ($V: ident ! $($T: ident),*) => {
+        ($V, $($T,)*)
+    };
+}
+
+macro_rules! append_unless_at_max {
+    ($V: ident ! $A:ident, $B:ident, $C:ident, $D:ident, $E:ident, $F:ident, $G:ident, $H:ident, $I:ident, $J:ident, $K:ident, $L:ident, $M:ident, $N:ident, $O:ident, $P:ident) =>  {
+        ($A, $B, $C, $D, $E, $F, $G, $H, $I, $J, $K, $L, $M, $N, $O, $V)
+    };
+    ($V: ident ! $($T: ident),*) => {
+        ($($T,)* $V,)
+    };
+}
+
+macro_rules! impl_concat {
+    ($(($lhs_i: tt, $lhs_t: ident)),*) => {
+        macro_rules! impl_concat_nested {
+            ($$(($rhs_i: tt, $rhs_t: ident)),*) => {
+                impl<$($lhs_t,)* $$($rhs_t,)*> TupleConcat<($$($rhs_t,)*)> for ($($lhs_t,)*) {
+                    type Out = ($($lhs_t,)* $$($rhs_t,)*);
+
+                    fn tuple_concat(self, rhs: ($$($rhs_t,)*)) -> Self::Out {
+                        let _ = rhs;
+                        ($(self.$lhs_i,)* $$(rhs.$rhs_i,)*)
+                    }
+                }
+            };
+        }
+
+        variadics_please::all_tuples_enumerated!(impl_concat_nested, 0, 1, U);
+    };
+}
+
 macro_rules! impl_at_trait {
     ($(($SI: tt, $start: ident)),* ! ) => { };
 
@@ -112,6 +158,7 @@ macro_rules! impl_at_trait {
         impl<$($start,)* $main $(,$rest)*> TupleAt<$I> for ($($start,)* $main, $($rest,)*) {
             type Item = $main;
             type Mapped<O> = ($($start,)* O, $($rest,)*);
+            type Removed = ($($start,)* $($rest,)*);
 
             fn tuple_into_at(self) -> Self::Item {
                 self.$I
@@ -140,16 +187,18 @@ macro_rules! impl_traits {
         impl<$($T),*> Tuple for ($($T,)*) {
             const SIZE: usize = count_args_literal!($($T),*);
             type Map<Mapper: TypeMapper> = ($(Mapper::Map<$T>,)*);
+            type Append<V> = append_unless_at_max!(V ! $($T),*);
+            type Prepend<V> = prepend_unless_at_max!(V ! $($T),*);
 
-            #[allow(unused_mut, unused)]
             fn map<M: TypeMapper>(self, mut mapper: M) -> Self::Map<M> {
+                let _ = &mut mapper;
                 ($(mapper.map(self.$N),)*)
             }
         }
 
         impl_traits!(if_at_least_one $(($N, $T)),*);
-
         impl_at_trait!(! $(($N, $T)),*);
+        impl_concat!($(($N, $T)),*);
     };
 
     (if_at_least_one ($fN: tt, $fT: ident) $(,($N: tt, $T: ident))*) => {
