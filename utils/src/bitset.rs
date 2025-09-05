@@ -140,9 +140,8 @@ impl<T> BitSet<T>
         }
     }
 
-    #[inline]
-    pub fn iter(&self) -> impl Iterator<Item = T> {
-        self.words.iter().copied().enumerate()
+    fn iter_from_words(words: impl Iterator<Item = usize>) -> impl Iterator<Item = T> {
+        words.enumerate()
             .flat_map(|(word_idx, mut word)| {
                 let base = word_idx * WORD_BIT_SIZE;
                 std::iter::from_fn(move || {
@@ -154,6 +153,16 @@ impl<T> BitSet<T>
                 })
             })
             .map(T::from_usize)
+    }
+
+    #[inline]
+    pub fn into_iter(self) -> impl Iterator<Item = T> {
+        Self::iter_from_words(self.words.into_iter())
+    }
+
+    #[inline]
+    pub fn iter(&self) -> impl Iterator<Item = T> {
+        Self::iter_from_words(self.words.iter().copied())
     }
 
     #[inline]
@@ -182,6 +191,28 @@ impl<T> Debug for BitSet<T>
                     .finish()
             })
             .finish()
+    }
+}
+
+impl<T> IntoIterator for BitSet<T>
+    where T: BitSetIndex,
+{
+    type Item = T;
+    type IntoIter = impl Iterator<Item = T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        BitSet::into_iter(self)
+    }
+}
+
+impl<'a, T> IntoIterator for &'a BitSet<T>
+    where T: BitSetIndex,
+{
+    type Item = T;
+    type IntoIter = impl Iterator<Item = T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        BitSet::iter(self)
     }
 }
 
