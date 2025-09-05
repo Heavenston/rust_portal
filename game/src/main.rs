@@ -1,6 +1,8 @@
 #![feature(iter_array_chunks)]
 #![feature(array_repeat)]
 
+#![forbid(unsafe_code)]
+
 mod application;
 use application::*;
 

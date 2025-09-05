@@ -7,6 +7,8 @@
 #![feature(debug_closure_helpers)]
 #![feature(never_type)]
 
+#![forbid(unsafe_code)]
+
 pub mod sparse_set;
 mod world_utils;
 pub mod world;

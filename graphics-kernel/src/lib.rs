@@ -1,5 +1,7 @@
 #![feature(iter_array_chunks)]
 
+#![forbid(unsafe_code)]
+
 mod graphics_kernel;
 pub use graphics_kernel::*;
 pub mod color;

@@ -3,6 +3,8 @@
 // let me do like in C++ mouhahaha
 #![allow(irrefutable_let_patterns)]
 
+#![forbid(unsafe_code)]
+
 use std::collections::HashMap;
 
 mod parser;

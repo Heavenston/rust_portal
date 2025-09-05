@@ -11,6 +11,8 @@
 #![expect(internal_features)]
 #![expect(incomplete_features)]
 
+#![forbid(unsafe_code)]
+
 pub mod prelude {
     pub use crate::{
         ix, dix, trait_alias,
