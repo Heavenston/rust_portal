@@ -10,6 +10,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(auto_traits)]
 #![feature(negative_impls)]
+#![feature(associated_type_defaults)]
 
 #![expect(internal_features)]
 #![expect(incomplete_features)]
@@ -40,6 +41,7 @@ pub mod prelude {
         bitset::{ BitSetIndex, BitSet },
         maybe_default::{ MaybeDefault },
         tuple_traits::{ HomogeneousTuple, Tuple, TupleAt, TupleIteratorExt },
+        partial_bool::{ BoolValue, Bool, PartialBool, True, False, BoolAnd, BoolOr, BoolNot },
     };
 }
 
@@ -66,6 +68,7 @@ pub mod either_of;
 pub mod bitset;
 pub mod maybe_default;
 pub mod tuple_traits;
+pub mod partial_bool;
 
 use std::hash::{ DefaultHasher, Hash, Hasher };
 
