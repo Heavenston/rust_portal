@@ -1,15 +1,16 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
-mod parameters;
-use std::iter::{repeat, zip};
-
-pub use parameters::*;
+mod runtime_parameters;
+pub use runtime_parameters::*;
+mod typed_parameters;
+pub use typed_parameters::*;
 mod modifiers;
 pub use modifiers::*;
 
-use super::*;
+use super::{ World, ArchetypId, Entity, EntityIndex };
 
+use std::{ borrow::Cow, iter::{ empty, repeat, zip } };
 use utils::itertools::izip;
 use utils::prelude::*;
 
@@ -29,12 +30,13 @@ mod private {
 
     pub trait QueryParameterImpl {
         type CreationConfig;
+        type RequiresPerEntityMatchingBool: PartialBool;
         type ValueMut<'a>;
         type ArchetypMatch: Clone;
 
         fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self;
 
-        fn requires_per_entity_matching(&self) -> bool;
+        fn requires_per_entity_matching(&self) -> Self::RequiresPerEntityMatchingBool;
 
         fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::ArchetypMatch>;
 
@@ -159,7 +161,7 @@ impl<P: QueryParameterImpl> Query<P> {
                 world.archetypes[archetyp_id].entities.iter(),
             ))
             .filter(move |&(archetyp_id, ref matched, entity)|
-                !requires_per_entity_matching ||
+                !requires_per_entity_matching.is_true() ||
                     self.parameters.match_entity(world, &matched, entity)
             )
     }
@@ -209,7 +211,7 @@ impl<P: QueryParameterImpl> Query<P> {
             return Err(QueryGetError::NotMatched { entity });
         };
 
-        if self.parameters.requires_per_entity_matching() &&
+        if self.parameters.requires_per_entity_matching().is_true() &&
             !self.parameters.match_entity(world, &archetyp_match, entity.index())
         {
             return Err(QueryGetError::NotMatched { entity });

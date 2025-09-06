@@ -639,6 +639,7 @@ impl Drop for DynVec {
 ///
 /// The value can then be then be read as an Any trait object or casted into
 /// its real type.
+#[derive(Clone, Copy)]
 pub struct DynVecValueRef<'a> {
     vec: &'a DynVec,
     idx: usize,

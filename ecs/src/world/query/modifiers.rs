@@ -19,6 +19,7 @@ impl<C> QueryParameterImpl for Optional<C>
     where C: QueryParameterImpl,
 {
     type CreationConfig = C::CreationConfig;
+    type RequiresPerEntityMatchingBool = False;
     type ValueMut<'a> = Option<C::ValueMut<'a>>;
     type ArchetypMatch = Option<C::ArchetypMatch>;
 
@@ -28,9 +29,9 @@ impl<C> QueryParameterImpl for Optional<C>
         }
     }
 
-    fn requires_per_entity_matching(&self) -> bool {
+    fn requires_per_entity_matching(&self) -> False {
         // we never need to check per entity as we always match it (but return None)
-        false
+        False
     }
 
     fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Option<C::ArchetypMatch>> {
@@ -61,7 +62,8 @@ impl<C> QueryParameterImmutableImpl for Optional<C>
     ) -> Option<C::Value<'a>> {
         let child_archetyp_match = archetyp_match.as_ref()?;
 
-        if self.child.requires_per_entity_matching() && !self.child.match_entity(world, child_archetyp_match, entity){
+        if self.child.requires_per_entity_matching().is_true() &&
+            !self.child.match_entity(world, child_archetyp_match, entity){
             return None;
         }
 
@@ -80,6 +82,7 @@ impl<C> QueryParameterImpl for NoFetch<C>
     where C: QueryParameterImpl,
 {
     type CreationConfig = C::CreationConfig;
+    type RequiresPerEntityMatchingBool = C::RequiresPerEntityMatchingBool;
     type ValueMut<'a> = C::ValueMut<'a>;
     type ArchetypMatch = C::ArchetypMatch;
 
@@ -89,7 +92,7 @@ impl<C> QueryParameterImpl for NoFetch<C>
         }
     }
 
-    fn requires_per_entity_matching(&self) -> bool {
+    fn requires_per_entity_matching(&self) -> C::RequiresPerEntityMatchingBool {
         self.child.requires_per_entity_matching()
     }
 
@@ -131,6 +134,7 @@ impl<C> QueryParameterImpl for Not<C>
     where C: QueryParameterImpl,
 {
     type CreationConfig = C::CreationConfig;
+    type RequiresPerEntityMatchingBool = C::RequiresPerEntityMatchingBool;
     type ValueMut<'a> = ();
     type ArchetypMatch = Option<C::ArchetypMatch>;
 
@@ -140,14 +144,14 @@ impl<C> QueryParameterImpl for Not<C>
         }
     }
 
-    fn requires_per_entity_matching(&self) -> bool {
+    fn requires_per_entity_matching(&self) -> C::RequiresPerEntityMatchingBool {
         self.child.requires_per_entity_matching()
     }
 
     fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Option<C::ArchetypMatch>> {
         // We cannot make any assumption about the whole archetyp if it requires
         // fined-grain filtering
-        if self.child.requires_per_entity_matching() {
+        if self.child.requires_per_entity_matching().is_true() {
             Some(self.child.match_archetyp(world, archetyp_id))
         }
         else {
@@ -195,6 +199,7 @@ mod private {
     use super::*;
 
     pub trait QueryParameterTupleImpl {
+        type RequiresPerEntityMatchingBool: PartialBool;
         type CreationConfig;
 
         type AndValueMut<'a>;
@@ -205,7 +210,7 @@ mod private {
 
         fn new(world: &World, cfg: Self::CreationConfig) -> Self;
 
-        fn requires_per_entity_matching(&self) -> bool;
+        fn requires_per_entity_matching(&self) -> Self::RequiresPerEntityMatchingBool;
 
         fn and_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::AndArchetypMatch>;
         fn or_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::OrArchetypMatch>;
@@ -225,11 +230,26 @@ mod private {
         ) -> bool;
     }
 
+    macro_rules! bool_or_all {
+        ($first: ty) => { Bool<<$first as PartialBool>::T, <$first as PartialBool>::F> };
+        ($first: ty $(, $rest: ty)+) => {
+            BoolOr<$first, bool_or_all!($($rest),*)>
+        };
+    }
+
+    macro_rules! bool_or_else {
+        ($first: expr) => { $first.into_bool() };
+        ($first: expr $(, $rest: expr)+) => {
+            PartialBool::or_else($first, || bool_or_else!($($rest),*))
+        };
+    }
+
     macro_rules! impl_query_parameter_tuple {
         ($($T:ident),*) => {
             impl<$($T),*> QueryParameterTupleImpl for ($($T,)*)
                 where $($T: QueryParameter,)*
             {
+                type RequiresPerEntityMatchingBool = bool_or_all!($($T::RequiresPerEntityMatchingBool),*);
                 type CreationConfig = ($($T::CreationConfig,)*);
 
                 type AndValueMut<'a> = ($($T::ValueMut::<'a>,)*);
@@ -242,8 +262,8 @@ mod private {
                     ($($T::new(world, config.${index()}),)*)
                 }
 
-                fn requires_per_entity_matching(&self) -> bool {
-                    ($($T::requires_per_entity_matching(&self.${index()}))||*)
+                fn requires_per_entity_matching(&self) -> Self::RequiresPerEntityMatchingBool {
+                    bool_or_else!($($T::requires_per_entity_matching(&self.${index()})),*)
                 }
 
                 fn and_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::AndArchetypMatch> {
@@ -358,6 +378,7 @@ impl<Tuple> QueryParameterImpl for And<Tuple>
     where Tuple: QueryParameterTuple,
 {
     type CreationConfig = Tuple::CreationConfig;
+    type RequiresPerEntityMatchingBool = Tuple::RequiresPerEntityMatchingBool;
     type ValueMut<'a> = Tuple::AndValueMut<'a>;
     type ArchetypMatch = Tuple::AndArchetypMatch;
 
@@ -367,7 +388,7 @@ impl<Tuple> QueryParameterImpl for And<Tuple>
         }
     }
 
-    fn requires_per_entity_matching(&self) -> bool {
+    fn requires_per_entity_matching(&self) -> Tuple::RequiresPerEntityMatchingBool {
         self.tuple.requires_per_entity_matching()
     }
 
@@ -381,7 +402,7 @@ impl<Tuple> QueryParameterImpl for And<Tuple>
         archetyp_match: &Self::ArchetypMatch,
         entity: EntityIndex,
     ) -> bool {
-        debug_assert!(self.requires_per_entity_matching());
+        debug_assert!(self.requires_per_entity_matching().is_true());
 
         self.tuple.and_match_entity(world, archetyp_match, entity)
     }
@@ -414,6 +435,7 @@ impl<Tuple> QueryParameterImpl for Or<Tuple>
     where Tuple: QueryParameterTuple,
 {
     type CreationConfig = Tuple::CreationConfig;
+    type RequiresPerEntityMatchingBool = Tuple::RequiresPerEntityMatchingBool;
     type ValueMut<'a> = Tuple::OrValueMut<'a>;
     type ArchetypMatch = Tuple::OrArchetypMatch;
 
@@ -423,7 +445,7 @@ impl<Tuple> QueryParameterImpl for Or<Tuple>
         }
     }
 
-    fn requires_per_entity_matching(&self) -> bool {
+    fn requires_per_entity_matching(&self) -> Tuple::RequiresPerEntityMatchingBool {
         self.tuple.requires_per_entity_matching()
     }
 
@@ -437,7 +459,7 @@ impl<Tuple> QueryParameterImpl for Or<Tuple>
         archetyp_match: &Self::ArchetypMatch,
         entity: EntityIndex,
     ) -> bool {
-        debug_assert!(self.requires_per_entity_matching());
+        debug_assert!(self.requires_per_entity_matching().is_true());
 
         self.tuple.or_match_entity(world, archetyp_match, entity)
     }
