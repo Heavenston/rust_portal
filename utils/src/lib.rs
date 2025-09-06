@@ -11,6 +11,7 @@
 #![feature(auto_traits)]
 #![feature(negative_impls)]
 #![feature(associated_type_defaults)]
+#![feature(associated_const_equality)]
 
 #![expect(internal_features)]
 #![expect(incomplete_features)]
@@ -42,6 +43,7 @@ pub mod prelude {
         maybe_default::{ MaybeDefault },
         tuple_traits::{ HomogeneousTuple, Tuple, TupleAt, TupleIteratorExt },
         partial_bool::{
+            BoolValueFrom, BoolValueInto,
             BoolValue, Bool, PartialBool, True, False,
             BoolValueAnd, BoolValueNot, BoolValueOr,
             BoolAnd, BoolOr, BoolNot

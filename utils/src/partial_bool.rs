@@ -4,12 +4,45 @@ mod sealed {
     pub trait PrivatePartialBool { }
 }
 
-pub trait BoolValue: std::fmt::Debug + Copy + sealed::PrivateBoolValue {
+pub trait BoolValueFrom<O>
+    where O: BoolValue,
+{
+    fn bool_value_from(other: O) -> Self;
+}
+
+impl BoolValueFrom<!> for ! {
+    fn bool_value_from(_: !) -> ! { unreachable!() }
+}
+
+impl<O> BoolValueFrom<O> for ()
+    where O: BoolValue,
+{
+    /// O can be either [`!`] or [`()`]:
+    ///   - If is is the never type this method can never be called
+    ///   - If it is the tuple type this is just doing `() -> ()`
+    fn bool_value_from(_: O) { }
+}
+
+pub trait BoolValueInto<O>
+    where O: BoolValue
+{
+    fn bool_value_into(self) -> O;
+}
+
+impl<A: BoolValue, B: BoolValue> BoolValueInto<B> for A
+    where B: BoolValueFrom<A>
+{
+    fn bool_value_into(self) -> B {
+        B::bool_value_from(self)
+    }
+}
+
+pub trait BoolValue: std::fmt::Debug + Copy + BoolValueFrom<Self> + BoolValueInto<Self> + BoolValueFrom<!> + sealed::PrivateBoolValue {
     const INHABITED: bool;
     /// Type is INHABITED if both Self and O are INHABITED
     type And<O: BoolValue>: BoolValue;
     /// Type is INHABITED if one of Self or O are INHABITED
-    type Or<O: BoolValue>: BoolValue;
+    type Or<O: BoolValue>: BoolValue + BoolValueFrom<Self> + BoolValueFrom<O>;
     type Not: BoolValue;
 
     fn and<O: BoolValue>(self, other: O) -> Self::And<O>;
