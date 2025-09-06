@@ -5,7 +5,10 @@ use crate::world::{
 
 use utils::prelude::*;
 
-impl QueryParameterImpl for Entity {
+#[derive(Default, Debug, Clone, Copy)]
+pub struct EntityHandle;
+
+impl QueryParameterImpl for EntityHandle {
     type CreationConfig = ();
     type RequiresPerEntityMatchingBool = False;
     type ValueMut<'a> = Entity;
@@ -13,7 +16,7 @@ impl QueryParameterImpl for Entity {
     type ArchetypMatchError = !;
 
     fn new(world: &World, (): ()) -> Self {
-        default()
+        EntityHandle
     }
 
     fn requires_per_entity_matching(&self) -> False {
@@ -34,7 +37,7 @@ impl QueryParameterImpl for Entity {
     }
 }
 
-impl QueryParameterImmutableImpl for Entity {
+impl QueryParameterImmutableImpl for EntityHandle {
     type Value<'a> = Entity;
 
     fn get<'s, 'a>(
@@ -48,7 +51,7 @@ impl QueryParameterImmutableImpl for Entity {
     }
 }
 
-pub type Always = super::NoFetch<Entity>;
+pub type Always = super::NoFetch<EntityHandle>;
 pub type Never = super::Not<Always>;
 
 #[derive(Debug, Clone, Copy)]

@@ -921,6 +921,7 @@ mod queries {
     fn always() {
         let ctx = create_ctx();
         let query = q::Query::<q::Always>::new(&ctx.world);
+        assert_eq!(size_of::<q::Always>(), 0);
 
         assert_eq!(
             query.entities(&ctx.world)
@@ -939,6 +940,7 @@ mod queries {
     fn never() {
         let ctx = create_ctx();
         let query = q::Query::<q::Never>::new(&ctx.world);
+        assert_eq!(size_of::<q::Never>(), 0);
 
         assert_eq!(
             query.entities(&ctx.world).collect_vec(),
@@ -1028,7 +1030,7 @@ mod queries {
     #[test]
     fn ref_simple_1() {
         let ctx = create_ctx();
-        let query = q::Query::<q::And<(Entity, q::Ref<TestComponent1>)>>::new(&ctx.world);
+        let query = q::Query::<q::And<(q::EntityHandle, q::Ref<TestComponent1>)>>::new(&ctx.world);
 
         assert_eq!(
             query.iter(&ctx.world)
@@ -1044,7 +1046,7 @@ mod queries {
     #[test]
     fn ref_simple_2() {
         let ctx = create_ctx();
-        let query = q::Query::<q::And<(Entity, q::Ref<TestComponent2>)>>::new(&ctx.world);
+        let query = q::Query::<q::And<(q::EntityHandle, q::Ref<TestComponent2>)>>::new(&ctx.world);
 
         assert_eq!(
             query.iter(&ctx.world)
@@ -1060,7 +1062,7 @@ mod queries {
     #[test]
     fn ref_and_has() {
         let ctx = create_ctx();
-        let query = q::Query::<q::And<(Entity, q::Has<TestComponent1>, q::Ref<TestComponent2>)>>::new(&ctx.world);
+        let query = q::Query::<q::And<(q::EntityHandle, q::Has<TestComponent1>, q::Ref<TestComponent2>)>>::new(&ctx.world);
 
         assert_eq!(
             query.iter(&ctx.world)
@@ -1075,7 +1077,7 @@ mod queries {
     #[test]
     fn ref_and_not_has() {
         let ctx = create_ctx();
-        let query = q::Query::<q::And<(Entity, q::Not<q::Has<TestComponent1>>, q::Ref<TestComponent2>)>>::new(&ctx.world);
+        let query = q::Query::<q::And<(q::EntityHandle, q::Not<q::Has<TestComponent1>>, q::Ref<TestComponent2>)>>::new(&ctx.world);
 
         assert_eq!(
             query.iter(&ctx.world)
@@ -1090,7 +1092,7 @@ mod queries {
     #[test]
     fn stays_up_to_date() {
         let mut ctx = create_ctx();
-        let query = q::Query::<q::And<(Entity, q::Ref<TestComponent1>)>>::new(&ctx.world);
+        let query = q::Query::<q::And<(q::EntityHandle, q::Ref<TestComponent1>)>>::new(&ctx.world);
 
         assert_eq!(
             query.iter(&ctx.world)
