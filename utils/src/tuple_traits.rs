@@ -16,13 +16,16 @@ pub use iter_tuple_map_nth::*;
 fn transmute_array_i_assure_you_its_the_same_size<const A: usize, const B: usize, T>(
     a: [T; A],
 ) -> [T; B] {
+    // Both should be equivalent anyway
     assert_eq!(A, B);
+    assert_eq!(size_of::<[T; A]>(), size_of::<[T; B]>());
+
     let mut maybe_a = MaybeUninit::new(a);
-    let ptr_a: &mut MaybeUninit<[T; A]> = &mut maybe_a;
     // they **ARE** the same size
-    let ptr_b: &mut MaybeUninit<[T; B]> = unsafe { std::mem::transmute(ptr_a) };
+    let ptr_b = &raw mut maybe_a as *mut _;
+    let ref_b: &mut MaybeUninit<[T; B]> = unsafe { &mut *ptr_b };
     // Created already init
-    unsafe { ptr_b.assume_init_read() }
+    unsafe { ref_b.assume_init_read() }
 }
 
 /// Simple mapper for mapping any type T to another one
