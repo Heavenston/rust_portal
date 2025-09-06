@@ -10,6 +10,7 @@ impl QueryParameterImpl for Entity {
     type RequiresPerEntityMatchingBool = False;
     type ValueMut<'a> = Entity;
     type ArchetypMatch = ();
+    type ArchetypMatchError = !;
 
     fn new(world: &World, (): ()) -> Self {
         default()
@@ -19,8 +20,8 @@ impl QueryParameterImpl for Entity {
         False
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<()> {
-        Some(())
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<(), !> {
+        Ok(())
     }
 
     fn match_entity(
@@ -61,6 +62,7 @@ impl QueryParameterImpl for ComponentRef {
     type RequiresPerEntityMatchingBool = bool;
     type ValueMut<'a> = dynvec::DynVecValueRef<'a>;
     type ArchetypMatch = usize;
+    type ArchetypMatchError = ();
 
     fn new(world: &World, component: ComponentEntity) -> Self {
         Self {
@@ -73,8 +75,8 @@ impl QueryParameterImpl for ComponentRef {
         self.requires_per_entity_matching
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<usize> {
-        Some(world.archetypes[archetyp_id].components.index_of(self.component)?)
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<usize, ()> {
+        Ok(world.archetypes[archetyp_id].components.index_of(self.component).ok_or(())?)
     }
 
     fn match_entity(
@@ -116,6 +118,7 @@ impl QueryParameterImpl for ComponentRefMut {
     type CreationConfig = ComponentEntity;
     type ValueMut<'a> = dynvec::DynVecValueRefMut<'a>;
     type ArchetypMatch = usize;
+    type ArchetypMatchError = ();
 
     fn new(world: &World, component: ComponentEntity) -> Self {
         Self {
@@ -128,8 +131,8 @@ impl QueryParameterImpl for ComponentRefMut {
         self.requires_per_entity_matching
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::ArchetypMatch> {
-        Some(world.archetypes[archetyp_id].components.index_of(self.component)?)
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<Self::ArchetypMatch, ()> {
+        Ok(world.archetypes[archetyp_id].components.index_of(self.component).ok_or(())?)
     }
 
     fn match_entity(

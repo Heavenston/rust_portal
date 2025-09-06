@@ -1,48 +1,21 @@
 
 mod sealed {
-    pub trait PrivateBoolValue { }
+    pub trait PrivateBoolValue {
+        /// AVOID USING AT ALL COSTS, this requires being sure that this is
+        /// only reachable when Self = ()
+        ///
+        /// Still WAY easier to use then try to reconstruct with BoolValue::and etc...
+        fn value() -> Self;
+    }
     pub trait PrivatePartialBool { }
 }
 
-pub trait BoolValueFrom<O>
-    where O: BoolValue,
-{
-    fn bool_value_from(other: O) -> Self;
-}
-
-impl BoolValueFrom<!> for ! {
-    fn bool_value_from(_: !) -> ! { unreachable!() }
-}
-
-impl<O> BoolValueFrom<O> for ()
-    where O: BoolValue,
-{
-    /// O can be either [`!`] or [`()`]:
-    ///   - If is is the never type this method can never be called
-    ///   - If it is the tuple type this is just doing `() -> ()`
-    fn bool_value_from(_: O) { }
-}
-
-pub trait BoolValueInto<O>
-    where O: BoolValue
-{
-    fn bool_value_into(self) -> O;
-}
-
-impl<A: BoolValue, B: BoolValue> BoolValueInto<B> for A
-    where B: BoolValueFrom<A>
-{
-    fn bool_value_into(self) -> B {
-        B::bool_value_from(self)
-    }
-}
-
-pub trait BoolValue: std::fmt::Debug + Copy + BoolValueFrom<Self> + BoolValueInto<Self> + BoolValueFrom<!> + sealed::PrivateBoolValue {
+pub trait BoolValue: std::fmt::Debug + Copy + sealed::PrivateBoolValue {
     const INHABITED: bool;
     /// Type is INHABITED if both Self and O are INHABITED
     type And<O: BoolValue>: BoolValue;
     /// Type is INHABITED if one of Self or O are INHABITED
-    type Or<O: BoolValue>: BoolValue + BoolValueFrom<Self> + BoolValueFrom<O>;
+    type Or<O: BoolValue>: BoolValue;
     type Not: BoolValue;
 
     fn and<O: BoolValue>(self, other: O) -> Self::And<O>;
@@ -50,7 +23,9 @@ pub trait BoolValue: std::fmt::Debug + Copy + BoolValueFrom<Self> + BoolValueInt
     fn or_right<O: BoolValue>(_: O) -> Self::Or<O>;
 }
 
-impl sealed::PrivateBoolValue for () { }
+impl sealed::PrivateBoolValue for () {
+    fn value() { }
+}
 impl BoolValue for () {
     const INHABITED: bool = true;
     type And<O: BoolValue> = O;
@@ -62,7 +37,7 @@ impl BoolValue for () {
     fn or_right<O: BoolValue>(_: O) -> Self::Or<O> { () }
 }
 
-impl sealed::PrivateBoolValue for ! { }
+impl sealed::PrivateBoolValue for ! { fn value() -> ! { unreachable!() } }
 impl BoolValue for ! {
     const INHABITED: bool = false;
     type And<O: BoolValue> = !;
@@ -80,6 +55,72 @@ impl BoolValue for ! {
 pub type BoolValueAnd<A, B> = <A as BoolValue>::And<B>;
 pub type BoolValueOr<A, B> = <A as BoolValue>::Or<B>;
 pub type BoolValueNot<A> = <A as BoolValue>::Not;
+
+pub trait TupleOfBoolValues {
+    type And: BoolValue;
+    type Or: BoolValue;
+    type Not: TupleOfBoolValues;
+
+    fn and_from_all(all: Self) -> Self::And;
+}
+
+pub trait TupleOfBoolValuesOrFrom<const N: usize, T>: TupleOfBoolValues {
+    fn from(val: T) -> Self::Or;
+}
+
+macro_rules! bool_value_and_all {
+    ($first: ty) => { $first };
+    ($first: ty $(, $rest: ty)+) => {
+        BoolValueAnd<$first, bool_value_and_all!($($rest),*)>
+    };
+}
+
+macro_rules! bool_value_or_all {
+    ($first: ty) => { $first };
+    ($first: ty $(, $rest: ty)+) => {
+        BoolValueOr<$first, bool_value_or_all!($($rest),*)>
+    };
+}
+
+macro_rules! impl_tuple_of_bool_values_or_from {
+    ($(($N:tt, $T:ident)),* !) => {
+    };
+    ($(($N:tt, $T:ident)),* ! ($mn: tt, $main: ident) $(, ($rn: tt, $rest: ident))*) => {
+        impl<$($T,)* $main, $($rest,)*> TupleOfBoolValuesOrFrom<$mn, $main> for ($($T,)* $main, $($rest,)*)
+            where $($T: BoolValue,)* $main: BoolValue, $($rest: BoolValue,)*
+        {
+            fn from(_: $main) -> Self::Or {
+                // We have a value of from the tuple so its inhabited (the function wouldn't be called otherwise)
+                // so `bool_value_or_all!($($T),*)` is necessarily inhabited too
+                <Self::Or as sealed::PrivateBoolValue>::value()
+            }
+        }
+
+        impl_tuple_of_bool_values_or_from!($(($N, $T),)* ($mn, $main) ! $(($rn,$rest)),*);
+    };
+}
+
+macro_rules! impl_tuple_of_bool_value {
+    // ($name: ident, $(($N:tt, $U: ident, $T: ident, $V: ident)),*) => {
+    ($(($N:tt, $U: ident, $T: ident, $V: ident)),*) => {
+        impl<$($T),*> TupleOfBoolValues for ($($T,)*)
+            where $($T: BoolValue,)*
+        {
+            type And = bool_value_and_all!($($T),*);
+            type Or = bool_value_or_all!($($T),*);
+            type Not = ($($T::Not,)*);
+
+            /// We have all values in the And as arguments, so they are all
+            /// inhabited so Self::And is inhabited too
+            fn and_from_all(_: Self) -> Self::And {
+                <Self::And as sealed::PrivateBoolValue>::value()
+            }
+        }
+
+        impl_tuple_of_bool_values_or_from!(! $(($N,$T)),*);
+    };
+}
+variadics_please::all_tuples_enumerated!(impl_tuple_of_bool_value, 1, 4, U, T, V);
 
 pub type BoolAnd<A, B> = Bool<<<A as PartialBool>::T as BoolValue>::And<<B as PartialBool>::T>, <<A as PartialBool>::F as BoolValue>::Or<<B as PartialBool>::F>>;
 pub type BoolOr<A, B> = Bool<<<A as PartialBool>::T as BoolValue>::Or<<B as PartialBool>::T>, <<A as PartialBool>::F as BoolValue>::And<<B as PartialBool>::F>>;

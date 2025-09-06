@@ -26,6 +26,7 @@ impl<C> QueryParameterImpl for Ref<C>
     type RequiresPerEntityMatchingBool = bool;
     type ValueMut<'a> = &'a C;
     type ArchetypMatch = <ComponentRef as QueryParameterImpl>::ArchetypMatch;
+    type ArchetypMatchError = ();
 
     fn new(world: &World, (): ()) -> Self {
         Self {
@@ -38,8 +39,8 @@ impl<C> QueryParameterImpl for Ref<C>
         self.child.is_some_and(|has_component| has_component.requires_per_entity_matching())
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<usize> {
-        self.child?.match_archetyp(world, archetyp_id)
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<usize, ()> {
+        self.child.ok_or(())?.match_archetyp(world, archetyp_id)
     }
 
     fn match_entity(
@@ -88,6 +89,7 @@ impl<C> QueryParameterImpl for RefMut<C>
     type RequiresPerEntityMatchingBool = bool;
     type ValueMut<'a> = &'a mut C;
     type ArchetypMatch = <ComponentRefMut as QueryParameterImpl>::ArchetypMatch;
+    type ArchetypMatchError = ();
 
     fn new(world: &World, (): ()) -> Self {
         Self {
@@ -100,8 +102,8 @@ impl<C> QueryParameterImpl for RefMut<C>
         self.child.is_some_and(|has_component| has_component.requires_per_entity_matching())
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<usize> {
-        self.child?.match_archetyp(world, archetyp_id)
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<usize, ()> {
+        self.child.ok_or(())?.match_archetyp(world, archetyp_id)
     }
 
     fn match_entity(

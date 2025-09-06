@@ -33,12 +33,13 @@ mod private {
         type RequiresPerEntityMatchingBool: PartialBool;
         type ValueMut<'a>;
         type ArchetypMatch: Clone;
+        type ArchetypMatchError: BoolValue;
 
         fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self;
 
         fn requires_per_entity_matching(&self) -> Self::RequiresPerEntityMatchingBool;
 
-        fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Option<Self::ArchetypMatch>;
+        fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<Self::ArchetypMatch, Self::ArchetypMatchError>;
 
         /// Only called if the entity's archetypes matches (giving the value back).
         /// The entity is guarenteed to be alive.
@@ -118,7 +119,7 @@ impl<P: QueryParameterImpl> Query<P> {
     fn generate_archetypes(&self, world: &World) -> impl Iterator<Item = (ArchetypId, P::ArchetypMatch)> {
         // FIXME: With lots of archtyps this could get slow
         world.archetypes.indices()
-            .filter_map(|archetyp_id| Some(archetyp_id).zip(self.parameters.match_archetyp(world, archetyp_id)))
+            .filter_map(|archetyp_id| Some(archetyp_id).zip(self.parameters.match_archetyp(world, archetyp_id).ok()))
     }
 
     pub fn cache_matches(&mut self, world: &World) {
@@ -206,7 +207,7 @@ impl<P: QueryParameterImpl> Query<P> {
                 ))
         } else {
             self.parameters.match_archetyp(world, archetyp_id)
-                .map(Cow::Owned)
+                .ok().map(Cow::Owned)
         }) else {
             return Err(QueryGetError::NotMatched { entity });
         };

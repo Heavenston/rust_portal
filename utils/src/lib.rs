@@ -12,6 +12,7 @@
 #![feature(negative_impls)]
 #![feature(associated_type_defaults)]
 #![feature(associated_const_equality)]
+#![feature(macro_metavar_expr_concat)]
 
 #![expect(internal_features)]
 #![expect(incomplete_features)]
@@ -43,8 +44,8 @@ pub mod prelude {
         maybe_default::{ MaybeDefault },
         tuple_traits::{ HomogeneousTuple, Tuple, TupleAt, TupleIteratorExt },
         partial_bool::{
-            BoolValueFrom, BoolValueInto,
             BoolValue, Bool, PartialBool, True, False,
+            TupleOfBoolValuesOrFrom, TupleOfBoolValues,
             BoolValueAnd, BoolValueNot, BoolValueOr,
             BoolAnd, BoolOr, BoolNot
         },
