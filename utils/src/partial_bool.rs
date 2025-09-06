@@ -1,21 +1,7 @@
 
 mod sealed {
-    use super::BoolValue;
-
-    pub trait PrivateBoolValue {
-        fn value() -> Self;
-    }
+    pub trait PrivateBoolValue { }
     pub trait PrivatePartialBool { }
-
-    pub trait BoolValueAnd<O: BoolValue> {
-        type Out: BoolValue;
-    }
-    impl<A: BoolValue, B: BoolValue> BoolValueAnd<A> for B { default type Out = (); }
-
-    pub trait BoolValueOr<O: BoolValue> {
-        type Out: BoolValue;
-    }
-    impl<A: BoolValue, B: BoolValue> BoolValueOr<A> for B { default type Out = (); }
 }
 
 pub trait BoolValue: std::fmt::Debug + Copy + sealed::PrivateBoolValue {
@@ -25,44 +11,46 @@ pub trait BoolValue: std::fmt::Debug + Copy + sealed::PrivateBoolValue {
     /// Type is INHABITED if one of Self or O are INHABITED
     type Or<O: BoolValue>: BoolValue;
     type Not: BoolValue;
+
+    fn and<O: BoolValue>(self, other: O) -> Self::And<O>;
+    fn or_left<O: BoolValue>(self) -> Self::Or<O>;
+    fn or_right<O: BoolValue>(_: O) -> Self::Or<O>;
 }
 
-impl sealed::PrivateBoolValue for () {
-    fn value() -> Self { () }
-}
+impl sealed::PrivateBoolValue for () { }
 impl BoolValue for () {
     const INHABITED: bool = true;
-    type And<O: BoolValue> = <Self as sealed::BoolValueAnd<O>>::Out;
-    type Or<O: BoolValue> = <Self as sealed::BoolValueOr<O>>::Out;
+    type And<O: BoolValue> = O;
+    type Or<O: BoolValue> = ();
     type Not = !;
+
+    fn and<O: BoolValue>(self: (), other: O) -> Self::And<O> { other }
+    fn or_left<O: BoolValue>(self: ()) -> Self::Or<O> { () }
+    fn or_right<O: BoolValue>(_: O) -> Self::Or<O> { () }
 }
 
-impl sealed::BoolValueAnd<()> for () { type Out = (); }
-impl sealed::BoolValueAnd<!> for () { type Out = !; }
-impl sealed::BoolValueOr<()> for () { type Out = (); }
-impl sealed::BoolValueOr<!> for () { type Out = (); }
-
-impl sealed::PrivateBoolValue for ! {
-    fn value() -> Self { unreachable!() }
-}
+impl sealed::PrivateBoolValue for ! { }
 impl BoolValue for ! {
     const INHABITED: bool = false;
-    type And<O: BoolValue> = <Self as sealed::BoolValueAnd<O>>::Out;
-    type Or<O: BoolValue> = <Self as sealed::BoolValueOr<O>>::Out;
+    type And<O: BoolValue> = !;
+    type Or<O: BoolValue> = O;
     type Not = ();
+
+    /// Takes never as argument so we know we could never call this method
+    fn and<O: BoolValue>(self: !, _: O) -> Self::And<O> { unreachable!() }
+
+    /// Takes never as argument so we know we could never call this method
+    fn or_left<O: BoolValue>(self: !) -> Self::Or<O> { unreachable!() }
+    fn or_right<O: BoolValue>(other: O) -> Self::Or<O> { other }
 }
 
-impl sealed::BoolValueAnd<()> for ! { type Out = !; }
-impl sealed::BoolValueAnd<!> for ! { type Out = !; }
-impl sealed::BoolValueOr<()> for ! { type Out = (); }
-impl sealed::BoolValueOr<!> for ! { type Out = !; }
+pub type BoolValueAnd<A, B> = <A as BoolValue>::And<B>;
+pub type BoolValueOr<A, B> = <A as BoolValue>::Or<B>;
+pub type BoolValueNot<A> = <A as BoolValue>::Not;
 
-#[allow(type_alias_bounds)]
-pub type BoolAnd<A: PartialBool, B: PartialBool> = Bool<<A::T as BoolValue>::And<B::T>, <A::F as BoolValue>::Or<B::F>>;
-#[allow(type_alias_bounds)]
-pub type BoolOr<A: PartialBool, B: PartialBool> = Bool<<A::T as BoolValue>::Or<B::T>, <A::F as BoolValue>::And<B::F>>;
-#[allow(type_alias_bounds)]
-pub type BoolNot<A: PartialBool> = Bool<A::F, A::T>;
+pub type BoolAnd<A, B> = Bool<<<A as PartialBool>::T as BoolValue>::And<<B as PartialBool>::T>, <<A as PartialBool>::F as BoolValue>::Or<<B as PartialBool>::F>>;
+pub type BoolOr<A, B> = Bool<<<A as PartialBool>::T as BoolValue>::Or<<B as PartialBool>::T>, <<A as PartialBool>::F as BoolValue>::And<<B as PartialBool>::F>>;
+pub type BoolNot<A> = Bool<<A as PartialBool>::F, <A as PartialBool>::T>;
 
 pub trait PartialBool: Clone + Copy + sealed::PrivatePartialBool + Into<Bool<Self::T, Self::F>> + std::ops::Not {
     type T: BoolValue;
@@ -84,10 +72,10 @@ pub trait PartialBool: Clone + Copy + sealed::PrivatePartialBool + Into<Bool<Sel
 
     fn and_then<O: PartialBool>(self, other: impl FnOnce() -> O) -> BoolAnd<Self, O> {
         match self.into() {
-            Bool::False(_) => Bool::value_false(),
-            Bool::True(_) => match other().into() {
-                Bool::False(_) => Bool::value_false(),
-                Bool::True(_) => Bool::value_true(),
+            Bool::False(f1) => Bool::False(Self::F::or_left::<O::F>(f1)),
+            Bool::True(t1) => match other().into() {
+                Bool::False(f2) => Bool::False(Self::F::or_right::<O::F>(f2)),
+                Bool::True(t2) => Bool::True(Self::T::and::<O::T>(t1, t2)),
             },
         }
     }
@@ -98,10 +86,10 @@ pub trait PartialBool: Clone + Copy + sealed::PrivatePartialBool + Into<Bool<Sel
 
     fn or_else<O: PartialBool>(self, other: impl FnOnce() -> O) -> BoolOr<Self, O> {
         match self.into() {
-            Bool::True(_) => Bool::value_true(),
-            Bool::False(_) => match other().into() {
-                Bool::True(_) => Bool::value_true(),
-                Bool::False(_) => Bool::value_false(),
+            Bool::True(t1) => Bool::True(Self::T::or_left::<O::T>(t1)),
+            Bool::False(f1) => match other().into() {
+                Bool::True(t2) => Bool::True(Self::T::or_right::<O::T>(t2)),
+                Bool::False(f2) => Bool::False(Self::F::and::<O::F>(f1, f2)),
             },
         }
     }
@@ -125,21 +113,6 @@ pub enum Bool<T = (), F = ()>
 {
     True(T),
     False(F),
-}
-
-impl<T, F> Bool<T, F>
-    where T: BoolValue,
-          F: BoolValue,
-{
-    // Make sure you know this is unreachable if T is not inhabited
-    fn value_true() -> Self {
-        Self::True(T::value())
-    }
-    
-    // Make sure you know this is unreachable if F is not inhabited
-    fn value_false() -> Self {
-        Self::False(F::value())
-    }
 }
 
 impl Bool {
@@ -215,8 +188,9 @@ impl<Ta, Fa, Tb, Fb> std::ops::BitAnd<Bool<Tb, Fb>> for Bool<Ta, Fa>
 
     fn bitand(self, rhs: Bool<Tb, Fb>) -> Self::Output {
         match (self, rhs) {
-            (Bool::True(_), Bool::True(_)) => Bool::value_true(),
-            _ => Bool::value_false(),
+            (Bool::True(t1), Bool::True(t2)) => Bool::True(Ta::and(t1, t2)),
+            (Bool::False(f1), _) => Bool::False(Fa::or_left ::<Fb>(f1)),
+            (_, Bool::False(f2)) => Bool::False(Fa::or_right::<Fb>(f2)),
         }
     }
 }
@@ -229,8 +203,9 @@ impl<Ta, Fa, Tb, Fb> std::ops::BitOr<Bool<Tb, Fb>> for Bool<Ta, Fa>
 
     fn bitor(self, rhs: Bool<Tb, Fb>) -> Self::Output {
         match (self, rhs) {
-            (Bool::False(_), Bool::False(_)) => Bool::value_false(),
-            _ => Bool::value_true(),
+            (Bool::False(f1), Bool::False(f2)) => Bool::False(Fa::and(f1, f2)),
+            (Bool::True(t1), _) => Bool::True(Ta::or_left ::<Tb>(t1)),
+            (_, Bool::True(t2)) => Bool::True(Ta::or_right::<Tb>(t2)),
         }
     }
 }

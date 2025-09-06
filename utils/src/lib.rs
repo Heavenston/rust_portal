@@ -41,7 +41,11 @@ pub mod prelude {
         bitset::{ BitSetIndex, BitSet },
         maybe_default::{ MaybeDefault },
         tuple_traits::{ HomogeneousTuple, Tuple, TupleAt, TupleIteratorExt },
-        partial_bool::{ BoolValue, Bool, PartialBool, True, False, BoolAnd, BoolOr, BoolNot },
+        partial_bool::{
+            BoolValue, Bool, PartialBool, True, False,
+            BoolValueAnd, BoolValueNot, BoolValueOr,
+            BoolAnd, BoolOr, BoolNot
+        },
     };
 }
 
