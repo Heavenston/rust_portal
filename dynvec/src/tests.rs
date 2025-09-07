@@ -166,7 +166,7 @@ fn test_zst_unit_untyped() {
     // set with ZST keeps len
     let _ = v.set(2, Box::new(()));
     assert_eq!(v.len(), 5);
-    // swap_remove returns OwnedDynVecValue; convert to Box<dyn Any>
+    // swap_remove returns RemovedDynVecValue; convert to Box<dyn Any>
     let b = v.swap_remove(1).unwrap().into_boxed_any();
     assert!(b.downcast::<()>().is_ok());
     assert_eq!(v.len(), 4);

@@ -22,7 +22,7 @@ use std::{
 };
 use utils::prelude::*;
 use derive_more::{ IsVariant };
-use dynvec::{ DynVec, DynVecMetadata, DynVecValueRef, DynVecValueRefMut, OwnedDynVecValue };
+use dynvec::{ DynVec, DynVecMetadata, DynVecValueRef, DynVecValueRefMut, RemovedDynVecValue };
 
 const RESERVED_ENTITY_COUNT: u32 = 100;
 
@@ -761,7 +761,7 @@ impl World {
         &mut self,
         entity: impl Into<Entity>,
         component: ComponentEntity
-    ) -> Result<OptionalComponentRef<OwnedDynVecValue<'_>>, RemoveComponentError> {
+    ) -> Result<OptionalComponentRef<RemovedDynVecValue<'_>>, RemoveComponentError> {
         let entity = entity.into();
 
         if !self.alive(entity) {

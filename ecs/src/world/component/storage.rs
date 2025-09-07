@@ -15,7 +15,7 @@ use std::iter::{ empty, once };
 
 use utils::{ itertools::{ chain, zip_eq }, prelude::* };
 use derive_more::From;
-use dynvec::{ DynVec, IncorrectTypeError, InsertionError, OwnedDynVecValue };
+use dynvec::{ DynVec, IncorrectTypeError, InsertionError, RemovedDynVecValue };
 
 pub struct StorageComponentsRef<'a> {
     idx: usize,
@@ -72,7 +72,7 @@ impl SparseSetDenseStorage for ComponentDenseStorage {
     type DenseIdx = u32;
     type PrimitiveDenseIdx = u32;
 
-    type OwnedOutput<'a> = impl Iterator<Item = OwnedDynVecValue<'a>>
+    type OwnedOutput<'a> = impl Iterator<Item = RemovedDynVecValue<'a>>
         where Self: 'a;
     type RefItem<'a> = StorageComponentsRef<'a>
         where Self: 'a;
@@ -123,7 +123,7 @@ impl SparseSetDenseStorage for ComponentDenseStorage {
 
 #[derive(From)]
 pub enum ComponentDenseStorageInput<'a, 'b> {
-    DynVecValue(OwnedDynVecValue<'a>),
+    DynVecValue(RemovedDynVecValue<'a>),
     DynOption(&'b mut dyn DynOption),
     Default,
 }

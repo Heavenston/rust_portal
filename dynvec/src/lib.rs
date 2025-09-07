@@ -18,7 +18,7 @@
 //!   and provide fast typed methods without re-checking the type on every call.
 //! - Mutation:
 //!   - Untyped: `push`/`set` take `Box<dyn Any>`; removals `swap_remove`/`pop` return an owning
-//!     guard (OwnedDynVecValue) that can be consumed (e.g., `into_typed`, `push_into`, `set_into`).
+//!     guard (RemovedDynVecValue) that can be consumed (e.g., `into_typed`, `push_into`, `set_into`).
 //!   - Typed: use the typed views for `push`/`set`/`swap_remove`/`pop` with concrete types.
 //! - Iteration/collection: supports `Extend` and `FromIterator` so you can
 //!   `collect::<DynVec>()` from an iterator of `T` and `extend` typed views.
@@ -103,7 +103,7 @@ pub struct IndexOutOfBoundError {
 #[error("The type in this DynVec doesn't implement Default")]
 pub struct NoDefaultConstructorError;
 
-/// Error returned for [`DynVec::set`] and [`OwnedDynVecValue::set_into`]
+/// Error returned for [`DynVec::set`] and [`RemovedDynVecValue::set_into`]
 #[derive(thiserror::Error, Debug)]
 pub enum InsertionError {
     /// See [`IncorrectTypeError`]
@@ -513,13 +513,13 @@ impl DynVec {
 
         let new_ptr = self.push_and_get_ptr();
 
-        // Safety: destination is within allocation; `data_ptr` points to a valid T value.
+        // SAFETY: destination is within allocation; `data_ptr` points to a valid T value.
         unsafe {
             new_ptr.cast::<u8>()
                 .copy_from_nonoverlapping(val, self.meta.dyn_meta.layout().size());
         }
         // dealloc without running destructor
-        // Safety: val comes from the Box
+        // SAFETY: val comes from the Box
         unsafe { dealloc_or_dangling(val, self.meta.dyn_meta.layout()) };
 
         Ok(())
@@ -539,9 +539,8 @@ impl DynVec {
     /// Pops the last element, if any, returning an owning guard over that value.
     ///
     /// The element is actually removed from the vector when the returned guard is dropped.
-    pub fn pop(&mut self) -> Option<OwnedDynVecValue<'_>> {
-        if self.len == 0 { return None; }
-        Some(unsafe { self.swap_remove(self.len - 1).unwrap_unchecked() })
+    pub fn pop(&mut self) -> Option<RemovedDynVecValue<'_>> {
+        self.swap_remove(self.len - 1).ok()
     }
 
     /// Replaces the element at `idx`, dropping the previous value in place.
@@ -605,8 +604,8 @@ impl DynVec {
     /// assert_eq!(x, 10);
     /// assert_eq!(v.typed::<u64>().unwrap().as_slice(), &[20]);
     /// ```
-    pub fn swap_remove(&mut self, idx: usize) -> Result<OwnedDynVecValue<'_>, IndexOutOfBoundError> {
-        Ok(OwnedDynVecValue {
+    pub fn swap_remove(&mut self, idx: usize) -> Result<RemovedDynVecValue<'_>, IndexOutOfBoundError> {
+        Ok(RemovedDynVecValue {
             value_ptr: self.try_idx_ptr(idx)?,
             moved: false,
 
@@ -681,18 +680,18 @@ impl<'a> DynVecValueRefMut<'a> {
 /// The source vector is actually updated on `Drop` of this guard.
 ///
 /// Typical ways to consume the guard:
-/// - Move into another `DynVec` of the same type using [`OwnedDynVecValue::push_into`]
-/// - Overwrite a position in another `DynVec` using [`OwnedDynVecValue::set_into`]
-/// - Extract the concrete value with [`OwnedDynVecValue::into_typed`]
-/// - Box as `dyn Any` with [`OwnedDynVecValue::into_boxed_any`]
-pub struct OwnedDynVecValue<'a> {
+/// - Move into another `DynVec` of the same type using [`RemovedDynVecValue::push_into`]
+/// - Overwrite a position in another `DynVec` using [`RemovedDynVecValue::set_into`]
+/// - Extract the concrete value with [`RemovedDynVecValue::into_typed`]
+/// - Box as `dyn Any` with [`RemovedDynVecValue::into_boxed_any`]
+pub struct RemovedDynVecValue<'a> {
     vec: &'a mut DynVec,
     value_ptr: NonNull<()>,
     /// Set to [`true`] when the value referenced has been moved elsewhere
     moved: bool,
 }
 
-impl<'a> OwnedDynVecValue<'a> {
+impl<'a> RemovedDynVecValue<'a> {
     /// Consumes the guard and returns the value boxed as `dyn Any`.
     ///
     /// Allocates a new box and copies the bytes of the value into it.
@@ -791,7 +790,7 @@ impl<'a> OwnedDynVecValue<'a> {
     }
 }
 
-impl<'a> Drop for OwnedDynVecValue<'a> {
+impl<'a> Drop for RemovedDynVecValue<'a> {
     fn drop(&mut self) {
         debug_assert_ne!(self.vec.len, 0);
         let layout = self.vec.meta.dyn_meta.layout();
