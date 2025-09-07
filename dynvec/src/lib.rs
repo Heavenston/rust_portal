@@ -7,6 +7,7 @@
 #![feature(impl_trait_in_assoc_type)]
 
 #![warn(missing_docs)]
+
 //! Type-erased, single-type vector.
 //!
 //! DynVec is a growable vector whose element type is picked at runtime, yet
@@ -56,7 +57,7 @@ use std::ops::{ Deref, DerefMut };
 use std::ptr::{ self, from_raw_parts, from_raw_parts_mut, NonNull };
 use std::slice;
 
-use utils::prelude::MaybeDefault;
+use utils::{ maybe_clone::MaybeClone, maybe_default::MaybeDefault };
 
 #[cfg(test)]
 mod tests;
@@ -102,6 +103,12 @@ pub struct IndexOutOfBoundError {
 #[derive(thiserror::Error, Debug)]
 #[error("The type in this DynVec doesn't implement Default")]
 pub struct NoDefaultConstructorError;
+
+/// Error returned when trying to call [`DynVec::try_clone`] but the type
+/// doesn't implement Clone
+#[derive(thiserror::Error, Debug)]
+#[error("The type in this DynVec doesn't implement Clone")]
+pub struct NoCloneError;
 
 /// Error returned for [`DynVec::set`] and [`RemovedDynVecValue::set_into`]
 #[derive(thiserror::Error, Debug)]
@@ -167,6 +174,8 @@ pub struct DynVecMetadata {
     pub dyn_meta: std::ptr::DynMetadata<dyn Any>,
     /// Initialize the default for the type into the given pointer
     pub default_fn: Option<unsafe fn(NonNull<()>)>,
+    /// Clones the value from the first argument to the second argument
+    pub clone_fn: Option<unsafe fn(NonNull<()>, NonNull<()>)>,
     // Private dummy field to prevent external construction while keeping field reads possible.
     _priv: (),
 }
@@ -181,11 +190,20 @@ impl DynVecMetadata {
         let meta = std::ptr::metadata(obj);
 
         unsafe fn default_fn<T: 'static>(into: NonNull<()>) {
-            debug_assert!(<T as MaybeDefault>::maybe_default().is_some(), "This function should only be called when T: Default");
+            debug_assert!(<T as MaybeDefault>::maybe_default().is_some(), "This function is only called when T: Default");
             unsafe {
                 let maybe_default = <T as MaybeDefault>::maybe_default()
                     .unwrap_unchecked();
                 into.cast::<T>().write(maybe_default())
+            };
+        }
+
+        unsafe fn clone_fn<T: 'static>(from: NonNull<()>, into: NonNull<()>) {
+            debug_assert!(<T as MaybeClone>::maybe_clone().is_some(), "This function is only called when T: Clone");
+            unsafe {
+                let maybe_clone = <T as MaybeClone>::maybe_clone()
+                    .unwrap_unchecked();
+                into.cast::<T>().write(maybe_clone(from.cast::<T>().as_ref()));
             };
         }
 
@@ -195,6 +213,8 @@ impl DynVecMetadata {
             dyn_meta: meta,
             default_fn: <T as MaybeDefault>::maybe_default()
                 .and(Some(default_fn::<T>)),
+            clone_fn: <T as MaybeClone>::maybe_clone()
+                .and(Some(clone_fn::<T>)),
             _priv: ()
         }
     }
@@ -300,8 +320,7 @@ impl DynVec {
     /// # Safety
     /// The index must point inside the allocated memory
     unsafe fn idx_ptr(&self, idx: usize) -> NonNull<()> {
-        // Idx can be == len when we are pushing into the dynvec
-        debug_assert!(idx < self.len || (idx == self.len && self.len < self.capacity));
+        debug_assert!(idx < self.capacity);
         unsafe { self.ptr.byte_add(idx * self.meta.dyn_meta.layout().size()) }
     }
 
@@ -371,6 +390,26 @@ impl DynVec {
     /// Returns the element type metadata used by this vector.
     pub fn metadata(&self) -> &DynVecMetadata { &self.meta }
 
+    /// Clones the DynVec if the stored types supports this operation.
+    pub fn try_clone(&self) -> Result<DynVec, NoCloneError> {
+        let Some(clone_fn) = self.meta.clone_fn
+        else { return Err(NoCloneError) };
+
+        let mut cloned = DynVec::new_with_meta(self.meta.clone());
+        cloned.reserve(self.len);
+        for i in 0..self.len {
+            // SAFETY: i < len
+            let source = unsafe { self.idx_ptr(i) };
+            // SAFETY: Just reserved enough space
+            let target = unsafe { cloned.idx_ptr(i) };
+            // SAFETY: Target has never been used
+            unsafe { clone_fn(source, target) };
+        }
+        cloned.len = self.len;
+
+        Ok(cloned)
+    }
+
     /// Reserves capacity for at least `additional` more elements to be inserted.
     ///
     /// May reallocate. Uses a geometric growth strategy similar to `Vec`.
@@ -378,7 +417,7 @@ impl DynVec {
         let needed = self.len.saturating_add(additional);
         if needed <= self.capacity { return; }
         // Choose next power of two for growth; minimum capacity of 4.
-        let new_cap = needed.next_power_of_two().max(4);
+        let new_cap = needed.next_power_of_two();
         self.realloc_capacity(new_cap);
     }
 

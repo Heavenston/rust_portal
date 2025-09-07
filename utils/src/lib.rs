@@ -42,6 +42,7 @@ pub mod prelude {
         either_of, either_of::*,
         bitset::{ BitSetIndex, BitSet },
         maybe_default::{ MaybeDefault },
+        maybe_clone::{ MaybeClone },
         tuple_traits::{ HomogeneousTuple, Tuple, TupleAt, TupleIteratorExt },
         partial_bool::{
             BoolValue, Bool, PartialBool, True, False,
@@ -75,6 +76,7 @@ pub mod assert_is_sorted;
 pub mod either_of;
 pub mod bitset;
 pub mod maybe_default;
+pub mod maybe_clone;
 pub mod tuple_traits;
 pub mod partial_bool;
 pub mod either_utils;

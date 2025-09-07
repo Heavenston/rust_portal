@@ -575,3 +575,23 @@ fn test_drain_partially_consumed() {
     vec.drain();
     assert_eq!(vec.len(), 0);
 }
+
+#[test]
+fn test_clone() {
+    let strs = ["Feur0","Feur1","Feur2","Feur3"];
+    let vec: DynVec = strs.into_iter().map(String::from).collect();
+    let new_vec = vec.try_clone().unwrap();
+    assert_eq!(vec.len, new_vec.len);
+    assert_eq!(vec.len, new_vec.capacity);
+
+    assert_eq!(vec.typed::<String>().unwrap().as_slice(), new_vec.typed::<String>().unwrap().as_slice());
+}
+
+#[test]
+fn test_clone_error() {
+    struct NoClone;
+
+    let strs = [NoClone, NoClone, NoClone];
+    let vec: DynVec = strs.into_iter().collect();
+    assert!(matches!(vec.try_clone(), Err(NoCloneError)));
+}
