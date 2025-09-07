@@ -4,6 +4,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(alloc_layout_extra)]
 #![feature(box_vec_non_null)]
+#![feature(impl_trait_in_assoc_type)]
 
 #![warn(missing_docs)]
 //! Type-erased, single-type vector.
@@ -54,7 +55,6 @@ use std::marker::PhantomData;
 use std::ops::{ Deref, DerefMut };
 use std::ptr::{ self, from_raw_parts, from_raw_parts_mut, NonNull };
 use std::slice;
-use std::ptr::Alignment;
 
 use utils::prelude::MaybeDefault;
 
@@ -125,14 +125,6 @@ pub enum DefaultInsertionError {
     IndexOutOfBound(#[from] IndexOutOfBoundError),
 }
 
-#[inline]
-fn dangling_with_layout<T>(layout: Layout) -> NonNull<T> {
-    assert!(std::mem::align_of::<T>() <= layout.align());
-    // SAFETY: layout.align() is guaranteed > 0 and a power of two.
-    let alignment = unsafe { Alignment::new_unchecked(layout.align()) };
-    NonNull::without_provenance(alignment.as_nonzero())
-}
-
 unsafe fn try_alloc(layout: Layout) -> NonNull<u8> {
     debug_assert!(layout.size() != 0);
     let allocated = unsafe { std::alloc::alloc(layout) };
@@ -142,7 +134,7 @@ unsafe fn try_alloc(layout: Layout) -> NonNull<u8> {
 
 fn alloc_or_dangling(layout: Layout) -> NonNull<u8> {
     if layout.size() == 0 {
-        dangling_with_layout(layout)
+        layout.dangling()
     }
     else {
         unsafe { try_alloc(layout) }
@@ -226,6 +218,11 @@ impl DynVecMetadata {
             })
         }
     }
+
+    unsafe fn drop_ptr(&self, data_ptr: NonNull<()>) {
+        let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr.as_ptr(), self.dyn_meta);
+        unsafe { ptr::drop_in_place(fat) };
+    }
 }
 
 impl std::fmt::Debug for DynVecMetadata {
@@ -282,7 +279,7 @@ impl DynVec {
     pub fn new_with_meta(meta: DynVecMetadata) -> Self {
         Self {
             // keep base pointer aligned to element type even with capacity == 0
-            ptr: dangling_with_layout(meta.dyn_meta.layout()),
+            ptr: meta.dyn_meta.layout().dangling().cast(),
             len: 0,
             capacity: 0,
             meta,
@@ -361,14 +358,7 @@ impl DynVec {
 
     unsafe fn drop_at(&mut self, idx: usize) {
         debug_assert!(idx < self.len);
-        unsafe { self.drop_ptr(self.idx_ptr(idx)) };
-    }
-
-    /// # Safety
-    /// The pointer MUST come from this dynvec and be initialized
-    unsafe fn drop_ptr(&mut self, data_ptr: NonNull<()>) {
-        let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr.as_ptr(), self.meta.dyn_meta);
-        unsafe { ptr::drop_in_place(fat) };
+        unsafe { self.meta.drop_ptr(self.idx_ptr(idx)) };
     }
 
     /// Returns the number of elements currently stored.
@@ -503,6 +493,21 @@ impl DynVec {
         std::iter::empty()
     }
 
+    /// Removes all elements from the vec like [`DynVec::clear`], but
+    /// also returns an iterator of these elements.
+    ///
+    /// Note that the unconsumed elements from the iterator are still dropped
+    /// alongside the iterator.
+    pub fn drain(&mut self) -> DynVecDrain<'_> {
+        DynVecDrain {
+            len: &mut self.len,
+            ptr: self.ptr,
+            metadata: &self.meta,
+            current_idx: 0,
+            _ref: PhantomData,
+        }
+    }
+
     /// Appends an element to the back as `Box<dyn Any>`.
     ///
     /// Returns an `Err(IncorrectTypeError)` if the boxed value's `TypeId`
@@ -540,7 +545,7 @@ impl DynVec {
     ///
     /// The element is actually removed from the vector when the returned guard is dropped.
     pub fn pop(&mut self) -> Option<RemovedDynVecValue<'_>> {
-        self.swap_remove(self.len - 1).ok()
+        self.swap_remove(self.len.checked_sub(1)?).ok()
     }
 
     /// Replaces the element at `idx`, dropping the previous value in place.
@@ -621,6 +626,89 @@ impl Drop for DynVec {
     }
 }
 
+impl Extend<Box<dyn Any>> for DynVec {
+    fn extend<I: IntoIterator<Item = Box<dyn Any>>>(&mut self, iter: I) {
+        let it = iter.into_iter();
+        let (lower, _) = it.size_hint();
+        if lower > 0 { self.reserve(lower); }
+        for item in it { self.push(item).expect("Attempted to extend with an incorrect type"); }
+    }
+}
+
+impl<T: 'static> std::iter::FromIterator<T> for DynVec {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let it = iter.into_iter();
+        let (lower, _) = it.size_hint();
+        let mut v = DynVec::new::<T>();
+        if lower > 0 { v.reserve(lower); }
+        {
+            let mut tv = v.typed_mut::<T>().expect("Type it was just created with");
+            for item in it { tv.push(item); }
+        }
+        v
+    }
+}
+
+impl<'a> IntoIterator for &'a DynVec {
+    type Item = DynVecValueRef<'a>;
+    type IntoIter = impl Iterator<Item = Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut DynVec {
+    type Item = DynVecValueRefMut<'a>;
+    type IntoIter = impl Iterator<Item = Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
+/// Iterator returned by [`DynVec::drain`]
+pub struct DynVecDrain<'a> {
+    len: &'a mut usize,
+    ptr: NonNull<()>,
+    metadata: &'a DynVecMetadata,
+    current_idx: usize,
+
+    _ref: PhantomData<&'a mut dyn Any>,
+}
+
+impl<'a> Iterator for DynVecDrain<'a> {
+    type Item = DrainedDynVecValue<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_idx < *self.len {
+            // SAFETY: self.current_idx is inside the vec
+            let ptr = unsafe { self.ptr.byte_add(self.metadata.layout().size() * self.current_idx) };
+            self.current_idx += 1;
+            Some(DrainedDynVecValue::<'a> {
+                meta: self.metadata,
+                value_ptr: ptr,
+                moved: false,
+            })
+        }
+        else {
+            None
+        }
+    }
+}
+
+impl Drop for DynVecDrain<'_> {
+    fn drop(&mut self) {
+        for i in self.current_idx..*self.len {
+            // SAFETY: i is inside the vec
+            let ptr = unsafe { self.ptr.byte_add(self.metadata.layout().size() * i) };
+            // SAFETY: 
+            unsafe { self.metadata.drop_ptr(ptr) };
+        }
+        *self.len = 0;
+    }
+}
+
 /// Shared reference guard for an element inside a `DynVec`.
 ///
 /// The value can then be then be read as an Any trait object or casted into
@@ -671,6 +759,81 @@ impl<'a> DynVecValueRefMut<'a> {
     pub fn as_typed<T: 'static>(&mut self) -> Result<&'a mut T, IncorrectTypeError> {
         self.metadata.assert_type_t::<T>()?;
         Ok(unsafe { self.ptr.cast::<T>().as_mut() })
+    }
+}
+
+/// Owning guard for an element drained from a `DynVec`.
+/// Same as [`RemovedDynVecValue`] but for the [`DynVec::drain`] operation.
+// FIXME: I would prefer this merged with RemovedDynVecValue but i havn't found
+// a solution that I like.
+pub struct DrainedDynVecValue<'a> {
+    meta: &'a DynVecMetadata,
+    value_ptr: NonNull<()>,
+    moved: bool,
+}
+
+impl<'a> DrainedDynVecValue<'a> {
+    /// Like [`RemovedDynVecValue::into_boxed_any`]
+    pub fn into_boxed_any(mut self) -> Box<dyn Any> {
+        let layout = self.meta.dyn_meta.layout();
+        let data_ptr = alloc_or_dangling(layout);
+
+        // SAFETY: Same Layout
+        unsafe { data_ptr.copy_from_nonoverlapping(self.value_ptr.cast::<u8>(), layout.size()); };
+        self.moved = true;
+
+        // SAFETY: The Type is the correct one
+        let fat = from_raw_parts_mut(data_ptr.as_ptr(), self.meta.dyn_meta);
+        unsafe { Box::from_raw(fat) }
+    }
+
+    /// Like [`RemovedDynVecValue::into_typed`]
+    pub fn into_typed<T: 'static>(mut self) -> Result<T, IncorrectTypeError> {
+        self.meta.assert_type_t::<T>()?;
+        // SAFETY: value_ptr is inistialized and won't be used again
+        let out = unsafe { self.value_ptr.cast::<T>().read() };
+        self.moved = true;
+        Ok(out)
+    }
+
+    /// Like [`RemovedDynVecValue::push_into`]
+    pub fn push_into(mut self, dst: &mut DynVec) -> Result<(), IncorrectTypeError> {
+        dst.assert_type_meta(&self.meta)?;
+
+        let layout = self.meta.dyn_meta.layout();
+        let target_ptr = dst.push_and_get_ptr();
+
+        // SAFETY: Same layout and just reserved the space
+        unsafe { target_ptr.cast::<u8>().copy_from_nonoverlapping(self.value_ptr.cast::<u8>(), layout.size()) };
+        self.moved = true;
+
+        Ok(())
+    }
+
+    /// Like [`RemovedDynVecValue::set_into`]
+    pub fn set_into(mut self, dst: &mut DynVec, idx: usize) -> Result<(), InsertionError> {
+        dst.assert_type_meta(&self.meta)?;
+        let target_ptr = dst.try_idx_ptr(idx)?;
+
+        let layout = self.meta.dyn_meta.layout();
+
+        // SAFETY: All elements are initialized
+        unsafe { dst.meta.drop_ptr(target_ptr); }
+        // SAFETY: Same layout and just freed the space
+        unsafe { target_ptr.cast::<u8>().copy_from_nonoverlapping(self.value_ptr.cast::<u8>(), layout.size()) };
+        self.moved = true;
+
+        Ok(())
+    }
+}
+
+impl<'a> Drop for DrainedDynVecValue<'a> {
+    fn drop(&mut self) {
+        if !self.moved {
+            // SAFETY: Got the pointer from the vec, and if
+            // consumed is false then it has never been moved.
+            unsafe { self.meta.drop_ptr(self.value_ptr) };
+        }
     }
 }
 
@@ -781,7 +944,7 @@ impl<'a> RemovedDynVecValue<'a> {
         let layout = self.vec.meta.dyn_meta.layout();
 
         // SAFETY: All elements are initialized
-        unsafe { dst.drop_ptr(target_ptr); }
+        unsafe { dst.meta.drop_ptr(target_ptr); }
         // SAFETY: Same layout and just freed the space
         unsafe { target_ptr.cast::<u8>().copy_from_nonoverlapping(self.value_ptr.cast::<u8>(), layout.size()) };
         self.moved = true;
@@ -795,14 +958,14 @@ impl<'a> Drop for RemovedDynVecValue<'a> {
         debug_assert_ne!(self.vec.len, 0);
         let layout = self.vec.meta.dyn_meta.layout();
 
-        // SAFETY: Last element of the vec is in the vec
-        let source_ptr = unsafe { self.vec.idx_ptr(self.vec.len - 1) };
-
         if !self.moved {
             // SAFETY: Got the pointer from the vec, and if
             // consumed is false then it has never been moved.
-            unsafe { self.vec.drop_ptr(self.value_ptr) };
+            unsafe { self.vec.meta.drop_ptr(self.value_ptr) };
         }
+
+        // SAFETY: Last element of the vec is in the vec
+        let source_ptr = unsafe { self.vec.idx_ptr(self.vec.len - 1) };
 
         if source_ptr != self.value_ptr {
             // SAFETY: Layout is the same, and the target has been droped or moved
@@ -936,15 +1099,6 @@ impl<'a, T: 'static> DerefMut for TypedDynVecRefMut<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target { self.as_mut_slice() }
 }
 
-impl Extend<Box<dyn Any>> for DynVec {
-    fn extend<I: IntoIterator<Item = Box<dyn Any>>>(&mut self, iter: I) {
-        let it = iter.into_iter();
-        let (lower, _) = it.size_hint();
-        if lower > 0 { self.reserve(lower); }
-        for item in it { self.push(item).expect("Attempted to extend with an incorrect type"); }
-    }
-}
-
 impl<'a, T: 'static> Extend<T> for TypedDynVecRefMut<'a, T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         let it = iter.into_iter();
@@ -963,19 +1117,5 @@ where
         let (lower, _) = it.size_hint();
         if lower > 0 { self.vec.reserve(lower); }
         for item in it { self.push(item.clone()); }
-    }
-}
-
-impl<T: 'static> std::iter::FromIterator<T> for DynVec {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let it = iter.into_iter();
-        let (lower, _) = it.size_hint();
-        let mut v = DynVec::new::<T>();
-        if lower > 0 { v.reserve(lower); }
-        {
-            let mut tv = v.typed_mut::<T>().expect("Type it was just created with");
-            for item in it { tv.push(item); }
-        }
-        v
     }
 }

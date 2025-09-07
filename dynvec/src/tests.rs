@@ -535,3 +535,43 @@ fn test_set_default_zst() {
     assert_eq!(drain_last_drop(), 5);
     assert_eq!(drain_default(), 0);
 }
+
+#[test]
+fn test_drain() {
+    let strs = ["Feur0","Feur1","Feur2","Feur3"];
+    let mut vec: DynVec = strs.into_iter().map(String::from).collect();
+
+    assert_eq!(
+        vec.drain().map(|owned| owned.into_typed::<String>().unwrap()).collect::<Vec<_>>(),
+        Vec::from(strs.map(String::from)),
+    );
+
+    assert_eq!(vec.len(), 0);
+}
+
+#[test]
+fn test_drain_empty() {
+    let mut vec: DynVec = DynVec::new::<String>();
+    assert_eq!(vec.drain().count(), 0);
+    assert_eq!(vec.len(), 0);
+}
+
+#[test]
+fn test_drain_un_consumed() {
+    let strs = ["Feur0","Feur1","Feur2","Feur3"];
+    let mut vec: DynVec = strs.into_iter().map(String::from).collect();
+    vec.drain();
+    assert_eq!(vec.len(), 0);
+}
+
+#[test]
+fn test_drain_partially_consumed() {
+    let strs = ["Feur0","Feur1","Feur2","Feur3"];
+    let mut vec: DynVec = strs.into_iter().map(String::from).collect();
+    assert_eq!(
+        vec.drain().take(2).map(|owned| owned.into_typed::<String>().unwrap()).collect::<Vec<_>>(),
+        strs[0..2].iter().copied().map(String::from).collect::<Vec<_>>(),
+    );
+    vec.drain();
+    assert_eq!(vec.len(), 0);
+}
