@@ -68,6 +68,18 @@ pub enum RemoveComponentTypedError {
     },
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum GetSingletonError {
+    #[error("Component from type '{type_name}' was never registred")]
+    UnknownComponent {
+        type_name: &'static str,
+    },
+    #[error("Component's entity from type '{type_name}' does not have itself as component")]
+    ComponentNotPresent {
+        type_name: &'static str,
+    },
+}
+
 impl World {
     pub fn has<C: Component>(&self, entity: impl Into<Entity>) -> HasComponentTyped {
         let Some(component) = self.try_component::<C>()
@@ -109,7 +121,7 @@ impl World {
         }
     }
 
-    pub fn get_mut<C: Component>(&mut self, entity: Entity) -> Result<&mut C, GetComponentTypedError> {
+    pub fn get_mut<C: Component>(&mut self, entity: impl Into<Entity>) -> Result<&mut C, GetComponentTypedError> {
         let Some(component) = self.try_component::<C>()
         else {
             return Err(GetComponentTypedError::UnknownComponent {
@@ -136,14 +148,14 @@ impl World {
         }
     }
 
-    pub fn get_or_default<C: Component + Default>(&mut self, entity: Entity) -> Result<AddComponent<&'_ mut C>, AddComponentTypedError> {
+    pub fn get_or_default<C: Component + Default>(&mut self, entity: Entity) -> Result<AddComponent<&mut C>, AddComponentTypedError> {
         self.add_with(entity, default)
     }
     
     /// Gets the component of the given type for the given entity, if the entity
     /// does not have the component, then the given function is called
     /// for adding the component to the entity.
-    pub fn add_with<C, F>(&mut self, entity: impl Into<Entity>, f: F) -> Result<AddComponent<&'_ mut C>, AddComponentTypedError>
+    pub fn add_with<C, F>(&mut self, entity: impl Into<Entity>, f: F) -> Result<AddComponent<&mut C>, AddComponentTypedError>
         where F: FnOnce() -> C,
               C: Component,
     {
@@ -163,13 +175,13 @@ impl World {
 
     /// Gets the component of the given type for the given entity, if the entity
     /// does not have the component, it is inserted with the given value.
-    pub fn add<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> Result<AddComponent<&'_ mut C>, AddComponentTypedError> {
+    pub fn add<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> Result<AddComponent<&mut C>, AddComponentTypedError> {
         self.add_with(entity, || component)
     }
 
     /// Sets the value for the given component on the given entity, overrides
     /// the component's value if the entity already has it.
-    pub fn set<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> Result<AddComponent<&'_ mut C>, AddComponentTypedError> {
+    pub fn set<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> Result<AddComponent<&mut C>, AddComponentTypedError> {
         let mut value = Some(component);
         let result = self.add_with::<C, _>(entity, || value.take().expect("Took once"))?;
         if let Some(value) = value {
@@ -208,6 +220,54 @@ impl World {
                 }),
             Err(RemoveComponentError::Forbidden { reason }) =>
                 Err(RemoveComponentTypedError::Forbidden { reason }),
+        }
+    }
+
+    pub fn set_singleton<C: Component>(&mut self, value: C) -> &mut C {
+        let entity = self.component::<C>();
+
+        match self.add(entity, value) {
+            Ok(component_ref) => component_ref.component_ref,
+            Err(AddComponentTypedError::EntityIsNotAlive { .. }) =>
+                unreachable!("World::component should not return a dead entity"),
+        }
+    }
+
+    pub fn get_singleton<C: Component>(&self) -> Result<&C, GetSingletonError> {
+        let Some(entity) = self.try_component::<C>()
+        else {
+            return Err(GetSingletonError::UnknownComponent {
+                type_name: type_name::<C>()
+            })
+        };
+
+        match self.get::<C>(entity) {
+            Ok(component_ref) => Ok(component_ref),
+            Err(GetComponentTypedError::EntityIsNotAlive { .. }) =>
+                unreachable!("World::component should not return a dead entity"),
+            Err(GetComponentTypedError::UnknownComponent { .. }) =>
+                unreachable!("Just checked this"),
+            Err(GetComponentTypedError::ComponentNotPresent { type_name, .. }) =>
+                return Err(GetSingletonError::ComponentNotPresent { type_name }),
+        }
+    }
+
+    pub fn get_singleton_mut<C: Component>(&mut self) -> Result<&mut C, GetSingletonError> {
+        let Some(entity) = self.try_component::<C>()
+        else {
+            return Err(GetSingletonError::UnknownComponent {
+                type_name: type_name::<C>()
+            })
+        };
+
+        match self.get_mut::<C>(entity) {
+            Ok(component_ref) => Ok(component_ref),
+            Err(GetComponentTypedError::EntityIsNotAlive { .. }) =>
+                unreachable!("World::component should not return a dead entity"),
+            Err(GetComponentTypedError::UnknownComponent { .. }) =>
+                unreachable!("Just checked this"),
+            Err(GetComponentTypedError::ComponentNotPresent { type_name, .. }) =>
+                return Err(GetSingletonError::ComponentNotPresent { type_name }),
         }
     }
 }
