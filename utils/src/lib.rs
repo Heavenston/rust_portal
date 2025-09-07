@@ -49,6 +49,7 @@ pub mod prelude {
             BoolValueAnd, BoolValueNot, BoolValueOr,
             BoolAnd, BoolOr, BoolNot
         },
+        either_utils::{ zip_left, zip_right },
     };
 }
 
@@ -76,6 +77,7 @@ pub mod bitset;
 pub mod maybe_default;
 pub mod tuple_traits;
 pub mod partial_bool;
+pub mod either_utils;
 
 use std::hash::{ DefaultHasher, Hash, Hasher };
 

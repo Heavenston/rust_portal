@@ -1,6 +1,7 @@
 use crate::index_map::{IndexMap, IndexMapIndex};
 
 use std::fmt::Debug;
+use std::iter::zip;
 use utils::prelude::*;
 use utils::mapped_nonzero::{
     NonZeroPrimitive,
@@ -19,7 +20,7 @@ pub trait SparseSetDenseStorage {
     type DenseIdx: Copy + Debug + IndexMapIndex + PartialEq;
     type PrimitiveDenseIdx: PlusOneMappable + NonZeroPrimitive + Into<Self::DenseIdx> + From<Self::DenseIdx>;
 
-    type OwnedOutput<'a>
+    type RemovedOutput<'a>
         where Self: 'a;
     type RefItem<'a>
         where Self: 'a;
@@ -28,7 +29,7 @@ pub trait SparseSetDenseStorage {
 
     fn len(&self) -> Self::DenseIdx;
 
-    fn swap_remove(&mut self, idx: Self::DenseIdx) -> Self::OwnedOutput<'_>;
+    fn swap_remove(&mut self, idx: Self::DenseIdx) -> Self::RemovedOutput<'_>;
 
     fn get(&self, idx: Self::DenseIdx) -> Option<Self::RefItem<'_>>;
     fn get_mut(&mut self, idx: Self::DenseIdx) -> Option<Self::RefMutItem<'_>>;
@@ -52,7 +53,7 @@ impl<T> SparseSetDenseStorage for Vec<T> {
     type DenseIdx = usize;
     type PrimitiveDenseIdx = usize;
 
-    type OwnedOutput<'a> = T
+    type RemovedOutput<'a> = T
         where Self: 'a;
     type RefItem<'a> = &'a T
         where Self: 'a;
@@ -63,7 +64,7 @@ impl<T> SparseSetDenseStorage for Vec<T> {
         self.len()
     }
 
-    fn swap_remove(&mut self, idx: usize) -> Self::OwnedOutput<'_> {
+    fn swap_remove(&mut self, idx: usize) -> Self::RemovedOutput<'_> {
         self.swap_remove(idx)
     }
 
@@ -84,6 +85,12 @@ impl<T> SparseSetDenseStorage for Vec<T> {
     }
 }
 
+pub struct DiconstructedSparseSet<S: SparseSetDenseStorage> {
+    pub sparse_to_dense_indices: IndexMap<Option<PlusOneNonZero<S::PrimitiveDenseIdx>>, S::SparseIdx>,
+    pub dense_to_sparse_indices: IndexMap<S::SparseIdx, S::DenseIdx>,
+    pub dense_values: S,
+}
+
 /// Basically a Map<SparseIdx, T>, where the 'SparseIdx' is the sparse idx
 #[derive(Default, Debug, Clone)]
 pub struct SparseSet<S: SparseSetDenseStorage> {
@@ -100,6 +107,14 @@ impl<S> SparseSet<S>
             sparse_to_dense_indices: default(),
             dense_to_sparse_indices: default(),
             dense_values,
+        }
+    }
+
+    pub fn into_deconstructed(self) -> DiconstructedSparseSet<S> {
+        DiconstructedSparseSet {
+            sparse_to_dense_indices: self.sparse_to_dense_indices,
+            dense_to_sparse_indices: self.dense_to_sparse_indices,
+            dense_values: self.dense_values,
         }
     }
 
@@ -147,7 +162,7 @@ impl<S> SparseSet<S>
         }
     }
 
-    pub fn remove(&mut self, sparse_idx: S::SparseIdx) -> Option<S::OwnedOutput<'_>> {
+    pub fn remove(&mut self, sparse_idx: S::SparseIdx) -> Option<S::RemovedOutput<'_>> {
         let dense_idx: S::DenseIdx = self.sparse_to_dense_indices.get(sparse_idx)
             .copied().flatten()?.get().into();
 
@@ -173,15 +188,11 @@ impl<S> SparseSet<S>
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (S::SparseIdx, S::RefItem<'_>)> + DoubleEndedIterator + Clone + ExactSizeIterator {
-        self.dense_to_sparse_indices.values().copied().zip(
-            self.dense_values.iter()
-        )
+        zip(self.dense_to_sparse_indices.values().copied(), self.dense_values.iter())
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (S::SparseIdx, S::RefMutItem<'_>)> + DoubleEndedIterator + ExactSizeIterator {
-        self.dense_to_sparse_indices.values().copied().zip(
-            self.dense_values.iter_mut()
-        )
+        zip(self.dense_to_sparse_indices.values().copied(), self.dense_values.iter_mut())
     }
 }
 

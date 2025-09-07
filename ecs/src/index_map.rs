@@ -142,6 +142,15 @@ impl<T, I> IndexMut<I> for IndexMap<T, I>
     }
 }
 
+impl<T, I> IntoIterator for IndexMap<T, I> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.vec.into_iter()
+    }
+}
+
 #[macro_export]
 macro_rules! indexmap {
     () => (

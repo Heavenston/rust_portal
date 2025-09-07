@@ -747,11 +747,11 @@ mod drops_when_it_should {
         let checker = Arc::new(AtomicUsize::new(0));
 
         world.add(e, DropCheckComponent(Arc::clone(&checker))).unwrap();
-        assert_eq!(checker.load(Ordering::Relaxed), 0);
+        assert_eq!(checker.swap(0, Ordering::Relaxed), 0);
         world.dispawn(c);
-        assert_eq!(checker.load(Ordering::Relaxed), 1);
+        assert_eq!(checker.swap(0, Ordering::Relaxed), 1);
         world.dispawn(e);
-        assert_eq!(checker.load(Ordering::Relaxed), 0);
+        assert_eq!(checker.swap(0, Ordering::Relaxed), 0);
     }
 
     #[test]

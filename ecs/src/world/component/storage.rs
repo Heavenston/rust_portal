@@ -15,7 +15,7 @@ use std::iter::{ empty, once };
 
 use utils::{ itertools::{ chain, zip_eq }, prelude::* };
 use derive_more::From;
-use dynvec::{ DynVec, IncorrectTypeError, InsertionError, RemovedDynVecValue };
+use dynvec::{ DrainedDynVecValue, DynVec, DynVecDrain, IncorrectTypeError, InsertionError, RemovedDynVecValue };
 
 pub struct StorageComponentsRef<'a> {
     idx: usize,
@@ -65,6 +65,12 @@ impl ComponentDenseStorage {
         list.finish()?;
         Ok(())
     }
+
+    pub fn drain(&mut self) -> impl Iterator<Item = DynVecDrain<'_>> {
+        self.storages.iter_mut()
+            .map(move |storage| storage.drain())
+            .consume_on_drop()
+    }
 }
 
 impl SparseSetDenseStorage for ComponentDenseStorage {
@@ -72,7 +78,7 @@ impl SparseSetDenseStorage for ComponentDenseStorage {
     type DenseIdx = u32;
     type PrimitiveDenseIdx = u32;
 
-    type OwnedOutput<'a> = impl Iterator<Item = RemovedDynVecValue<'a>>
+    type RemovedOutput<'a> = impl Iterator<Item = RemovedDynVecValue<'a>>
         where Self: 'a;
     type RefItem<'a> = StorageComponentsRef<'a>
         where Self: 'a;
@@ -87,7 +93,7 @@ impl SparseSetDenseStorage for ComponentDenseStorage {
         self.len
     }
 
-    fn swap_remove(&mut self, idx: u32) -> Self::OwnedOutput<'_> {
+    fn swap_remove(&mut self, idx: u32) -> Self::RemovedOutput<'_> {
         self.len -= 1;
         self.storages.iter_mut()
             .map(move |storage| storage.swap_remove(ix!(idx)).expect("Valid index"))
@@ -117,13 +123,15 @@ impl SparseSetDenseStorage for ComponentDenseStorage {
 
     fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = Self::RefMutItem<'a>> + DoubleEndedIterator + ExactSizeIterator {
         // TODO: Implement (do i need unsafe ?? x( )
+        todo!();
         empty()
     }
 }
 
 #[derive(From)]
 pub enum ComponentDenseStorageInput<'a, 'b> {
-    DynVecValue(RemovedDynVecValue<'a>),
+    RemovedDynVecValue(RemovedDynVecValue<'a>),
+    DrainedDynVecValue(DrainedDynVecValue<'a>),
     DynOption(&'b mut dyn DynOption),
     Default,
 }
@@ -136,7 +144,10 @@ impl<'a, 'b, T, I> SparseSetDenseStorageInput<I> for ComponentDenseStorage
         self.len += 1;
         for (i, (storage, comp)) in zip_eq(self.storages.iter_mut(), comps).enumerate() {
             let type_result: Result<(), IncorrectTypeError> = match comp.into() {
-                ComponentDenseStorageInput::DynVecValue(dyn_vec_value) => {
+                ComponentDenseStorageInput::RemovedDynVecValue(dyn_vec_value) => {
+                    dyn_vec_value.push_into(storage)
+                },
+                ComponentDenseStorageInput::DrainedDynVecValue(dyn_vec_value) => {
                     dyn_vec_value.push_into(storage)
                 },
                 ComponentDenseStorageInput::DynOption(dyn_option) => {
@@ -160,7 +171,10 @@ impl<'a, 'b, T, I> SparseSetDenseStorageInput<I> for ComponentDenseStorage
         assert!(idx < self.len);
         for (i, (storage, comp)) in zip_eq(self.storages.iter_mut(), comps).enumerate() {
             let type_result: Result<(), InsertionError> = match comp.into() {
-                ComponentDenseStorageInput::DynVecValue(dyn_vec_value) => {
+                ComponentDenseStorageInput::RemovedDynVecValue(dyn_vec_value) => {
+                    dyn_vec_value.set_into(storage, ix!(idx))
+                },
+                ComponentDenseStorageInput::DrainedDynVecValue(dyn_vec_value) => {
                     dyn_vec_value.set_into(storage, ix!(idx))
                 },
                 ComponentDenseStorageInput::DynOption(dyn_option) => {
