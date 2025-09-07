@@ -13,9 +13,8 @@ pub trait SparseSetDenseStorageInput<C>: SparseSetDenseStorage {
     fn set(&mut self, idx: Self::DenseIdx, item: C);
 }
 
+// TODO: Invariants of this trait should be layed out precisely
 pub trait SparseSetDenseStorage {
-    // TODO: Semantics of these types should be layed out precisely
-    
     type SparseIdx: Copy + Debug + IndexMapIndex + PartialEq;
     type DenseIdx: Copy + Debug + IndexMapIndex + PartialEq;
     type PrimitiveDenseIdx: PlusOneMappable + NonZeroPrimitive + Into<Self::DenseIdx> + From<Self::DenseIdx>;
@@ -27,11 +26,15 @@ pub trait SparseSetDenseStorage {
     type RefMutItem<'a>
         where Self: 'a;
 
+    /// Must start at `0`
     fn len(&self) -> Self::DenseIdx;
 
+    /// Must work the same way as [`std::vec::Vec::swap_remove`]
     fn swap_remove(&mut self, idx: Self::DenseIdx) -> Self::RemovedOutput<'_>;
 
+    /// Must return None if and only if `idx` is strictly inferior to the length
     fn get(&self, idx: Self::DenseIdx) -> Option<Self::RefItem<'_>>;
+    /// Must return None if and only if `idx` is strictly inferior to the length
     fn get_mut(&mut self, idx: Self::DenseIdx) -> Option<Self::RefMutItem<'_>>;
 
     fn iter<'a>(&'a self) -> impl Iterator<Item = Self::RefItem<'a>> + DoubleEndedIterator + ExactSizeIterator + Clone;
@@ -103,6 +106,7 @@ impl<S> SparseSet<S>
     where S: SparseSetDenseStorage,
 {
     pub fn new(dense_values: S) -> Self {
+        assert_eq!(dense_values.len(), S::DenseIdx::from_usize(0));
         Self {
             sparse_to_dense_indices: default(),
             dense_to_sparse_indices: default(),
@@ -193,6 +197,13 @@ impl<S> SparseSet<S>
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (S::SparseIdx, S::RefMutItem<'_>)> + DoubleEndedIterator + ExactSizeIterator {
         zip(self.dense_to_sparse_indices.values().copied(), self.dense_values.iter_mut())
+    }
+
+    /// Allows you to mutate the internal dense value storage
+    ///
+    /// Must *not* change any of the invariants of the [`SparseSetDenseStorage`] trait.
+    pub fn unsafely_mutate_dense_values(&mut self, mutator: impl FnOnce(&mut S)) {
+        mutator(&mut self.dense_values);
     }
 }
 

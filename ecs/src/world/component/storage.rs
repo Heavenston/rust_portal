@@ -71,6 +71,12 @@ impl ComponentDenseStorage {
             .map(move |storage| storage.drain())
             .consume_on_drop()
     }
+
+    pub fn remove_column(&mut self, component_idx: usize) {
+        let mut storages = std::mem::take(&mut self.storages).into_vec();
+        storages.remove(component_idx);
+        self.storages = storages.into_boxed_slice();
+    }
 }
 
 impl SparseSetDenseStorage for ComponentDenseStorage {

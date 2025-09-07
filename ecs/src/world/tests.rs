@@ -381,7 +381,7 @@ mod torturing_components {
     }
 
     #[test]
-    fn removing_storage_compenent_before_usage() {
+    fn removing_storage_compenent() {
         let mut world = World::new();
         let c = world.component::<TestComponent1>();
         let e = world.spawn();
@@ -395,6 +395,11 @@ mod torturing_components {
 
         world.add(e, TestComponent1(42)).unwrap();
         assert_matches!(world.get::<TestComponent1>(e), Ok(TestComponent1(42)));
+
+        assert_matches!(
+            world.remove::<ComponentStorageComponent>(c),
+            Err(RemoveComponentTypedError::Forbidden { reason: _ })
+        );
     }
 
     #[test]

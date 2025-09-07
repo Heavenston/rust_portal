@@ -916,6 +916,13 @@ impl World {
             return Err(RemoveComponentError::ComponentNotPresent { component, entity });
         }
 
+        /*
+         * We have to change the entity's archetyp
+         */
+
+        old_archetyp.entities.remove(entity.index());
+        let (_, new_component_set) = old_archetyp.components.clone().without(component);
+
         if component == self.components_typeid_to_entity[&TypeId::of::<ComponentStorageComponent>()] {
             if self.components_entity_to_typeid.contains_key(&ComponentEntity(entity)) {
                 return Err(RemoveComponentError::Forbidden {
@@ -923,16 +930,33 @@ impl World {
                 });
             }
 
-            todo!("Remove the storage from all tables");
+            let centity = ComponentEntity(entity);
+
+            match (self.component_fragments_tables(centity), &component_storage) {
+                (true | false, ComponentStorageKind::None) =>
+                    unreachable!("Enttiy with ComponentStorageComponent cannot have None storage"),
+                (true, ComponentStorageKind::Table { .. }) => {
+                    for archetyp in self.components_to_archetypes.get(entity.index()).into_iter().flatten() {
+                        let table_id = self.archetypes[archetyp].table_id;
+                        let table = &mut self.tables[table_id];
+
+                        let Some(component_idx) = table.table_components.remove(centity)
+                        else {
+                            // This means we already removed the component from this
+                            // table
+                            continue;
+                        };
+                        table.sparse_set.unsafely_mutate_dense_values(|dense_storage| {
+                            dense_storage.remove_column(component_idx);
+                        });
+                    }
+                },
+                (false, ComponentStorageKind::Table { .. }) => unreachable!("Table storage cannot not fragment tables"),
+                // TODO: For sparse storage just removing the component's
+                // sparse set should be enough
+            }
         }
 
-        /*
-         * We have to change the entity's archetyp
-         */
-
-        old_archetyp.entities.remove(entity.index());
-
-        let (_, new_component_set) = old_archetyp.components.clone().without(component);
         let new_archetyp_id = self.archtyp_for(Cow::Borrowed(&new_component_set));
         debug_assert_ne!(old_archetyp_id, new_archetyp_id);
         let new_archetyp = &mut self.archetypes[new_archetyp_id];
