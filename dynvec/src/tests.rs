@@ -396,7 +396,6 @@ fn test_push_default_non_empty() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore)]
 fn test_push_default_zst() {
     static DEFAULT_COUNTER: AtomicUsize = AtomicUsize::new(0);
     static DROP_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -451,7 +450,6 @@ fn test_push_default_zst() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore)]
 fn test_set_default() {
     static LAST_DROPS: Mutex<Vec<u32>> = Mutex::new(vec![]);
 
@@ -493,7 +491,6 @@ fn test_set_default() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore)]
 fn test_set_default_zst() {
     static LAST_DROPS: AtomicUsize = AtomicUsize::new(0);
     static LAST_DEFAULTS: AtomicUsize = AtomicUsize::new(0);
