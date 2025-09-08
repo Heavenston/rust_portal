@@ -31,6 +31,9 @@ struct ZSTComponent;
 #[derive(Clone, Debug)]
 struct DropCheckComponent(Arc<AtomicUsize>);
 
+#[derive(Debug, PartialEq, Eq, Default)]
+struct NotCloneComponent;
+
 impl Drop for DropCheckComponent {
     fn drop(&mut self) {
         self.0.fetch_add(1, Ordering::Relaxed);
@@ -698,6 +701,68 @@ mod misc {
         assert_matches!(world.get::<TestComponent1>(e), Ok(&TestComponent1(42)));
         world.remove_component(e, c).unwrap();
         assert_matches!(world.get::<TestComponent1>(e), Err(GetComponentTypedError::ComponentNotPresent { .. }));
+    }
+}
+
+mod world_try_clone {
+    use dynvec::NoCloneError;
+
+    use super::*;
+
+    #[test]
+    fn simple_empty() {
+        let world = World::new();
+        let _new_world = world.try_clone().unwrap();
+    }
+
+    #[test]
+    fn simple_entity_alive() {
+        let mut world = World::new();
+        let entity = world.spawn();
+
+        let new_world = world.try_clone().unwrap();
+        assert!(world.alive(entity));
+        assert!(new_world.alive(entity));
+
+        world.dispawn(entity);
+
+        assert!(!world.alive(entity));
+        assert!(new_world.alive(entity));
+    }
+
+    #[test]
+    fn clonable_component() {
+        let mut world = World::new();
+        let entity = world.spawn();
+
+        world.add(entity, DefaultComponent("Feur".to_string())).unwrap();
+
+        let new_world = world.try_clone().unwrap();
+
+        assert_eq!(new_world.get::<DefaultComponent>(entity).unwrap(), &DefaultComponent("Feur".to_string()));
+    }
+
+    #[test]
+    fn runtime_component() {
+        let mut world = World::new();
+        let entity = world.spawn();
+        let c = world.spawn_component();
+
+        world.add_component(entity, c).unwrap();
+
+        let new_world = world.try_clone().unwrap();
+
+        assert_eq!(new_world.has_component(entity, c), HasComponent::Present);
+    }
+
+    #[test]
+    fn unclonable_component() {
+        let mut world = World::new();
+        let entity = world.spawn();
+
+        world.add(entity, NotCloneComponent).unwrap();
+
+        assert!(matches!(world.try_clone(), Err(NoCloneError { .. })));
     }
 }
 

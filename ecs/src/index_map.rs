@@ -57,6 +57,15 @@ impl<T, I> IndexMap<T, I> {
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> + ExactSizeIterator + DoubleEndedIterator {
         self.vec.iter_mut()
     }
+
+    pub fn try_clone(&self) -> Result<Self, T::Error>
+        where T: TryClone,
+    {
+        Ok(Self {
+            vec: self.vec.iter().map(T::try_clone).try_collect()?,
+            _index: PhantomData,
+        })
+    }
 }
 
 impl<T, I> IndexMap<T, I>
@@ -148,6 +157,12 @@ impl<T, I> IntoIterator for IndexMap<T, I> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.vec.into_iter()
+    }
+}
+
+impl<T, I> FromIterator<T> for IndexMap<T, I> {
+    fn from_iter<U: IntoIterator<Item = T>>(iter: U) -> Self {
+        Self::from_vec(iter.into_iter().collect())
     }
 }
 

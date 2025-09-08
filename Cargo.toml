@@ -1,9 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["engine", "game", "graphics-kernel", "utils", "shader-preprocessor", "ecs", "dynvec"]
+members = ["engine", "game", "graphics-kernel", "utils", "shader-preprocessor", "ecs", "dynvec", "utils-macros"]
 
 [workspace.dependencies]
 utils = { path = "./utils", package = "portal-utils" }
+utils-macros = { path = "./utils-macros", package = "portal-utils-macros" }
 ecs = { path = "./ecs", package = "portal-ecs" }
 pgk = { path = "./graphics-kernel", package = "portal-graphics-kernel" }
 engine = { path = "./engine", package = "portal-engine" }

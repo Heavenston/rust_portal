@@ -95,10 +95,11 @@ pub struct DiconstructedSparseSet<S: SparseSetDenseStorage> {
 }
 
 /// Basically a Map<SparseIdx, T>, where the 'SparseIdx' is the sparse idx
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, TryClone)]
 pub struct SparseSet<S: SparseSetDenseStorage> {
     sparse_to_dense_indices: IndexMap<Option<PlusOneNonZero<S::PrimitiveDenseIdx>>, S::SparseIdx>,
     dense_to_sparse_indices: IndexMap<S::SparseIdx, S::DenseIdx>,
+    #[try_clone(use_try_clone)]
     dense_values: S,
 }
 

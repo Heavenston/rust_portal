@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+utils-macros = { workspace = true }
+
 derive-where = { version = "1.5.0", features = ["nightly"] }
 getset = "0.1.6"
 readonly = "0.2.13"

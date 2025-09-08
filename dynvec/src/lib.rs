@@ -5,6 +5,8 @@
 #![feature(alloc_layout_extra)]
 #![feature(box_vec_non_null)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(iterator_try_collect)]
+#![feature(never_type)]
 
 #![warn(missing_docs)]
 
@@ -57,7 +59,7 @@ use std::ops::{ Deref, DerefMut };
 use std::ptr::{ self, from_raw_parts, from_raw_parts_mut, NonNull };
 use std::slice;
 
-use utils::{ maybe_clone::MaybeClone, maybe_default::MaybeDefault };
+use utils::{ maybe_clone::MaybeClone, maybe_default::MaybeDefault, try_clone::TryClone };
 
 #[cfg(test)]
 mod tests;
@@ -107,8 +109,17 @@ pub struct NoDefaultConstructorError;
 /// Error returned when trying to call [`DynVec::try_clone`] but the type
 /// doesn't implement Clone
 #[derive(thiserror::Error, Debug)]
-#[error("The type in this DynVec doesn't implement Clone")]
-pub struct NoCloneError;
+#[error("The type in this DynVec '{type_name}' doesn't implement Clone")]
+pub struct NoCloneError {
+    /// The name of the type stored in the DynVec
+    pub type_name: &'static str,
+    /// The TypeId of the type stored in the DynVec
+    pub type_id: TypeId,
+}
+
+impl From<!> for NoCloneError {
+    fn from(_: !) -> Self { unreachable!() }
+}
 
 /// Error returned for [`DynVec::set`] and [`RemovedDynVecValue::set_into`]
 #[derive(thiserror::Error, Debug)]
@@ -390,26 +401,6 @@ impl DynVec {
     /// Returns the element type metadata used by this vector.
     pub fn metadata(&self) -> &DynVecMetadata { &self.meta }
 
-    /// Clones the DynVec if the stored types supports this operation.
-    pub fn try_clone(&self) -> Result<DynVec, NoCloneError> {
-        let Some(clone_fn) = self.meta.clone_fn
-        else { return Err(NoCloneError) };
-
-        let mut cloned = DynVec::new_with_meta(self.meta.clone());
-        cloned.reserve(self.len);
-        for i in 0..self.len {
-            // SAFETY: i < len
-            let source = unsafe { self.idx_ptr(i) };
-            // SAFETY: Just reserved enough space
-            let target = unsafe { cloned.idx_ptr(i) };
-            // SAFETY: Target has never been used
-            unsafe { clone_fn(source, target) };
-        }
-        cloned.len = self.len;
-
-        Ok(cloned)
-    }
-
     /// Reserves capacity for at least `additional` more elements to be inserted.
     ///
     /// May reallocate. Uses a geometric growth strategy similar to `Vec`.
@@ -662,6 +653,35 @@ impl Drop for DynVec {
     fn drop(&mut self) {
         self.clear();
         self.realloc_capacity(0);
+    }
+}
+
+impl TryClone for DynVec {
+    type Error = NoCloneError;
+
+    /// Clones the DynVec if the stored types supports this operation.
+    fn try_clone(&self) -> Result<Self, Self::Error> {
+        let Some(clone_fn) = self.meta.clone_fn
+        else {
+            return Err(NoCloneError {
+                type_name: self.meta.type_name,
+                type_id: self.meta.type_id,
+            });
+        };
+
+        let mut cloned = DynVec::new_with_meta(self.meta.clone());
+        cloned.reserve(self.len);
+        for i in 0..self.len {
+            // SAFETY: i < len
+            let source = unsafe { self.idx_ptr(i) };
+            // SAFETY: Just reserved enough space
+            let target = unsafe { cloned.idx_ptr(i) };
+            // SAFETY: Target has never been used
+            unsafe { clone_fn(source, target) };
+        }
+        cloned.len = self.len;
+
+        Ok(cloned)
     }
 }
 

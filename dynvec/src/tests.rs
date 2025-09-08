@@ -593,5 +593,5 @@ fn test_clone_error() {
 
     let strs = [NoClone, NoClone, NoClone];
     let vec: DynVec = strs.into_iter().collect();
-    assert!(matches!(vec.try_clone(), Err(NoCloneError)));
+    assert!(matches!(vec.try_clone(), Err(NoCloneError { .. })));
 }

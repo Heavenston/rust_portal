@@ -20,7 +20,7 @@ use crate::{
 use std::{
     any::{Any, TypeId}, assert_matches::debug_assert_matches, borrow::Cow, collections::HashMap, iter::{ empty, once }
 };
-use utils::{extract_nth::ExtractNthExt, itertools::Itertools, prelude::*};
+use utils::{ extract_nth::ExtractNthExt, itertools::Itertools, prelude::* };
 use derive_more::{ IsVariant };
 use dynvec::{ DynVec, DynVecMetadata, DynVecValueRef, DynVecValueRefMut, RemovedDynVecValue };
 
@@ -79,13 +79,14 @@ struct Archetyp {
     table_id: TableId,
 }
 
-#[derive(Default, Debug)]
+#[derive(TryClone, Default, Debug)]
 struct Table {
     /// NOTE: This is a subset of the components used to find this table,
     /// as only components that have table storage are stored in this set
     /// but components that have no storage or are stored in sparse sets
     /// may still 'fragment' tables.
     table_components: ComponentSet,
+    #[try_clone(use_try_clone)]
     sparse_set: SparseSet<ComponentDenseStorage>,
 }
 
@@ -220,7 +221,7 @@ pub enum RemoveComponentError {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, TryClone)]
 pub struct World {
     entity_storage: entity_storage::EntityStorage,
 
@@ -230,6 +231,7 @@ pub struct World {
     /// List of all archetypes indexed by their ids
     archetypes: IndexMap<Archetyp, ArchetypId>,
     /// List of tables indexed by their ids
+    #[try_clone(use_try_clone, error_type = "dynvec::NoCloneError", clone_with = "IndexMap::try_clone")]
     tables: IndexMap<Table, TableId>,
 
     /// Maps components to the set of archetypes that have this component

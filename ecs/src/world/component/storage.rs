@@ -42,10 +42,12 @@ impl<'a> StorageComponentsRefMut<'a> {
 }
 
 #[derive_where::derive_where(Debug)]
-#[derive(Default)]
+#[derive(TryClone, Default)]
 pub struct ComponentDenseStorage {
+    #[try_clone(use_clone)]
     len: u32,
     #[derive_where(skip)]
+    #[try_clone(error_type = "dynvec::NoCloneError", clone_with = try_clone_boxed_slice)]
     storages: Box<[DynVec]>,
 }
 

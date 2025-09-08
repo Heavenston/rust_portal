@@ -13,6 +13,7 @@
 #![feature(associated_type_defaults)]
 #![feature(associated_const_equality)]
 #![feature(macro_metavar_expr_concat)]
+#![feature(iterator_try_collect)]
 
 #![expect(internal_features)]
 #![expect(incomplete_features)]
@@ -21,7 +22,7 @@
 
 pub mod prelude {
     pub use crate::{
-        ix, dix, trait_alias,
+        ix, dix, trait_alias, macros::TryClone,
         uid::Uid,
         default, concat_arrays, flatten_array, hash_value,
         itertools::Itertools as _,
@@ -51,6 +52,7 @@ pub mod prelude {
             BoolAnd, BoolOr, BoolNot
         },
         either_utils::{ zip_left, zip_right },
+        try_clone::{ try_clone_boxed_slice, TryClone },
     };
 }
 
@@ -60,6 +62,7 @@ pub use either;
 pub use sorted_vec;
 pub use dyn_clone;
 pub use smallvec;
+pub use utils_macros as macros;
 
 pub mod handle_map;
 pub mod uid;
@@ -80,6 +83,7 @@ pub mod maybe_clone;
 pub mod tuple_traits;
 pub mod partial_bool;
 pub mod either_utils;
+pub mod try_clone;
 
 use std::hash::{ DefaultHasher, Hash, Hasher };
 
