@@ -11,7 +11,7 @@ use proptest_state_machine::{prop_state_machine, ReferenceStateMachine, StateMac
 
 prop_state_machine! {
     #[test]
-    fn run_my_heap_test(
+    fn run_world_state_machine_tests(
         sequential 1..20 => WorldMachine
     );
 }
@@ -185,6 +185,8 @@ impl ReferenceStateMachine for ReferenceWorld {
     }
 
     fn transitions(state: &Self::State) -> BoxedStrategy<Self::Transition> {
+        let ccuid = state.component_entities[&TypeId::of::<ComponentStorageComponent>()];
+
         let mut options = Vec::<BoxedStrategy<Self::Transition>>::new();
 
         options.extend([
@@ -192,9 +194,11 @@ impl ReferenceStateMachine for ReferenceWorld {
             LazyJust::new(Uid::new).prop_map(|uid| Transition::SpawnComponentEntity(uid)).boxed(),
         ]);
 
-        if !state.entities.is_empty() {
+        if state.entities.len() > 1 {
             options.push(
-                Union::new(state.entities.keys().copied().map(Just))
+                Union::new(state.entities.keys().copied()
+                    .filter(|&e| e != ccuid /* Cannot dispawn the component storage component */)
+                    .map(Just))
                     .prop_map(|entity| Transition::DispawnAliveEntity(entity))
                     .boxed()
             );
@@ -293,7 +297,7 @@ impl StateMachineTest for WorldMachine {
             },
             Transition::DispawnAliveEntity(uid) => {
                 let &entity = state.entity_mapping_u2e.get(&uid).unwrap();
-                assert_eq!(state.world.dispawn(entity), true);
+                state.world.dispawn(entity).unwrap();
             },
         }
         state

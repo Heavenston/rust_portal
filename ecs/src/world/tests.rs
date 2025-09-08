@@ -63,9 +63,9 @@ mod entity_spawning {
         let entity = world.spawn();
         
         assert_eq!(world.alive(entity), true);
-        assert_eq!(world.dispawn(entity), true);
+        assert_matches!(world.dispawn(entity), Ok(()));
         assert_eq!(world.alive(entity), false);
-        assert_eq!(world.dispawn(entity), false);
+        assert_matches!(world.dispawn(entity), Err(DispawnError::EntityIsNotAlive { .. }));
     }
 
     #[test]
@@ -78,7 +78,7 @@ mod entity_spawning {
             entity.generation()
         );
         
-        world.dispawn(entity);
+        world.dispawn(entity).unwrap();
         
         // Generation should increment after dispawn
         assert_eq!(
@@ -143,7 +143,7 @@ mod typed_components_api {
         assert_eq!(world.try_component::<TestComponent1>(), Some(e1));
         assert_eq!(world.try_component::<TestComponent2>(), Some(e2));
 
-        world.dispawn(e2);
+        world.dispawn(e2).unwrap();
 
         assert!(world.alive(e1));
         assert!(!world.alive(e2));
@@ -158,7 +158,7 @@ mod typed_components_api {
 
         let e1 = world.component::<TestComponent1>();
         let e2 = world.component::<TestComponent2>();
-        world.dispawn(e2);
+        world.dispawn(e2).unwrap();
         assert!(world.alive(e1));
         assert!(!world.alive(e2));
         let new_e2 = world.component::<TestComponent2>();
@@ -258,12 +258,12 @@ mod entities_with_typed_components {
         let e = world.spawn();
 
         world.add(e, TestComponent1(42)).unwrap();
-        assert_matches!(world.dispawn(e), true);
+        assert_matches!(world.dispawn(e), Ok(()));
 
         assert_matches!(world.has::<TestComponent1>(e), HasComponentTyped::EntityIsNotAlive);
         assert_matches!(world.has::<TestComponent2>(e), HasComponentTyped::UnknownComponent);
 
-        assert_matches!(world.dispawn(e), false);
+        assert_matches!(world.dispawn(e), Err(DispawnError::EntityIsNotAlive { .. }));
     }
 
     #[test]
@@ -321,7 +321,7 @@ mod entities_with_typed_components {
         let c = world.component::<TestComponent1>();
 
         world.add(e, TestComponent1(42)).unwrap();
-        world.dispawn(c);
+        world.dispawn(c).unwrap();
 
         assert!(!world.alive(c));
         assert!(world.alive(e));
@@ -345,7 +345,7 @@ mod untyped_component_apis {
         assert!(world.alive(e));
 
         assert_matches!(world.component_storage(e), Some(ComponentStorageKind::None));
-        world.dispawn(e);
+        world.dispawn(e).unwrap();
         assert_matches!(world.component_storage(e), None);
     }
 
@@ -357,7 +357,7 @@ mod untyped_component_apis {
         assert!(world.alive(e));
 
         assert_matches!(world.component_storage(e), Some(ComponentStorageKind::None));
-        world.dispawn(e);
+        world.dispawn(e).unwrap();
         assert_matches!(world.component_storage(e), None);
     }
 }
@@ -525,7 +525,7 @@ mod torturing_components {
         ).unwrap();
         assert_eq!(world.has_component(e, c), HasComponent::Present);
         assert_eq!(drops.load(Ordering::Relaxed), 0);
-        world.dispawn(c);
+        world.dispawn(c).unwrap();
         assert_eq!(drops.load(Ordering::Relaxed), 1);
         assert_eq!(world.has_component(e, c), HasComponent::ComponentIsNotAlive);
         assert_eq!(world.try_component::<DropCheckComponent>(), None);
@@ -559,7 +559,7 @@ mod entities_with_untyped_components {
         let c = world.spawn_component();
 
         world.add_component(e, c).unwrap();
-        world.dispawn(e);
+        world.dispawn(e).unwrap();
         assert!(matches!(world.add_component(e, c), Err(AddComponentError::EntityIsNotAlive { .. })));
         assert_eq!(world.has_component(e, c), HasComponent::EntityIsNotAlive);
 
@@ -612,7 +612,7 @@ mod entities_with_untyped_components {
         world.add_component(e, c).unwrap();
 
         assert!(world.alive(c));
-        world.dispawn(c);
+        world.dispawn(c).unwrap();
         assert!(!world.alive(c));
 
         assert_matches!(world.has_component(e, c), HasComponent::ComponentIsNotAlive);
@@ -626,7 +626,7 @@ mod entities_with_untyped_components {
         let c = world.spawn_component();
 
         assert!(world.alive(c));
-        world.dispawn(c);
+        world.dispawn(c).unwrap();
         assert!(!world.alive(c));
 
         assert_matches!(world.has_component(e, c), HasComponent::ComponentIsNotAlive);
@@ -646,7 +646,7 @@ mod misc {
 
         assert_matches!(world.get::<TestComponent1>(e), Ok(&TestComponent1(42)));
         
-        assert_eq!(world.dispawn(e), true);
+        assert_matches!(world.dispawn(e), Ok(()));
 
         let e2 = world.spawn();
         assert_ne!(e, e2);
@@ -724,7 +724,7 @@ mod world_try_clone {
         assert!(world.alive(entity));
         assert!(new_world.alive(entity));
 
-        world.dispawn(entity);
+        world.dispawn(entity).unwrap();
 
         assert!(!world.alive(entity));
         assert!(new_world.alive(entity));
@@ -791,7 +791,7 @@ mod drops_when_it_should {
 
         world.add(e, DropCheckComponent(Arc::clone(&checker))).unwrap();
         assert_eq!(checker.load(Ordering::Relaxed), 0);
-        world.dispawn(e);
+        world.dispawn(e).unwrap();
         assert_eq!(checker.load(Ordering::Relaxed), 1);
     }
 
@@ -818,9 +818,9 @@ mod drops_when_it_should {
 
         world.add(e, DropCheckComponent(Arc::clone(&checker))).unwrap();
         assert_eq!(checker.swap(0, Ordering::Relaxed), 0);
-        world.dispawn(c);
+        world.dispawn(c).unwrap();
         assert_eq!(checker.swap(0, Ordering::Relaxed), 1);
-        world.dispawn(e);
+        world.dispawn(e).unwrap();
         assert_eq!(checker.swap(0, Ordering::Relaxed), 0);
     }
 
@@ -900,7 +900,7 @@ mod tables_and_archetyps {
         assert_eq!(world.entities_archetypes[e.index()], empty_archetyp);
         world.add(e, TestComponent1(42)).unwrap();
         assert_eq!(world.entities_archetypes[e.index()], non_empty_archetyp);
-        world.dispawn(c);
+        world.dispawn(c).unwrap();
         assert_eq!(world.entities_archetypes[e.index()], empty_archetyp);
     }
 
@@ -1188,7 +1188,7 @@ mod queries {
             .collect_vec(),
         );
 
-        ctx.world.dispawn(new_entity);
+        ctx.world.dispawn(new_entity).unwrap();
 
         assert_eq!(
             query.iter(&ctx.world)

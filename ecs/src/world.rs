@@ -92,6 +92,18 @@ struct Table {
     sparse_set: SparseSet<ComponentDenseStorage>,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum DispawnError {
+    #[error("Tried to dispawn a dead entity")]
+    EntityIsNotAlive {
+        entity: Entity,
+    },
+    #[error("Dispawning this entity is forbidden by the implementation: {reason}")]
+    Forbidden {
+        reason: &'static str,
+    },
+}
+
 /// Ref to a component that may or may not have no storage attached in which
 /// case a ref makes no sense. If this is returned this means that the component
 /// **is** attached to the relevant entity.
@@ -400,12 +412,21 @@ impl World {
     }
 
     /// Returns false if the entity was already dead.
-    pub fn dispawn(&mut self, entity: impl Into<Entity>) -> bool {
+    pub fn dispawn(&mut self, entity: impl Into<Entity>) -> Result<(), DispawnError> {
         let entity = entity.into();
         let centity = ComponentEntity(entity);
 
+        // FIXME: Maybe support it by removing all storage everywhere lol ?
+        // In that case it would be not having the `ComponentStorageComponent`
+        // registered from the begining would be feasible
+        if centity == self.components_typeid_to_entity[&TypeId::of::<ComponentStorageComponent>()] {
+            return Err(DispawnError::Forbidden {
+                reason: "You cannot dispawn the ComponentStorageComponent",
+            });
+        }
+
         if !self.alive(entity) {
-            return false;
+            return Err(DispawnError::EntityIsNotAlive { entity });
         }
 
         if let Some(type_id) = self.components_entity_to_typeid.remove(&centity) {
@@ -433,7 +454,7 @@ impl World {
 
         self.tables[table_id].sparse_set.remove(entity.index());
 
-        true
+        Ok(())
     }
 
     /// Returns the entity for the given component type_id, or None if it was never

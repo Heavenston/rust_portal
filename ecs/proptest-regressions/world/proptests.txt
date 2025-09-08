@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5b6fd14cb72ec933006901b22011d6e813032991291a518ef8b6a9277cbfad3b # shrinks to (initial_state, transitions, seen_counter) = (ReferenceWorldState { component_entities: {TypeId(0x38d14ca746e1184f49ad3b66706988a1): Uid(0)}, entities: [(Uid(0), [(Uid(0), Some("portal_ecs::world::component::ComponentStorageComponent"))])] }, [DispawnAliveEntity(Uid(0))], None)
