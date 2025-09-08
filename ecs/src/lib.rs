@@ -6,6 +6,7 @@
 #![feature(assert_matches)]
 #![feature(debug_closure_helpers)]
 #![feature(never_type)]
+#![feature(option_zip)]
 
 #![forbid(unsafe_code)]
 

@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod proptests;
 
 mod entity_storage;
 pub use entity_storage::{ Entity, EntityIndex, EntityGeneration };
