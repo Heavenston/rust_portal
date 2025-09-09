@@ -141,7 +141,7 @@ impl HasComponent {
 pub enum ComponentStorageKind {
     /// The component has no storage and thus is stored nowhere
     None,
-    /// The component has table storage and thus is stoired alongside
+    /// The component has table storage and thus is stored alongside
     /// other components with table storage for each archetyp.
     ///
     /// This is the only storage kind that always fragment tables
