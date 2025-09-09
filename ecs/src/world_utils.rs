@@ -130,7 +130,7 @@ impl World {
         };
 
         match self.get_component_mut(entity, component) {
-            Ok(mut component_ref) => Ok(component_ref.as_typed().expect("Type is correct")),
+            Ok(component_ref) => Ok(component_ref.as_typed().expect("Type is correct")),
             Err(GetComponentError::EntityIsNotAlive { entity }) => {
                 return Err(GetComponentTypedError::EntityIsNotAlive { entity });
             },

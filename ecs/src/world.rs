@@ -907,7 +907,7 @@ impl World {
 
         Ok(AddComponent {
             component_ref: match result.component_ref {
-                OptionalComponentRef::HasStorage(mut r) => r.as_typed::<V>()
+                OptionalComponentRef::HasStorage(r) => r.as_typed::<V>()
                     .expect("Correctly typed"),
                 OptionalComponentRef::NoStorage => unreachable!("Created from type so must have storage"),
             },

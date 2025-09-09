@@ -807,7 +807,7 @@ pub struct DynVecValueRefMut<'a> {
 
 impl<'a> DynVecValueRefMut<'a> {
     /// Returns a trait object mutable reference to the underlying value.
-    pub fn as_any(&mut self) -> &'a mut dyn Any {
+    pub fn as_any(self) -> &'a mut dyn Any {
         let fat = from_raw_parts_mut::<dyn Any>(self.ptr.as_ptr(), self.metadata.dyn_meta);
         unsafe { &mut *fat }
     }
@@ -815,7 +815,7 @@ impl<'a> DynVecValueRefMut<'a> {
     /// If the given type is the same as the value's type a mutable reference
     /// to the value is returned.
     /// Otherwise Err(IncorrectTypeError) is returned.
-    pub fn as_typed<T: 'static>(&mut self) -> Result<&'a mut T, IncorrectTypeError> {
+    pub fn as_typed<T: 'static>(self) -> Result<&'a mut T, IncorrectTypeError> {
         self.metadata.assert_type_t::<T>()?;
         Ok(unsafe { self.ptr.cast::<T>().as_mut() })
     }
