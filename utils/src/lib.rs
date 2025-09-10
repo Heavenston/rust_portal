@@ -22,7 +22,7 @@
 
 pub mod prelude {
     pub use crate::{
-        ix, dix, trait_alias, macros::TryClone,
+        ix, dix, trait_alias, macros::TryClone, unwrap_matches,
         uid::Uid,
         default, concat_arrays, flatten_array, hash_value,
         itertools::Itertools as _,
@@ -175,3 +175,24 @@ macro_rules! trait_alias {
         impl<T: $($cond)+> $name for T { }
     };
 }
+
+#[macro_export]
+macro_rules! unwrap_matches {
+    ($e:expr, $pat:pat) => {
+        let value = $e;
+        let $pat = value else {
+            ::core::panic!(
+                "match assertion failed\n pattern: `{}`\n   value: `{:?}`",
+                ::core::stringify!($pat), value,
+            );
+        };
+    };
+    ($e:expr, $pat:pat, $($arg:tt)*) => {
+        let value = $e;
+        let $pat = value else {
+            ::core::panic!(
+                "match assertion failed: {}\n pattern: `{}`\n   value: `{:?}`",
+                ::core::format_args!($($arg)*), ::core::stringify!($pat), value,
+            );
+        };
+    };}
