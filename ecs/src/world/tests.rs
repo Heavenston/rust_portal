@@ -521,6 +521,44 @@ mod torturing_components {
     }
 
     #[test]
+    fn add_component_storage_component_on_custom_component_after_usage() {
+        let mut world = World::new();
+        let e = world.spawn();
+        let c = world.spawn_component();
+
+        world.add_component(e, c).unwrap();
+
+        assert_matches!(
+            world.add(c, ComponentStorageComponent {
+                dynvec_meta: DynVecMetadata::new::<TestComponent1>(),
+            }),
+            Err(AddComponentTypedError::Forbidden { reason: _ })
+        );
+
+        assert_matches!(
+            world.get_component(e, c).unwrap().as_typed::<TestComponent1>(),
+            Ok(TestComponent1(0))
+        );
+        assert!(world.has_component(e, c).is_not_present());
+    }
+
+    #[test]
+    fn mutate_component_storage_component_on_registered_component() {
+        let mut world = World::new();
+        let e = world.spawn();
+        let c = world.component::<TestComponent1>();
+
+        world.add(e, TestComponent1(42)).unwrap();
+
+        world.get_mut::<ComponentStorageComponent>(c).unwrap().dynvec_meta =
+            DynVecMetadata::new::<TestComponent2>();
+
+        assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(42));
+        world.set(e, TestComponent1(52)).unwrap();
+        assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(52));
+    }
+
+    #[test]
     fn dispawning_custom_component_with_storage_drops_it() {
         let mut world = World::new();
         let e = world.spawn();
@@ -541,22 +579,6 @@ mod torturing_components {
         assert_eq!(drops.load(Ordering::Relaxed), 1);
         assert_eq!(world.has_component(e, c), HasComponent::ComponentIsNotAlive);
         assert_eq!(world.try_component::<DropCheckComponent>(), None);
-    }
-
-    #[test]
-    fn mutate_component_storage_component_on_registered_component() {
-        let mut world = World::new();
-        let e = world.spawn();
-        let c = world.component::<TestComponent1>();
-
-        world.add(e, TestComponent1(42)).unwrap();
-
-        world.get_mut::<ComponentStorageComponent>(c).unwrap().dynvec_meta =
-            DynVecMetadata::new::<TestComponent2>();
-
-        assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(42));
-        world.set(e, TestComponent1(52)).unwrap();
-        assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(52));
     }
 }
 

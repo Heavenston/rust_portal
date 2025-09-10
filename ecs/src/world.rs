@@ -320,7 +320,8 @@ pub struct World {
     #[try_clone(use_try_clone, error_type = "dynvec::NoCloneError", clone_with = "IndexMap::try_clone")]
     tables: IndexMap<Table, TableId>,
 
-    /// Maps components to the set of archetypes that have this component
+    /// Maps components' entities to the set of archetypes that have this component
+    /// Used as a faster alternative to going through each archetyp
     components_to_archetypes: IndexMap<BitSet<ArchetypId>, EntityIndex>,
 
     components_typeid_to_entity: HashMap<TypeId, ComponentEntity>,
@@ -1050,7 +1051,7 @@ impl World {
 
             match (self.component_fragments_tables(centity), &component_storage) {
                 (true | false, ComponentStorageKind::None) =>
-                    unreachable!("Enttiy with ComponentStorageComponent cannot have None storage"),
+                    unreachable!("Entity with ComponentStorageComponent cannot have None storage"),
                 (true, ComponentStorageKind::Table { .. }) => {
                     for archetyp in self.components_to_archetypes.get(entity.index()).into_iter().flatten() {
                         let table_id = self.archetypes[archetyp].table_id;
