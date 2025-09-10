@@ -607,12 +607,7 @@ impl DynVec {
     ///
     /// Returns an error if `idx` is out of bounds or the boxed value's `TypeId` mismatches.
     pub fn set_default(&mut self, idx: usize) -> Result<(), DefaultInsertionError> {
-        let Some(write_default) = self.meta.default_fn
-        else { return Err(NoDefaultConstructorError.into()) };
-
-        let ptr = self.try_idx_ptr(idx)?;
-        unsafe { self.drop_at(idx); write_default(ptr) }
-
+        self.get_mut(idx)?.replace_with_default()?;
         Ok(())
     }
 
@@ -834,6 +829,18 @@ impl<'a> DynVecValueRefMut<'a> {
             ptr: self.ptr,
             _data: PhantomData,
         }
+    }
+
+    /// Drops the current value, assigning the value of its Default trait
+    /// in its place.
+    pub fn replace_with_default(&mut self) -> Result<(), NoDefaultConstructorError> {
+        let default_constructor = self.metadata.default_fn
+            .ok_or(NoDefaultConstructorError)?;
+
+        unsafe { self.metadata.drop_ptr(self.ptr) };
+        unsafe { default_constructor(self.ptr) };
+
+        Ok(())
     }
 
     /// Returns a trait object mutable reference to the underlying value.
