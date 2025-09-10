@@ -250,6 +250,20 @@ impl DynVecMetadata {
         }
     }
 
+    fn assert_type_meta(&self, other: &DynVecMetadata) -> Result<(), IncorrectTypeError> {
+        if other.type_id == self.type_id {
+            Ok(())
+        }
+        else {
+            Err(IncorrectTypeError {
+                expected_name: Some(self.type_name),
+                expected_typeid: self.type_id,
+                received_name: Some(other.type_name),
+                received_typeid: other.type_id,
+            })
+        }
+    }
+
     unsafe fn drop_ptr(&self, data_ptr: NonNull<()>) {
         let fat: *mut dyn Any = from_raw_parts_mut::<dyn Any>(data_ptr.as_ptr(), self.dyn_meta);
         unsafe { ptr::drop_in_place(fat) };
@@ -279,6 +293,7 @@ impl std::fmt::Debug for DynVecMetadata {
 /// Type-erased vector storing a single runtime-selected element type.
 ///
 /// See the crate-level docs for overview and safety guarantees.
+#[derive(Debug /* This debug impl is not very useful but hey... its here */)]
 pub struct DynVec {
     ptr: NonNull<()>,
     len: usize,
@@ -354,18 +369,8 @@ impl DynVec {
         self.meta.assert_type_t::<T>()
     }
 
-    fn assert_type_meta(&self, meta: &DynVecMetadata) -> Result<(), IncorrectTypeError> {
-        if meta.type_id == self.meta.type_id {
-            Ok(())
-        }
-        else {
-            Err(IncorrectTypeError {
-                expected_name: Some(self.meta.type_name),
-                expected_typeid: self.meta.type_id,
-                received_name: Some(meta.type_name),
-                received_typeid: meta.type_id,
-            })
-        }
+    fn assert_type_meta(&self, other: &DynVecMetadata) -> Result<(), IncorrectTypeError> {
+        self.meta.assert_type_meta(other)
     }
 
     fn assert_index(&self, idx: usize) -> Result<(), IndexOutOfBoundError> {
@@ -796,6 +801,14 @@ impl<'a> DynVecValueRef<'a> {
     }
 }
 
+impl<'a> std::fmt::Debug for DynVecValueRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DynVecValueRef")
+            .field("type_name", &self.metadata.type_name)
+            .finish()
+    }
+}
+
 /// Mutable reference guard for an element inside a `DynVec`.
 ///
 /// The value can then be then be read as an Any trait object or casted into
@@ -809,9 +822,18 @@ pub struct DynVecValueRefMut<'a> {
 
 impl<'a> DynVecValueRefMut<'a> {
     /// Returns this reference as a shared reference instead of mutable
-    pub fn as_shared(&'_ self) -> &'_ DynVecValueRef<'a> {
+    pub fn as_shared(&self) -> &'_ DynVecValueRef<'_> {
         // SAFETY: They have the same layout
         unsafe { &*((self as *const _) as *const DynVecValueRef<'a>) }
+    }
+
+    /// Converts this mutable reference into a shared reference
+    pub fn into_shared(self) -> DynVecValueRef<'a> {
+        DynVecValueRef {
+            metadata: self.metadata,
+            ptr: self.ptr,
+            _data: PhantomData,
+        }
     }
 
     /// Returns a trait object mutable reference to the underlying value.
@@ -829,9 +851,11 @@ impl<'a> DynVecValueRefMut<'a> {
     }
 }
 
-impl<'a> AsRef<DynVecValueRef<'a>> for DynVecValueRefMut<'a> {
-    fn as_ref(&self) -> &DynVecValueRef<'a> {
-        self.as_shared()
+impl<'a> std::fmt::Debug for DynVecValueRefMut<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DynVecValueRefMut")
+            .field("type_name", &self.metadata.type_name)
+            .finish()
     }
 }
 
@@ -883,20 +907,30 @@ impl<'a> DrainedDynVecValue<'a> {
         Ok(())
     }
 
-    /// Like [`RemovedDynVecValue::set_into`]
-    pub fn set_into(mut self, dst: &mut DynVec, idx: usize) -> Result<(), InsertionError> {
-        dst.assert_type_meta(&self.meta)?;
-        let target_ptr = dst.try_idx_ptr(idx)?;
-
+    /// Like [`RemovedDynVecValue::assign_onto`]
+    pub fn assign_onto(mut self, dst: DynVecValueRefMut) -> Result<(), IncorrectTypeError> {
+        dst.metadata.assert_type_meta(self.meta)?;
         let layout = self.meta.dyn_meta.layout();
 
-        // SAFETY: All elements are initialized
-        unsafe { dst.meta.drop_ptr(target_ptr); }
-        // SAFETY: Same layout and just freed the space
-        unsafe { target_ptr.cast::<u8>().copy_from_nonoverlapping(self.value_ptr.cast::<u8>(), layout.size()) };
+        unsafe { dst.metadata.drop_ptr(dst.ptr) };
+        unsafe { dst.ptr.cast::<u8>().copy_from_nonoverlapping(self.value_ptr.cast::<u8>(), layout.size()); };
         self.moved = true;
 
         Ok(())
+    }
+
+    /// Like [`RemovedDynVecValue::set_into`]
+    pub fn set_into(self, dst: &mut DynVec, idx: usize) -> Result<(), InsertionError> {
+        self.assign_onto(dst.get_mut(idx)?)?;
+        Ok(())
+    }
+}
+
+impl<'a> std::fmt::Debug for DrainedDynVecValue<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DrainedDynVecValue")
+            .field("type_name", &self.meta.type_name)
+            .finish()
     }
 }
 
@@ -992,6 +1026,20 @@ impl<'a> RemovedDynVecValue<'a> {
         Ok(())
     }
 
+    /// Overwrites the element at `dst` with this value.
+    pub fn assign_onto(mut self, dst: DynVecValueRefMut) -> Result<(), IncorrectTypeError> {
+        dst.metadata.assert_type_meta(&self.vec.meta)?;
+        let layout = self.vec.meta.dyn_meta.layout();
+
+        // SAFETY: All elements are initialized
+        unsafe { dst.metadata.drop_ptr(dst.ptr) };
+        // SAFETY: Same layout and just freed the space
+        unsafe { dst.ptr.cast::<u8>().copy_from_nonoverlapping(self.value_ptr.cast::<u8>(), layout.size()); };
+        self.moved = true;
+
+        Ok(())
+    }
+
     /// Overwrites the element at `idx` in another `DynVec` with this value.
     ///
     /// Same semantics as [`DynVec::set`]: drops the previous value in `dst` at `idx`
@@ -1010,19 +1058,17 @@ impl<'a> RemovedDynVecValue<'a> {
     /// assert_eq!(a.typed::<i32>().unwrap().as_slice(), &[10, 30]);
     /// assert_eq!(b.typed::<i32>().unwrap().as_slice(), &[1, 20, 3]);
     /// ```
-    pub fn set_into(mut self, dst: &mut DynVec, idx: usize) -> Result<(), InsertionError> {
-        dst.assert_type_meta(&self.vec.meta)?;
-        let target_ptr = dst.try_idx_ptr(idx)?;
-
-        let layout = self.vec.meta.dyn_meta.layout();
-
-        // SAFETY: All elements are initialized
-        unsafe { dst.meta.drop_ptr(target_ptr); }
-        // SAFETY: Same layout and just freed the space
-        unsafe { target_ptr.cast::<u8>().copy_from_nonoverlapping(self.value_ptr.cast::<u8>(), layout.size()) };
-        self.moved = true;
-
+    pub fn set_into(self, dst: &mut DynVec, idx: usize) -> Result<(), InsertionError> {
+        self.assign_onto(dst.get_mut(idx)?)?;
         Ok(())
+    }
+}
+
+impl<'a> std::fmt::Debug for RemovedDynVecValue<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemovedDynVecValue")
+            .field("type_name", &self.vec.meta.type_name)
+            .finish()
     }
 }
 
