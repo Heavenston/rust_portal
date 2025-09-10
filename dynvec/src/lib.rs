@@ -773,6 +773,7 @@ impl Drop for DynVecDrain<'_> {
 /// The value can then be then be read as an Any trait object or casted into
 /// its real type.
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct DynVecValueRef<'a> {
     metadata: &'a DynVecMetadata,
     ptr: NonNull<()>,
@@ -799,6 +800,7 @@ impl<'a> DynVecValueRef<'a> {
 ///
 /// The value can then be then be read as an Any trait object or casted into
 /// its real type.
+#[repr(C)]
 pub struct DynVecValueRefMut<'a> {
     metadata: &'a DynVecMetadata,
     ptr: NonNull<()>,
@@ -806,6 +808,12 @@ pub struct DynVecValueRefMut<'a> {
 }
 
 impl<'a> DynVecValueRefMut<'a> {
+    /// Returns this reference as a shared reference instead of mutable
+    pub fn as_shared(&'_ self) -> &'_ DynVecValueRef<'a> {
+        // SAFETY: They have the same layout
+        unsafe { &*((self as *const _) as *const DynVecValueRef<'a>) }
+    }
+
     /// Returns a trait object mutable reference to the underlying value.
     pub fn as_any(self) -> &'a mut dyn Any {
         let fat = from_raw_parts_mut::<dyn Any>(self.ptr.as_ptr(), self.metadata.dyn_meta);
@@ -818,6 +826,12 @@ impl<'a> DynVecValueRefMut<'a> {
     pub fn as_typed<T: 'static>(self) -> Result<&'a mut T, IncorrectTypeError> {
         self.metadata.assert_type_t::<T>()?;
         Ok(unsafe { self.ptr.cast::<T>().as_mut() })
+    }
+}
+
+impl<'a> AsRef<DynVecValueRef<'a>> for DynVecValueRefMut<'a> {
+    fn as_ref(&self) -> &DynVecValueRef<'a> {
+        self.as_shared()
     }
 }
 

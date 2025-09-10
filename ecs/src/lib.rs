@@ -5,6 +5,7 @@
 #![feature(assert_matches)]
 #![feature(debug_closure_helpers)]
 #![feature(never_type)]
+#![feature(min_specialization)]
 
 #![forbid(unsafe_code)]
 

@@ -1,10 +1,6 @@
-use crate::{
-    world::{
-        component::Component,
-        AddComponent, AddComponentWithError, Entity,
-        GetComponentError, HasComponent, OptionalComponentRef, RemoveComponentError, World
-    }
-};
+use crate::world::{
+        component::Component, AddComponent, AddComponentWithError, Entity, GetComponentError, HasComponent, MaybeReadOnlyComponentRef, OptionalComponentRef, RemoveComponentError, World
+    };
 
 use std::any::type_name;
 use derive_more::IsVariant;
@@ -36,6 +32,10 @@ pub enum GetComponentTypedError {
     ComponentNotPresent {
         type_name: &'static str,
         entity: Entity,
+    },
+    #[error("Cannot get this component's value: {reason}")]
+    Forbidden {
+        reason: &'static str,
     },
 }
 
@@ -78,6 +78,10 @@ pub enum GetSingletonError {
     ComponentNotPresent {
         type_name: &'static str,
     },
+    #[error("Getting this singleton's value is forbidden: {reason}")]
+    Forbidden {
+        reason: &'static str,
+    },
 }
 
 impl World {
@@ -113,6 +117,9 @@ impl World {
                     entity,
                 });
             },
+            Err(GetComponentError::Forbidden { reason }) => {
+                return Err(GetComponentTypedError::Forbidden { reason });
+            },
 
             Err(GetComponentError::ComponentIsNotAlive { .. }) =>
                 unreachable!("World::try_component should not return dead entities."),
@@ -140,6 +147,9 @@ impl World {
                     entity,
                 });
             },
+            Err(GetComponentError::Forbidden { reason }) => {
+                return Err(GetComponentTypedError::Forbidden { reason });
+            },
 
             Err(GetComponentError::ComponentIsNotAlive { .. }) =>
                 unreachable!("World::try_component should not return dead entities."),
@@ -148,14 +158,14 @@ impl World {
         }
     }
 
-    pub fn get_or_default<C: Component + Default>(&mut self, entity: Entity) -> Result<AddComponent<&mut C>, AddComponentTypedError> {
+    pub fn get_or_default<C: Component + Default>(&mut self, entity: Entity) -> Result<AddComponent<MaybeReadOnlyComponentRef<'_, C>>, AddComponentTypedError> {
         self.add_with(entity, default)
     }
     
     /// Gets the component of the given type for the given entity, if the entity
     /// does not have the component, then the given function is called
     /// for adding the component to the entity.
-    pub fn add_with<C, F>(&mut self, entity: impl Into<Entity>, f: F) -> Result<AddComponent<&mut C>, AddComponentTypedError>
+    pub fn add_with<C, F>(&mut self, entity: impl Into<Entity>, f: F) -> Result<AddComponent<MaybeReadOnlyComponentRef<'_, C>>, AddComponentTypedError>
         where F: FnOnce() -> C,
               C: Component,
     {
@@ -175,18 +185,19 @@ impl World {
 
     /// Gets the component of the given type for the given entity, if the entity
     /// does not have the component, it is inserted with the given value.
-    pub fn add<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> Result<AddComponent<&mut C>, AddComponentTypedError> {
+    pub fn add<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> Result<AddComponent<MaybeReadOnlyComponentRef<'_, C>>, AddComponentTypedError> {
         self.add_with(entity, || component)
     }
 
     /// Sets the value for the given component on the given entity, overrides
     /// the component's value if the entity already has it.
-    pub fn set<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> Result<AddComponent<&mut C>, AddComponentTypedError> {
+    pub fn set<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> Result<AddComponent<MaybeReadOnlyComponentRef<'_, C>>, AddComponentTypedError> {
         let mut value = Some(component);
         let result = self.add_with::<C, _>(entity, || value.take().expect("Took once"))?;
         if let Some(value) = value {
             debug_assert_eq!(result.was_added, false);
-            *result.component_ref = value;
+            todo!();
+            // *result.component_ref = value;
         }
         Ok(result)
     }
@@ -223,10 +234,10 @@ impl World {
         }
     }
 
-    pub fn set_singleton<C: Component>(&mut self, value: C) -> &mut C {
+    pub fn set_singleton<C: Component>(&mut self, value: C) -> MaybeReadOnlyComponentRef<'_, C> {
         let entity = self.component::<C>();
 
-        match self.add(entity, value) {
+        match self.set(entity, value) {
             Ok(component_ref) => component_ref.component_ref,
             Err(AddComponentTypedError::EntityIsNotAlive { .. }) =>
                 unreachable!("World::component should not return a dead entity"),
@@ -249,6 +260,8 @@ impl World {
                 unreachable!("Just checked this"),
             Err(GetComponentTypedError::ComponentNotPresent { type_name, .. }) =>
                 return Err(GetSingletonError::ComponentNotPresent { type_name }),
+            Err(GetComponentTypedError::Forbidden { reason, .. }) =>
+                return Err(GetSingletonError::Forbidden { reason }),
         }
     }
 
@@ -268,6 +281,8 @@ impl World {
                 unreachable!("Just checked this"),
             Err(GetComponentTypedError::ComponentNotPresent { type_name, .. }) =>
                 return Err(GetSingletonError::ComponentNotPresent { type_name }),
+            Err(GetComponentTypedError::Forbidden { reason, .. }) =>
+                return Err(GetSingletonError::Forbidden { reason }),
         }
     }
 }

@@ -18,7 +18,11 @@ use crate::{
 };
 
 use std::{
-    any::{Any, TypeId}, assert_matches::debug_assert_matches, borrow::Cow, collections::HashMap, iter::{ empty, once }
+    any::TypeId,
+    assert_matches::debug_assert_matches,
+    borrow::Cow,
+    collections::HashMap,
+    iter::{ empty, once }, ops::Deref
 };
 use utils::{ extract_nth::ExtractNthExt, itertools::Itertools, prelude::* };
 use derive_more::{ IsVariant };
@@ -111,6 +115,71 @@ pub enum OptionalComponentRef<C> {
     NoStorage,
 }
 
+#[derive(derive_more::From)]
+pub enum MaybeReadOnlyComponentDynRef<'a> {
+    Mutable(DynVecValueRefMut<'a>),
+    ReadOnyl(DynVecValueRef<'a>),
+}
+
+impl<'a> MaybeReadOnlyComponentDynRef<'a> {
+    pub fn into_mutable(self) -> Option<DynVecValueRefMut<'a>> {
+        match self {
+            Self::Mutable(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_mutable(self) -> DynVecValueRefMut<'a> {
+        self.into_mutable().unwrap()
+    }
+
+    pub fn as_typed<C: 'static>(self) -> Result<MaybeReadOnlyComponentRef<'a, C>, dynvec::IncorrectTypeError> {
+        Ok(match self {
+            Self::Mutable(ref_mut) => ref_mut.as_typed::<C>()?.into(),
+            Self::ReadOnyl(ref_) => ref_.as_typed::<C>()?.into(),
+        })
+    }
+}
+
+impl<'a> AsRef<DynVecValueRef<'a>> for MaybeReadOnlyComponentDynRef<'a>  {
+    fn as_ref(&self) -> &DynVecValueRef<'a> {
+        match self {
+            Self::Mutable(ref_mut) => ref_mut.as_shared(),
+            Self::ReadOnyl(ref_) => ref_,
+        }
+    }
+}
+
+#[derive(Debug, derive_more::From, PartialEq, Eq)]
+pub enum MaybeReadOnlyComponentRef<'a, C> {
+    Mutable(&'a mut C),
+    ReadOnyl(&'a C),
+}
+
+impl<'a, C> MaybeReadOnlyComponentRef<'a, C> {
+    pub fn into_mutable(self) -> Option<&'a mut C> {
+        match self {
+            Self::Mutable(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_mutable(self) -> &'a mut C {
+        self.into_mutable().unwrap()
+    }
+}
+
+impl<'a, C> Deref for MaybeReadOnlyComponentRef<'a, C> {
+    type Target = C;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Mutable(r) => &r,
+            Self::ReadOnyl(r) => r,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct AddComponent<C> {
     pub component_ref: C,
@@ -145,6 +214,7 @@ pub enum ComponentStorageKind {
     /// This is the only storage kind that always fragment tables
     Table {
         dynvec_meta: DynVecMetadata,
+        is_readonly: bool,
     },
     // TODO
     // Sparse,
@@ -171,6 +241,10 @@ pub enum GetComponentError {
     ComponentHasNoStorage {
         component: ComponentEntity,
         entity: Entity,
+    },
+    #[error("Cannot get this component's value: {reason}")]
+    Forbidden {
+        reason: &'static str,
     },
 }
 
@@ -488,7 +562,10 @@ impl World {
             },
         };
 
-        self.add(created_entity, ComponentStorageComponent {
+        C::on_register(self, created_entity);
+
+        // We override any value set by on_register
+        self.set(created_entity, ComponentStorageComponent {
             dynvec_meta: DynVecMetadata::new::<C>(),
         }).expect("Entity is alive");
 
@@ -502,6 +579,7 @@ impl World {
         if component == self.components_typeid_to_entity[&TypeId::of::<ComponentStorageComponent>()] {
             return Some(ComponentStorageKind::Table {
                 dynvec_meta: DynVecMetadata::new::<ComponentStorageComponent>(),
+                is_readonly: true,
             });
         }
 
@@ -509,6 +587,7 @@ impl World {
             Ok(storage)
                 => Some(ComponentStorageKind::Table {
                     dynvec_meta: storage.dynvec_meta.clone(),
+                    is_readonly: self.has::<component_tags::Readonly>(component).is_present(),
                 }),
             Err(GetComponentTypedError::EntityIsNotAlive { .. })
                 => None,
@@ -516,6 +595,8 @@ impl World {
                 => unreachable!("This component is always registred"),
             Err(GetComponentTypedError::ComponentNotPresent { .. })
                 => Some(ComponentStorageKind::None),
+            Err(GetComponentTypedError::Forbidden { reason })
+                => panic!("Got forbidden when retrieving the component storage component: {reason}"),
         }
     }
 
@@ -545,7 +626,9 @@ impl World {
                     sparse_set: SparseSet::new(ComponentDenseStorage::new(
                         table_components.iter()
                             .map(|component| {
-                                let Some(ComponentStorageKind::Table { dynvec_meta }) = self.component_storage(component)
+                                let Some(ComponentStorageKind::Table {
+                                    dynvec_meta, is_readonly: _,
+                                }) = self.component_storage(component)
                                 else { unreachable!("Filtered before"); };
 
                                 DynVec::new_with_meta(dynvec_meta)
@@ -691,9 +774,10 @@ impl World {
         }
 
         match component_storage {
-            ComponentStorageKind::None => return Err(
-                GetComponentError::ComponentHasNoStorage { component, entity }
-            ),
+            ComponentStorageKind::None =>
+                return Err(GetComponentError::ComponentHasNoStorage { component, entity }),
+            ComponentStorageKind::Table { is_readonly, .. } if is_readonly =>
+                return Err(GetComponentError::Forbidden { reason: component_tags::Readonly::REASON }),
             ComponentStorageKind::Table { .. } => (),
         }
 
@@ -718,7 +802,7 @@ impl World {
         component_storage: ComponentStorageKind,
         component: ComponentEntity,
         input: ComponentDenseStorageInput<'a, 'b>,
-    ) -> AddComponent<OptionalComponentRef<DynVecValueRefMut<'a>>> {
+    ) -> AddComponent<OptionalComponentRef<MaybeReadOnlyComponentDynRef<'a>>> {
         // things that should be checked before calling this function
         debug_assert!(self.alive(entity));
         debug_assert!(self.alive(component));
@@ -743,7 +827,7 @@ impl World {
                 component_ref: OptionalComponentRef::HasStorage(
                     self.get_mut_in_table_internal(
                         table_id, component, entity.index()
-                    )
+                    ).into()
                 ),
                 was_added: false,
             };
@@ -805,7 +889,8 @@ impl World {
 
         let component_ref = match new_table.table_components.index_of(component) {
             Some(new_idx) => {
-                debug_assert_matches!(component_storage, ComponentStorageKind::Table { .. });
+                let ComponentStorageKind::Table { is_readonly, .. } = component_storage
+                else { unreachable!() };
 
                 // inserts the component into the list at its index
                 let components = components.chain_after(new_idx, once(input));
@@ -813,11 +898,20 @@ impl World {
                 new_table.sparse_set.insert(entity.index(), components);
 
                 // then gets its reference
-                let r#ref = new_table.sparse_set.get_mut(entity.index())
-                    .expect("Entity just inserted")
-                    .for_component(new_idx);
+                if is_readonly {
+                    let ref_ = new_table.sparse_set.get(entity.index())
+                        .expect("Entity just inserted")
+                        .for_component(new_idx);
 
-                OptionalComponentRef::HasStorage(r#ref)
+                    OptionalComponentRef::HasStorage(ref_.into())
+                }
+                else {
+                    let ref_ = new_table.sparse_set.get_mut(entity.index())
+                        .expect("Entity just inserted")
+                        .for_component(new_idx);
+
+                    OptionalComponentRef::HasStorage(ref_.into())
+                }
             },
             None => {
                 debug_assert_matches!(component_storage, ComponentStorageKind::None);
@@ -839,7 +933,7 @@ impl World {
         &mut self,
         entity: impl Into<Entity>,
         component: ComponentEntity,
-    ) -> Result<AddComponent<OptionalComponentRef<DynVecValueRefMut<'_>>>, AddComponentError> {
+    ) -> Result<AddComponent<OptionalComponentRef<MaybeReadOnlyComponentDynRef<'_>>>, AddComponentError> {
         let entity = entity.into();
 
         if !self.alive(entity) {
@@ -866,12 +960,12 @@ impl World {
         ))
     }
 
-    pub fn add_component_with<V: Any>(
+    pub fn add_component_with<V: 'static>(
         &mut self,
         entity: impl Into<Entity>,
         component: ComponentEntity,
         f: impl FnOnce() -> V,
-    ) -> Result<AddComponent<&'_ mut V>, AddComponentWithError> {
+    ) -> Result<AddComponent<MaybeReadOnlyComponentRef<'_, V>>, AddComponentWithError> {
         let entity = entity.into();
 
         if !self.alive(entity) {
@@ -907,8 +1001,7 @@ impl World {
 
         Ok(AddComponent {
             component_ref: match result.component_ref {
-                OptionalComponentRef::HasStorage(r) => r.as_typed::<V>()
-                    .expect("Correctly typed"),
+                OptionalComponentRef::HasStorage(r) => r.as_typed::<V>().expect("Correctly typed"),
                 OptionalComponentRef::NoStorage => unreachable!("Created from type so must have storage"),
             },
             was_added: result.was_added,
@@ -1003,9 +1096,7 @@ impl World {
             debug_assert_eq!(old_table_id, new_table_id);
 
             return Ok(match component_storage {
-                ComponentStorageKind::None => {
-                    OptionalComponentRef::NoStorage
-                },
+                ComponentStorageKind::None => OptionalComponentRef::NoStorage,
                 ComponentStorageKind::Table { .. } => unreachable!("Table storage cannot not fragment tables"),
                 // TODO: For sparse storage we should just return its value
             });

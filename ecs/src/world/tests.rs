@@ -204,7 +204,10 @@ mod entities_with_typed_components {
         assert_matches!(world.has_component(e, component), HasComponent::NotPresent);
         assert_matches!(
             world.add(e, TestComponent1(50)).unwrap(),
-            AddComponent { component_ref: &mut TestComponent1(50), was_added: true },
+            AddComponent {
+                component_ref: MaybeReadOnlyComponentRef::Mutable(&mut TestComponent1(50)),
+                was_added: true
+            },
         );
         assert_matches!(world.has::<TestComponent1>(e), HasComponentTyped::Present);
         assert_matches!(world.has::<TestComponent2>(e), HasComponentTyped::UnknownComponent);
@@ -230,7 +233,10 @@ mod entities_with_typed_components {
         assert_matches!(world.has::<TestComponent1>(e), HasComponentTyped::UnknownComponent);
         assert_matches!(
             world.add(e, TestComponent1(42)),
-            Ok(AddComponent { component_ref: &mut TestComponent1(42), was_added: true })
+            Ok(AddComponent {
+                component_ref: MaybeReadOnlyComponentRef::Mutable(&mut TestComponent1(42)),
+                was_added: true,
+            })
         );
         assert_matches!(world.has::<TestComponent1>(e), HasComponentTyped::Present);
         world.remove::<TestComponent1>(e).unwrap();
@@ -245,7 +251,10 @@ mod entities_with_typed_components {
         assert_matches!(world.has::<ZSTComponent>(e), HasComponentTyped::UnknownComponent);
         assert_matches!(
             world.add(e, ZSTComponent),
-            Ok(AddComponent { component_ref: &mut ZSTComponent, was_added: true })
+            Ok(AddComponent {
+                component_ref: MaybeReadOnlyComponentRef::Mutable(&mut ZSTComponent),
+                was_added: true,
+            })
         );
         assert_matches!(world.has::<ZSTComponent>(e), HasComponentTyped::Present);
         world.remove::<ZSTComponent>(e).unwrap();
@@ -419,7 +428,10 @@ mod torturing_components {
 
         assert_matches!(
             world.add_component_with(e, c, || 53u32).unwrap(),
-            AddComponent { component_ref: &mut 53u32, was_added: true },
+            AddComponent {
+                component_ref: MaybeReadOnlyComponentRef::Mutable(&mut 53u32),
+                was_added: true,
+            },
         );
 
         assert_eq!(
@@ -529,6 +541,22 @@ mod torturing_components {
         assert_eq!(drops.load(Ordering::Relaxed), 1);
         assert_eq!(world.has_component(e, c), HasComponent::ComponentIsNotAlive);
         assert_eq!(world.try_component::<DropCheckComponent>(), None);
+    }
+
+    #[test]
+    fn mutate_component_storage_component_on_registered_component() {
+        let mut world = World::new();
+        let e = world.spawn();
+        let c = world.component::<TestComponent1>();
+
+        world.add(e, TestComponent1(42)).unwrap();
+
+        world.get_mut::<ComponentStorageComponent>(c).unwrap().dynvec_meta =
+            DynVecMetadata::new::<TestComponent2>();
+
+        assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(42));
+        world.set(e, TestComponent1(52)).unwrap();
+        assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(52));
     }
 }
 
@@ -833,14 +861,14 @@ mod drops_when_it_should {
         assert_eq!(
             world.get_or_default::<DefaultComponent>(e1).unwrap(),
             AddComponent {
-                component_ref: &mut DefaultComponent("default value".into()),
+                component_ref: MaybeReadOnlyComponentRef::Mutable(&mut DefaultComponent("default value".into())),
                 was_added: true,
             },
         );
         assert_eq!(
             world.get_or_default::<DefaultComponent>(e1).unwrap(),
             AddComponent {
-                component_ref: &mut DefaultComponent("default value".into()),
+                component_ref: MaybeReadOnlyComponentRef::Mutable(&mut DefaultComponent("default value".into())),
                 was_added: false,
             },
         );
@@ -849,7 +877,7 @@ mod drops_when_it_should {
         assert_eq!(
             world.get_or_default::<DefaultComponent>(e2).unwrap(),
             AddComponent {
-                component_ref: &mut DefaultComponent("Custom value".into()),
+                component_ref: MaybeReadOnlyComponentRef::Mutable(&mut DefaultComponent("Custom value".into())),
                 was_added: false,
             },
         );
