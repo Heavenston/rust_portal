@@ -115,10 +115,10 @@ pub enum OptionalComponentRef<C> {
     NoStorage,
 }
 
-#[derive(derive_more::From)]
+#[derive(derive_more::From, Debug)]
 pub enum MaybeReadOnlyComponentDynRef<'a> {
     Mutable(DynVecValueRefMut<'a>),
-    ReadOnyl(DynVecValueRef<'a>),
+    ReadOnly(DynVecValueRef<'a>),
 }
 
 impl<'a> MaybeReadOnlyComponentDynRef<'a> {
@@ -136,17 +136,8 @@ impl<'a> MaybeReadOnlyComponentDynRef<'a> {
     pub fn as_typed<C: 'static>(self) -> Result<MaybeReadOnlyComponentRef<'a, C>, dynvec::IncorrectTypeError> {
         Ok(match self {
             Self::Mutable(ref_mut) => ref_mut.as_typed::<C>()?.into(),
-            Self::ReadOnyl(ref_) => ref_.as_typed::<C>()?.into(),
+            Self::ReadOnly(ref_) => ref_.as_typed::<C>()?.into(),
         })
-    }
-}
-
-impl<'a> AsRef<DynVecValueRef<'a>> for MaybeReadOnlyComponentDynRef<'a>  {
-    fn as_ref(&self) -> &DynVecValueRef<'a> {
-        match self {
-            Self::Mutable(ref_mut) => ref_mut.as_shared(),
-            Self::ReadOnyl(ref_) => ref_,
-        }
     }
 }
 
@@ -181,9 +172,9 @@ impl<'a, C> Deref for MaybeReadOnlyComponentRef<'a, C> {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct AddComponent<C> {
-    pub component_ref: C,
-    pub was_added: bool,
+pub enum AddComponent {
+    Added,
+    AlreadyPresent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
@@ -262,6 +253,10 @@ pub enum AddComponentError {
     ComponentNeedsValue {
         component: ComponentEntity,
     },
+    #[error("Adding this component to this entity is forbidden: {reason}")]
+    Forbidden {
+        reason: &'static str
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -283,6 +278,36 @@ pub enum AddComponentWithError {
     #[error("{component} does NOT have storage. (Does not have a ComponentStorageComponent)")]
     ComponentDoesNotHaveStorage {
         component: ComponentEntity,
+    },
+    #[error("Adding this component to this entity is forbidden: {reason}")]
+    Forbidden {
+        reason: &'static str
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SetComponentWithError {
+    #[error("Tried to set a component to a dead entity {entity}")]
+    EntityIsNotAlive {
+        entity: Entity,
+    },
+    #[error("The type given does not match the type used for storage of {component}. Expected: '{expected}', given: '{given}'")]
+    TypeMismatched {
+        component: ComponentEntity,
+        given: &'static str,
+        expected: &'static str,
+    },
+    #[error("{component} is not alive")]
+    ComponentIsNotAlive {
+        component: ComponentEntity,
+    },
+    #[error("{component} does NOT have storage. (Does not have a ComponentStorageComponent)")]
+    ComponentDoesNotHaveStorage {
+        component: ComponentEntity,
+    },
+    #[error("Setting this component on this entity is forbidden: {reason}")]
+    Forbidden {
+        reason: &'static str
     },
 }
 
@@ -306,6 +331,8 @@ pub enum RemoveComponentError {
         reason: &'static str,
     },
 }
+
+const LAST_COMPONENT_TRAITS_ENTITY_INDEX: EntityIndex = EntityIndex(1);
 
 #[derive(Debug, TryClone)]
 pub struct World {
@@ -363,6 +390,12 @@ impl World {
         // Register this component first as it is required in the code paths
         // for other components
         this.component::<ComponentStorageComponent>();
+        this.component::<component_traits::ReadOnly>();
+
+        debug_assert_eq!(
+            this.entity_storage.reserved_entities().next().map(|e| e.index()),
+            Some(EntityIndex(LAST_COMPONENT_TRAITS_ENTITY_INDEX.0 + 1))
+        );
 
         this
     }
@@ -400,10 +433,29 @@ impl World {
         ComponentEntity(entity)
     }
 
+    fn is_internal_component_trait(&self, entity: ComponentEntity) -> bool {
+        let is_trait = entity.index() <= LAST_COMPONENT_TRAITS_ENTITY_INDEX;
+        if is_trait {
+            debug_assert_eq!(entity.generation(), EntityGeneration::FIRST);
+        }
+
+        is_trait
+    }
+
+    pub fn is_component_in_use(&self, component: ComponentEntity) -> bool {
+        self.components_to_archetypes.get(component.index())
+            .is_some_and(|archs| archs.len() > 0)
+    }
+
     /// Moves all entity from this archetype to a new one that doesn't have this component
     /// deleting the given archetyp and table
     /// Used by [`World::dispawn`] for removing a component being unregistered
+    /// 
+    /// When calling this method for all archetypes this component is present in
+    /// this makes [`World::is_component_in_use`] return false
     fn remove_component_from_archetype_internal(&mut self, old_archetyp_id: ArchetypId, component: ComponentEntity) {
+        debug_assert!(!self.is_internal_component_trait(component));
+
         let component_storage = self.component_storage(component)
             .expect("Component should be still be alive");
 
@@ -489,12 +541,9 @@ impl World {
         let entity = entity.into();
         let centity = ComponentEntity(entity);
 
-        // FIXME: Maybe support it by removing all storage everywhere lol ?
-        // In that case it would be not having the `ComponentStorageComponent`
-        // registered from the begining would be feasible
-        if centity == self.components_typeid_to_entity[&TypeId::of::<ComponentStorageComponent>()] {
+        if self.is_internal_component_trait(centity) {
             return Err(DispawnError::Forbidden {
-                reason: "You cannot dispawn the ComponentStorageComponent",
+                reason: "You cannot dispawn an internal component trait",
             });
         }
 
@@ -552,23 +601,23 @@ impl World {
         let created_entity = match self.components_typeid_to_entity.entry(type_id) {
             Entry::Occupied(o) => return *o.get(),
             Entry::Vacant(vacant) => {
-                let new_entity = *vacant.insert(ComponentEntity(
+                *vacant.insert(ComponentEntity(
                     // cannot call self.spawn_component because self is partially-borrowed
                     self.entity_storage.take_next_reserved()
                         .unwrap_or_else(|| self.entity_storage.spawn())
-                ));
-                let previous = self.components_entity_to_typeid.insert(new_entity, type_id);
-                debug_assert_eq!(previous, None);
-                new_entity
+                ))
             },
         };
 
         C::on_register(self, created_entity);
 
         // We override any value set by on_register
-        self.set(created_entity, ComponentStorageComponent {
+        self.add(created_entity, ComponentStorageComponent {
             dynvec_meta: DynVecMetadata::new::<C>(),
         }).expect("Entity is alive");
+
+        let previous = self.components_entity_to_typeid.insert(created_entity, type_id);
+        debug_assert_eq!(previous, None);
 
         created_entity
     }
@@ -588,7 +637,7 @@ impl World {
             Ok(storage)
                 => Some(ComponentStorageKind::Table {
                     dynvec_meta: storage.dynvec_meta.clone(),
-                    is_readonly: self.has::<component_tags::Readonly>(component).is_present(),
+                    is_readonly: self.has::<component_traits::ReadOnly>(component).is_present(),
                 }),
             Err(GetComponentTypedError::EntityIsNotAlive { .. })
                 => None,
@@ -745,9 +794,10 @@ impl World {
         }
 
         match component_storage {
-            ComponentStorageKind::None => return Err(
-                GetComponentError::ComponentHasNoStorage { component, entity }
-            ),
+            ComponentStorageKind::None =>
+                return Err(GetComponentError::ComponentHasNoStorage { component, entity }),
+
+            // Only accepted state
             ComponentStorageKind::Table { .. } => (),
         }
 
@@ -777,9 +827,11 @@ impl World {
         match component_storage {
             ComponentStorageKind::None =>
                 return Err(GetComponentError::ComponentHasNoStorage { component, entity }),
-            ComponentStorageKind::Table { is_readonly, .. } if is_readonly =>
-                return Err(GetComponentError::Forbidden { reason: component_tags::Readonly::REASON }),
-            ComponentStorageKind::Table { .. } => (),
+            ComponentStorageKind::Table { is_readonly: true, .. } =>
+                return Err(GetComponentError::Forbidden { reason: component_traits::ReadOnly::REASON }),
+
+            // Only accepted state
+            ComponentStorageKind::Table { is_readonly: false, .. } => (),
         }
 
         let table_id = archetyp.table_id;
@@ -789,21 +841,22 @@ impl World {
         ))
     }
 
-    /// The [`input`] function must retrun an iterator with exactly one
-    /// element.
-    ///
-    /// If it returns ComponentDenseStorageInput::Default the component should
-    /// be checked before if it has a default constructor, otherwise there
-    /// will be a panic internally.
+    /// If ComponentDenseStorageInput::Default is provided as input the
+    /// component must have a default constructor, otherwise there will be a
+    /// panic internally.
+    /// 
+    /// A mutable ref is returned wether the component is ReadOnly or not
+    /// it is the responsability of the caller to not provide the mutable ref
+    /// to an external caller
     // TODO: Be able to insert mutliple components at once, what would be the
     // best api for this ? (something like bevy's bundles I guess)
-    fn add_component_internal<'a, 'b>(
-        &'a mut self,
+    fn add_component_internal<'b>(
+        &'_ mut self,
         entity: Entity,
-        component_storage: ComponentStorageKind,
         component: ComponentEntity,
-        input: ComponentDenseStorageInput<'a, 'b>,
-    ) -> AddComponent<OptionalComponentRef<MaybeReadOnlyComponentDynRef<'a>>> {
+        input: ComponentDenseStorageInput<'_, 'b>,
+        override_existing_value: bool,
+    ) -> AddComponent {
         // things that should be checked before calling this function
         debug_assert!(self.alive(entity));
         debug_assert!(self.alive(component));
@@ -815,24 +868,19 @@ impl World {
         let old_table_id = old_archetyp.table_id;
 
         if old_archetyp.components.has(component) {
-            match component_storage {
-                ComponentStorageKind::None => return AddComponent {
-                    component_ref: OptionalComponentRef::NoStorage,
-                    was_added: false,
-                },
-                ComponentStorageKind::Table { .. } => (),
-            };
-
-            let table_id = old_archetyp.table_id;
-            return AddComponent {
-                component_ref: OptionalComponentRef::HasStorage(
-                    self.get_mut_in_table_internal(
-                        table_id, component, entity.index()
-                    ).into()
-                ),
-                was_added: false,
-            };
-
+            if override_existing_value {
+                let old_table = &mut self.tables[old_table_id];
+                if let Some(comp_idx) = old_table.table_components.index_of(component) {
+                    let component_ref = old_table.sparse_set.get_mut(entity.index())
+                        .expect("Got table from the entity's archetyp")
+                        .for_component(comp_idx);
+                    input.assign_onto(component_ref).expect("Correct type");
+                }
+                else {
+                    debug_assert!(matches!(input, ComponentDenseStorageInput::Default));
+                }
+            }
+            return AddComponent::AlreadyPresent;
         }
 
         // we have to change the entity's archetyp
@@ -849,34 +897,10 @@ impl World {
         new_archetyp.entities.insert(entity.index());
         self.entities_archetypes[entity.index()] = new_archetyp_id;
 
-        // Add the component's value into its storage
-        match component_storage {
-            ComponentStorageKind::None => {
-                // the value doesn't actually matter but lets check the caller
-                // knew that
-                debug_assert!(matches!(input, ComponentDenseStorageInput::Default));
-                
-                // Nothing to add anywhere
-            },
-            ComponentStorageKind::Table { .. } => {
-                // This is done at the same time as changing the entity's table
-            },
-            // TODO: For sparse storage we just insert it now
-        }
-
         if !self.component_fragments_tables(component) {
-            assert_eq!(old_table_id, new_table_id);
-
-            return match component_storage {
-                ComponentStorageKind::None => {
-                    AddComponent {
-                        component_ref: OptionalComponentRef::NoStorage,
-                        was_added: true,
-                    }
-                },
-                ComponentStorageKind::Table { .. } => unreachable!("Table storage cannot not fragment tables"),
-                // TODO: For sparse storage we just fetch the data
-            };
+            // TODO: With sparse storage, also needs to store it in its table
+            debug_assert_eq!(old_table_id, new_table_id);
+            return AddComponent::Added;
         }
 
         // The component fragments tables so the tables must be different here
@@ -885,48 +909,27 @@ impl World {
         ]).expect("Old table and new table are not equal");
 
         let components = old_table.sparse_set.remove(entity.index())
-            .expect("Entity is in table")
+            .expect("Got table from the entity's archetyp")
             .map(ComponentDenseStorageInput::RemovedDynVecValue);
 
-        let component_ref = match new_table.table_components.index_of(component) {
+        match new_table.table_components.index_of(component) {
+            // This necessarily means that the component uses table storage
+            // as it is in the table components list
             Some(new_idx) => {
-                let ComponentStorageKind::Table { is_readonly, .. } = component_storage
-                else { unreachable!() };
-
                 // inserts the component into the list at its index
-                let components = components.chain_after(new_idx, once(input));
+                let new_components = components.chain_after(new_idx, once(input));
 
-                new_table.sparse_set.insert(entity.index(), components);
-
-                // then gets its reference
-                if is_readonly {
-                    let ref_ = new_table.sparse_set.get(entity.index())
-                        .expect("Entity just inserted")
-                        .for_component(new_idx);
-
-                    OptionalComponentRef::HasStorage(ref_.into())
-                }
-                else {
-                    let ref_ = new_table.sparse_set.get_mut(entity.index())
-                        .expect("Entity just inserted")
-                        .for_component(new_idx);
-
-                    OptionalComponentRef::HasStorage(ref_.into())
-                }
+                new_table.sparse_set.insert(entity.index(), new_components);
             },
+            // This necessarily means that the component uses None storage
+            // unless
+            // TODO: Sparse storage makes this not sufficient
             None => {
-                debug_assert_matches!(component_storage, ComponentStorageKind::None);
-
                 new_table.sparse_set.insert(entity.index(), components);
-
-                OptionalComponentRef::NoStorage
             },
-        };
-
-        AddComponent {
-            component_ref,
-            was_added: true,
         }
+
+        AddComponent::Added
     }
 
     /// The component must have no storage or its storage type must implement Default.
@@ -934,7 +937,7 @@ impl World {
         &mut self,
         entity: impl Into<Entity>,
         component: ComponentEntity,
-    ) -> Result<AddComponent<OptionalComponentRef<MaybeReadOnlyComponentDynRef<'_>>>, AddComponentError> {
+    ) -> Result<AddComponent, AddComponentError> {
         let entity = entity.into();
 
         if !self.alive(entity) {
@@ -945,20 +948,34 @@ impl World {
             return Err(AddComponentError::ComponentIsNotAlive { component });
         }
 
+        if self.is_internal_component_trait(component) {
+            if self.components_entity_to_typeid.contains_key(&ComponentEntity(entity)) {
+                return Err(AddComponentError::Forbidden {
+                    reason: "Cannot add compononent traits to an internal component entity.",
+                });
+            }
+
+            if self.is_component_in_use(ComponentEntity(entity)) {
+                return Err(AddComponentError::Forbidden {
+                    reason: "Cannot add component traits to a component that is in use.",
+                })
+            }
+        }
+
         let component_storage = self.component_storage(component).expect("Entity is alive");
         match component_storage {
-            ComponentStorageKind::None |
-            ComponentStorageKind::Table { dynvec_meta: DynVecMetadata { default_fn: Some(_), .. }, .. } => (),
+            ComponentStorageKind::None => false,
+            ComponentStorageKind::Table {
+                dynvec_meta: DynVecMetadata { default_fn: Some(_), .. },
+                is_readonly,
+            } => is_readonly,
 
             ComponentStorageKind::Table { dynvec_meta: DynVecMetadata { default_fn: None, .. }, .. } => {
                 return Err(AddComponentError::ComponentNeedsValue { component });
             },
-        }
+        };
 
-        Ok(self.add_component_internal(
-            entity, component_storage, component,
-            ComponentDenseStorageInput::Default,
-        ))
+        Ok(self.add_component_internal(entity, component, ComponentDenseStorageInput::Default, false))
     }
 
     pub fn add_component_with<V: 'static>(
@@ -966,7 +983,7 @@ impl World {
         entity: impl Into<Entity>,
         component: ComponentEntity,
         f: impl FnOnce() -> V,
-    ) -> Result<AddComponent<MaybeReadOnlyComponentRef<'_, V>>, AddComponentWithError> {
+    ) -> Result<AddComponent, AddComponentWithError> {
         let entity = entity.into();
 
         if !self.alive(entity) {
@@ -977,6 +994,20 @@ impl World {
         else {
             return Err(AddComponentWithError::ComponentIsNotAlive { component });
         };
+
+        if self.is_internal_component_trait(component) {
+            if self.components_entity_to_typeid.contains_key(&ComponentEntity(entity)) {
+                return Err(AddComponentWithError::Forbidden {
+                    reason: "Cannot add compononent traits to an internal component entity.",
+                });
+            }
+
+            if self.is_component_in_use(ComponentEntity(entity)) {
+                return Err(AddComponentWithError::Forbidden {
+                    reason: "Cannot add component traits to a component that is in use.",
+                })
+            }
+        }
 
         match component_storage {
             ComponentStorageKind::None =>
@@ -994,19 +1025,65 @@ impl World {
             _ => (),
         }
 
-        let mut fun_dyn_option = FunDynOption::new(f);
-        let result = self.add_component_internal(
-            entity, component_storage, component,
-            ComponentDenseStorageInput::DynOption(&mut fun_dyn_option),
-        );
+        Ok(self.add_component_internal(
+            entity, component,
+            ComponentDenseStorageInput::DynOption(&mut FunDynOption::new(f)),
+            false
+        ))
+    }
 
-        Ok(AddComponent {
-            component_ref: match result.component_ref {
-                OptionalComponentRef::HasStorage(r) => r.as_typed::<V>().expect("Correctly typed"),
-                OptionalComponentRef::NoStorage => unreachable!("Created from type so must have storage"),
-            },
-            was_added: result.was_added,
-        })
+    pub fn set_component_with<V: 'static>(
+        &mut self,
+        entity: impl Into<Entity>,
+        component: ComponentEntity,
+        f: impl FnOnce() -> V,
+    ) -> Result<AddComponent, SetComponentWithError> {
+        let entity = entity.into();
+
+        if !self.alive(entity) {
+            return Err(SetComponentWithError::EntityIsNotAlive { entity });
+        }
+
+        let Some(component_storage) = self.component_storage(component)
+        else {
+            return Err(SetComponentWithError::ComponentIsNotAlive { component });
+        };
+
+        if self.is_internal_component_trait(component) {
+            if self.components_entity_to_typeid.contains_key(&ComponentEntity(entity)) {
+                return Err(SetComponentWithError::Forbidden {
+                    reason: "Cannot add compononent traits to an internal component entity.",
+                });
+            }
+
+            if self.is_component_in_use(ComponentEntity(entity)) {
+                return Err(SetComponentWithError::Forbidden {
+                    reason: "Cannot add component traits to a component that is in use.",
+                })
+            }
+        }
+
+        match component_storage {
+            ComponentStorageKind::None =>
+                return Err(SetComponentWithError::ComponentDoesNotHaveStorage {
+                    component,
+                }),
+            ComponentStorageKind::Table {
+                dynvec_meta: DynVecMetadata { type_id, type_name: expected, .. }, ..
+            } if type_id != TypeId::of::<V>() =>
+                return Err(SetComponentWithError::TypeMismatched {
+                    component,
+                    given: std::any::type_name::<V>(),
+                    expected,
+                }),
+            _ => (),
+        }
+
+        Ok(self.add_component_internal(
+            entity, component,
+            ComponentDenseStorageInput::DynOption(&mut FunDynOption::new(f)),
+            true
+        ))
     }
 
     pub fn remove_component(
@@ -1025,6 +1102,20 @@ impl World {
             return Err(RemoveComponentError::ComponentIsNotAlive { component });
         };
 
+        if self.is_internal_component_trait(component) {
+            if self.components_entity_to_typeid.contains_key(&ComponentEntity(entity)) {
+                return Err(RemoveComponentError::Forbidden {
+                    reason: "Cannot remove compononent traits from an internal component entity.",
+                });
+            }
+
+            if self.is_component_in_use(ComponentEntity(entity)) {
+                return Err(RemoveComponentError::Forbidden {
+                    reason: "Cannot remove component traits from a component that is in use.",
+                })
+            }
+        }
+
         let old_archetyp_id = self.entities_archetypes[entity.index()];
         let old_archetyp = &mut self.archetypes[old_archetyp_id];
         let old_table_id = old_archetyp.table_id;
@@ -1040,40 +1131,6 @@ impl World {
         old_archetyp.entities.remove(entity.index());
         let (_, new_component_set) = old_archetyp.components.clone().without(component);
 
-        if component == self.components_typeid_to_entity[&TypeId::of::<ComponentStorageComponent>()] {
-            if self.components_entity_to_typeid.contains_key(&ComponentEntity(entity)) {
-                return Err(RemoveComponentError::Forbidden {
-                    reason: "Cannot remove the componentStorageComponent from an internal component entity.",
-                });
-            }
-
-            let centity = ComponentEntity(entity);
-
-            match (self.component_fragments_tables(centity), &component_storage) {
-                (true | false, ComponentStorageKind::None) =>
-                    unreachable!("Entity with ComponentStorageComponent cannot have None storage"),
-                (true, ComponentStorageKind::Table { .. }) => {
-                    for archetyp in self.components_to_archetypes.get(entity.index()).into_iter().flatten() {
-                        let table_id = self.archetypes[archetyp].table_id;
-                        let table = &mut self.tables[table_id];
-
-                        let Some(component_idx) = table.table_components.remove(centity)
-                        else {
-                            // This means we already removed the component from this
-                            // table
-                            continue;
-                        };
-                        table.sparse_set.unsafely_mutate_dense_values(|dense_storage| {
-                            dense_storage.remove_column(component_idx);
-                        });
-                    }
-                },
-                (false, ComponentStorageKind::Table { .. }) => unreachable!("Table storage cannot not fragment tables"),
-                // TODO: For sparse storage just removing the component's
-                // sparse set should be enough
-            }
-        }
-
         let new_archetyp_id = self.archtyp_for(Cow::Borrowed(&new_component_set));
         debug_assert_ne!(old_archetyp_id, new_archetyp_id);
         let new_archetyp = &mut self.archetypes[new_archetyp_id];
@@ -1082,24 +1139,13 @@ impl World {
         new_archetyp.entities.insert(entity.index());
         self.entities_archetypes[entity.index()] = new_archetyp_id;
 
-        // Removes the component's value from its storage
-        match component_storage {
-            ComponentStorageKind::None => {
-                // Nothing to remove anywhere
-            },
-            ComponentStorageKind::Table { .. } => {
-                // This is done at the same time as changing the component's table
-            },
-            // TODO: For sparse storage we should remove it now
-        }
-
         if !self.component_fragments_tables(component) {
             debug_assert_eq!(old_table_id, new_table_id);
 
             return Ok(match component_storage {
                 ComponentStorageKind::None => OptionalComponentRef::NoStorage,
                 ComponentStorageKind::Table { .. } => unreachable!("Table storage cannot not fragment tables"),
-                // TODO: For sparse storage we should just return its value
+                // TODO: For sparse storage we should remove it here
             });
         }
 

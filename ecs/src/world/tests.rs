@@ -202,13 +202,7 @@ mod entities_with_typed_components {
         assert_matches!(world.has::<TestComponent1>(e), HasComponentTyped::NotPresent);
         assert_matches!(world.has::<TestComponent2>(e), HasComponentTyped::UnknownComponent);
         assert_matches!(world.has_component(e, component), HasComponent::NotPresent);
-        assert_matches!(
-            world.add(e, TestComponent1(50)).unwrap(),
-            AddComponent {
-                component_ref: MaybeReadOnlyComponentRef::Mutable(&mut TestComponent1(50)),
-                was_added: true
-            },
-        );
+        assert_matches!(world.add(e, TestComponent1(50)), Ok(AddComponent::Added));
         assert_matches!(world.has::<TestComponent1>(e), HasComponentTyped::Present);
         assert_matches!(world.has::<TestComponent2>(e), HasComponentTyped::UnknownComponent);
         assert_matches!(world.has_component(e, component), HasComponent::Present);
@@ -231,13 +225,7 @@ mod entities_with_typed_components {
         let e = world.spawn();
 
         assert_matches!(world.has::<TestComponent1>(e), HasComponentTyped::UnknownComponent);
-        assert_matches!(
-            world.add(e, TestComponent1(42)),
-            Ok(AddComponent {
-                component_ref: MaybeReadOnlyComponentRef::Mutable(&mut TestComponent1(42)),
-                was_added: true,
-            })
-        );
+        assert_matches!(world.add(e, TestComponent1(42)), Ok(AddComponent::Added));
         assert_matches!(world.has::<TestComponent1>(e), HasComponentTyped::Present);
         world.remove::<TestComponent1>(e).unwrap();
         assert_matches!(world.has::<TestComponent1>(e), HasComponentTyped::NotPresent);
@@ -249,16 +237,19 @@ mod entities_with_typed_components {
         let e = world.spawn();
 
         assert_matches!(world.has::<ZSTComponent>(e), HasComponentTyped::UnknownComponent);
-        assert_matches!(
-            world.add(e, ZSTComponent),
-            Ok(AddComponent {
-                component_ref: MaybeReadOnlyComponentRef::Mutable(&mut ZSTComponent),
-                was_added: true,
-            })
-        );
+        assert_matches!(world.add(e, ZSTComponent), Ok(AddComponent::Added));
         assert_matches!(world.has::<ZSTComponent>(e), HasComponentTyped::Present);
         world.remove::<ZSTComponent>(e).unwrap();
         assert_matches!(world.has::<ZSTComponent>(e), HasComponentTyped::NotPresent);
+    }
+
+    #[test]
+    fn simple_set_once() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        world.set(e, TestComponent1(42)).unwrap();
+        assert_matches!(world.get(e), Ok(TestComponent1(42)));
     }
 
     #[test]
@@ -284,6 +275,17 @@ mod entities_with_typed_components {
         assert_matches!(world.get::<TestComponent1>(e), Ok(&TestComponent1(42)));
         world.add(e, TestComponent1(50)).unwrap();
         assert_matches!(world.get::<TestComponent1>(e), Ok(&TestComponent1(42)));
+    }
+
+    #[test]
+    fn set_multiple_times() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        world.set(e, TestComponent1(42)).unwrap();
+        assert_matches!(world.get(e), Ok(TestComponent1(42)));
+        world.set(e, TestComponent1(52)).unwrap();
+        assert_matches!(world.get(e), Ok(TestComponent1(52)));
     }
 
     #[test]
@@ -427,16 +429,13 @@ mod torturing_components {
         }).unwrap();
 
         assert_matches!(
-            world.add_component_with(e, c, || 53u32).unwrap(),
-            AddComponent {
-                component_ref: MaybeReadOnlyComponentRef::Mutable(&mut 53u32),
-                was_added: true,
-            },
+            world.add_component_with(e, c, || 53u32),
+            Ok(AddComponent::Added),
         );
 
-        assert_eq!(
-            world.get_component(e, c).unwrap().as_typed::<u32>().unwrap(),
-            &53u32,
+        assert_matches!(
+            world.get_component(e, c).unwrap().as_typed::<u32>(),
+            Ok(&53u32),
         );
         assert_matches!(
             world.get::<u32>(e),
@@ -486,14 +485,11 @@ mod torturing_components {
 
         // can still use the component, it has no storage
 
-        assert!(matches!(
-            world.add_component(e, c).unwrap(),
-            AddComponent { component_ref: OptionalComponentRef::NoStorage, was_added: true },
-        ));
-        assert!(matches!(
+        assert_matches!(world.add_component(e, c), Ok(AddComponent::Added));
+        assert_matches!(
             world.get_component(e, c),
             Err(GetComponentError::ComponentHasNoStorage { .. }),
-        ));
+        );
     }
 
     #[test]
@@ -513,10 +509,10 @@ mod torturing_components {
         ).unwrap();
         assert_eq!(world.has_component(e, c), HasComponent::Present);
         assert_eq!(drops.load(Ordering::Relaxed), 0);
-        assert_matches!(world.remove::<ComponentStorageComponent>(c), Ok(..));
-        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_matches!(world.remove::<ComponentStorageComponent>(c), Err(RemoveComponentTypedError::Forbidden { .. }));
+        assert_eq!(drops.load(Ordering::Relaxed), 0);
         assert_eq!(world.has_component(e, c), HasComponent::Present);
-        assert!(matches!(world.get_component(e, c), Err(GetComponentError::ComponentHasNoStorage { .. })));
+        assert_matches!(world.get_component(e, c), Ok(_));
         assert_eq!(world.try_component::<DropCheckComponent>(), None);
     }
 
@@ -535,11 +531,8 @@ mod torturing_components {
             Err(AddComponentTypedError::Forbidden { reason: _ })
         );
 
-        assert_matches!(
-            world.get_component(e, c).unwrap().as_typed::<TestComponent1>(),
-            Ok(TestComponent1(0))
-        );
-        assert!(world.has_component(e, c).is_not_present());
+        assert_matches!(world.get_component(e, c), Err(GetComponentError::ComponentHasNoStorage { .. }));
+        assert!(world.has_component(e, c).is_present());
     }
 
     #[test]
@@ -550,8 +543,10 @@ mod torturing_components {
 
         world.add(e, TestComponent1(42)).unwrap();
 
-        world.get_mut::<ComponentStorageComponent>(c).unwrap().dynvec_meta =
-            DynVecMetadata::new::<TestComponent2>();
+        assert_matches!(
+            world.get_mut::<ComponentStorageComponent>(c),
+            Err(GetComponentTypedError::Forbidden { .. })
+        );
 
         assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(42));
         world.set(e, TestComponent1(52)).unwrap();
@@ -592,14 +587,12 @@ mod entities_with_untyped_components {
         let c = world.spawn_component();
 
         assert_eq!(world.has_component(e, c), HasComponent::NotPresent);
-        let added = world.add_component(e, c).unwrap();
-        assert!(matches!(added.component_ref, OptionalComponentRef::NoStorage));
-        assert_eq!(added.was_added, true);
+        assert_matches!(world.add_component(e, c), Ok(AddComponent::Added));
         assert_eq!(world.has_component(e, c), HasComponent::Present);
 
-        assert!(matches!(world.get_component(e, c), Err(GetComponentError::ComponentHasNoStorage { .. })));
+        assert_matches!(world.get_component(e, c), Err(GetComponentError::ComponentHasNoStorage { .. }));
 
-        assert!(matches!(world.remove_component(e, c).unwrap(), OptionalComponentRef::NoStorage));
+        assert_matches!(world.remove_component(e, c).unwrap(), OptionalComponentRef::NoStorage);
     }
 
     #[test]
@@ -610,10 +603,10 @@ mod entities_with_untyped_components {
 
         world.add_component(e, c).unwrap();
         world.dispawn(e).unwrap();
-        assert!(matches!(world.add_component(e, c), Err(AddComponentError::EntityIsNotAlive { .. })));
+        assert_matches!(world.add_component(e, c), Err(AddComponentError::EntityIsNotAlive { .. }));
         assert_eq!(world.has_component(e, c), HasComponent::EntityIsNotAlive);
 
-        assert!(matches!(world.remove_component(e, c), Err(RemoveComponentError::EntityIsNotAlive { .. })));
+        assert_matches!(world.remove_component(e, c), Err(RemoveComponentError::EntityIsNotAlive { .. }));
     }
 
     #[test]
@@ -623,17 +616,9 @@ mod entities_with_untyped_components {
         let c = world.spawn_component();
 
         assert_eq!(world.has_component(e, c), HasComponent::NotPresent);
-
-        let added = world.add_component(e, c).unwrap();
-        assert!(matches!(added.component_ref, OptionalComponentRef::NoStorage));
-        assert_eq!(added.was_added, true);
-
+        assert_matches!(world.add_component(e, c), Ok(AddComponent::Added));
         assert_eq!(world.has_component(e, c), HasComponent::Present);
-
-        let added = world.add_component(e, c).unwrap();
-        assert!(matches!(added.component_ref, OptionalComponentRef::NoStorage));
-        assert_eq!(added.was_added, false);
-
+        assert_matches!(world.add_component(e, c), Ok(AddComponent::AlreadyPresent));
         assert_eq!(world.has_component(e, c), HasComponent::Present);
     }
 
@@ -666,7 +651,7 @@ mod entities_with_untyped_components {
         assert!(!world.alive(c));
 
         assert_matches!(world.has_component(e, c), HasComponent::ComponentIsNotAlive);
-        assert!(matches!(world.add_component(e, c), Err(AddComponentError::ComponentIsNotAlive { .. })));
+        assert_matches!(world.add_component(e, c), Err(AddComponentError::ComponentIsNotAlive { .. }));
     }
 
     #[test]
@@ -680,7 +665,7 @@ mod entities_with_untyped_components {
         assert!(!world.alive(c));
 
         assert_matches!(world.has_component(e, c), HasComponent::ComponentIsNotAlive);
-        assert!(matches!(world.add_component(e, c), Err(AddComponentError::ComponentIsNotAlive { .. })));
+        assert_matches!(world.add_component(e, c), Err(AddComponentError::ComponentIsNotAlive { .. }));
     }
 }
 
@@ -705,12 +690,7 @@ mod misc {
 
         assert_matches!(world.get::<TestComponent1>(e), Err(GetComponentTypedError::EntityIsNotAlive { .. }));
         assert_matches!(world.get::<TestComponent1>(e2), Err(GetComponentTypedError::ComponentNotPresent { .. }));
-
-        assert_eq!(
-            world.add(e2, TestComponent1(52)).unwrap().was_added,
-            true,
-        );
-
+        assert_matches!(world.add(e2, TestComponent1(52)), Ok(AddComponent::Added));
         assert_matches!(world.get::<TestComponent1>(e), Err(GetComponentTypedError::EntityIsNotAlive { .. }));
         assert_matches!(world.get::<TestComponent1>(e2), Ok(&TestComponent1(52)));
     }
@@ -735,10 +715,10 @@ mod misc {
         let e = world.spawn();
         let c = world.component::<TestComponent1>();
 
-        assert!(matches!(
+        assert_matches!(
             world.add_component(e, c),
             Err(AddComponentError::ComponentNeedsValue { .. }),
-        ));
+        );
     }
 
     #[test]
@@ -812,7 +792,7 @@ mod world_try_clone {
 
         world.add(entity, NotCloneComponent).unwrap();
 
-        assert!(matches!(world.try_clone(), Err(NoCloneError { .. })));
+        assert_matches!(world.try_clone(), Err(NoCloneError { .. }));
     }
 }
 
@@ -882,26 +862,16 @@ mod drops_when_it_should {
 
         assert_eq!(
             world.get_or_default::<DefaultComponent>(e1).unwrap(),
-            AddComponent {
-                component_ref: MaybeReadOnlyComponentRef::Mutable(&mut DefaultComponent("default value".into())),
-                was_added: true,
-            },
+            &mut DefaultComponent("default value".into()),
         );
         assert_eq!(
             world.get_or_default::<DefaultComponent>(e1).unwrap(),
-            AddComponent {
-                component_ref: MaybeReadOnlyComponentRef::Mutable(&mut DefaultComponent("default value".into())),
-                was_added: false,
-            },
+            &mut DefaultComponent("default value".into()),
         );
-
         world.set(e2, DefaultComponent("Custom value".into())).unwrap();
         assert_eq!(
             world.get_or_default::<DefaultComponent>(e2).unwrap(),
-            AddComponent {
-                component_ref: MaybeReadOnlyComponentRef::Mutable(&mut DefaultComponent("Custom value".into())),
-                was_added: false,
-            },
+            &mut DefaultComponent("Custom value".into()),
         );
     }
 }
@@ -986,6 +956,55 @@ mod tables_and_archetyps {
     }
 }
 
+mod traits {
+    use super::*;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct MyReadOnlyComponent(u32);
+
+    impl Component for MyReadOnlyComponent {
+        fn on_register(world: &mut World, entity: ComponentEntity) {
+            world.add(entity, component_traits::ReadOnly).unwrap();
+        }
+    }
+
+    #[test]
+    fn readonly_registered_by_default() {
+        let world = World::new();
+        assert_matches!(world.try_component::<component_traits::ReadOnly>(), Some(_));
+    }
+
+    #[test]
+    fn simple_readonly_registering() {
+        let mut world = World::new();
+        let c = world.component::<MyReadOnlyComponent>();
+        assert_eq!(world.has::<component_traits::ReadOnly>(c), HasComponentTyped::Present);
+    }
+
+    #[test]
+    fn simple_readonly_using_without_mutating() {
+        let mut world = World::new();
+
+        let e = world.spawn();
+
+        world.add(e, MyReadOnlyComponent(42)).unwrap();
+        assert_eq!(world.has::<MyReadOnlyComponent>(e), HasComponentTyped::Present);
+        assert_matches!(world.get::<MyReadOnlyComponent>(e), Ok(&MyReadOnlyComponent(42)));
+    }
+
+    #[test]
+    fn simple_readonly_fail_get_mut() {
+        let mut world = World::new();
+
+        let e = world.spawn();
+
+        world.add(e, MyReadOnlyComponent(42)).unwrap();
+        assert_eq!(world.has::<MyReadOnlyComponent>(e), HasComponentTyped::Present);
+        assert_matches!(world.get_mut::<MyReadOnlyComponent>(e), Err(GetComponentTypedError::Forbidden { .. }));
+        assert_matches!(world.get::<MyReadOnlyComponent>(e), Ok(&MyReadOnlyComponent(42)));
+    }
+}
+
 mod queries {
     use super::*;
 
@@ -1009,18 +1028,18 @@ mod queries {
             world.component::<TestComponent1>().0,
             world.component::<TestComponent2>().0,
         ];
-        let with_nothing = (0..8).map(|_| world.spawn()).collect_vec();
+        let with_nothing = (0..4).map(|_| world.spawn()).collect_vec();
         let with_test_1 = (0..3).map(|_| {
             let e = world.spawn();
             world.add(e, TestComponent1(42)).unwrap();
             e
         }).collect_vec();
-        let with_test_2 = (0..5).map(|_| {
+        let with_test_2 = (0..2).map(|_| {
             let e = world.spawn();
             world.add(e, TestComponent2(88.)).unwrap();
             e
         }).collect_vec();
-        let with_both = (0..5).map(|_| {
+        let with_both = (0..2).map(|_| {
             let e = world.spawn();
             world.add(e, TestComponent1(50)).unwrap();
             world.add(e, TestComponent2(99.)).unwrap();

@@ -7,7 +7,19 @@ pub trait DynOption {
 
     fn take_and_set_into(
         &mut self, idx: usize, into: &mut DynVec
-    ) -> Option<Result<(), dynvec::InsertionError>>;
+    ) -> Option<Result<(), dynvec::InsertionError>> {
+        match into.get_mut(idx) {
+            Ok(mut_ref) => match self.take_and_assign(mut_ref)? {
+                Ok(()) => Some(Ok(())),
+                Err(error) => Some(Err(dynvec::InsertionError::IncorrectType(error))),
+            },
+            Err(error) => Some(Err(dynvec::InsertionError::IndexOutOfBound(error))),
+        }
+    }
+
+    fn take_and_assign(
+        &mut self, target: dynvec::DynVecValueRefMut,
+    ) -> Option<Result<(), dynvec::IncorrectTypeError>>;
 }
 
 impl<T: 'static> DynOption for Option<T> {
@@ -18,11 +30,11 @@ impl<T: 'static> DynOption for Option<T> {
         Some(try { into.typed_mut::<T>()?.push(val) })
     }
 
-    fn take_and_set_into(
-        &mut self, idx: usize, into: &mut DynVec
-    ) -> Option<Result<(), dynvec::InsertionError>> {
+    fn take_and_assign(
+        &mut self, target: dynvec::DynVecValueRefMut,
+    ) -> Option<Result<(), dynvec::IncorrectTypeError>> {
         let val = self.take()?;
-        Some(try { into.typed_mut::<T>()?.set(idx, val)? })
+        Some(try { *target.as_typed()? = val; })
     }
 }
 
@@ -40,17 +52,15 @@ impl<F, T: 'static> DynOption for FunDynOption<F>
     fn take_and_push_into(
         &mut self, into: &mut DynVec
     ) -> Option<Result<(), dynvec::IncorrectTypeError>> {
-        let fun = self.0.take()?;
-        let val = fun();
+        let val = self.0.take()?();
         Some(try { into.typed_mut::<T>()?.push(val) })
     }
 
-    fn take_and_set_into(
-        &mut self, idx: usize, into: &mut DynVec
-    ) -> Option<Result<(), dynvec::InsertionError>> {
-        let fun = self.0.take()?;
-        let val = fun();
-        Some(try { into.typed_mut::<T>()?.set(idx, val)? })
+    fn take_and_assign(
+        &mut self, target: dynvec::DynVecValueRefMut,
+    ) -> Option<Result<(), dynvec::IncorrectTypeError>> {
+        let val = self.0.take()?();
+        Some(try { *target.as_typed()? = val; })
     }
 }
 

@@ -22,17 +22,16 @@ impl<T: 'static> Component for T {
     }
 }
 
-pub mod component_tags {
+pub mod component_traits {
     /// If added to a component's entity, a mutable reference cannot be acquired
     /// to its storage data. It can still be removed and added again though.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct Readonly;
+    pub struct ReadOnly;
 
-    impl Readonly {
-        pub const REASON: &str = "This component is read-only (it has the Readonly component tag)";
+    impl ReadOnly {
+        pub const REASON: &str = "This component is read-only (it has the ReadOnly component trait)";
     }
 }
-use component_tags as tags;
 
 /// When added to entities, describes how to store data for this component
 /// into a DynVec.
@@ -41,14 +40,6 @@ use component_tags as tags;
 #[derive(Debug, Clone)]
 pub struct ComponentStorageComponent {
     pub dynvec_meta: DynVecMetadata,
-}
-
-impl Component for ComponentStorageComponent {
-    fn on_register(world: &mut World, entity: ComponentEntity) {
-        // NOTE: This is hard-coded in `World::component_storage` so it needs
-        // to be changed there too
-        world.add(entity, tags::Readonly).unwrap();
-    }
 }
 
 /// Newtype for Entities for component used for clarity, no checks are done to

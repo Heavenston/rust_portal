@@ -65,7 +65,7 @@ mod private {
     pub trait QueryParameterImmutableImpl: QueryParameterImpl {
         type Value<'a>: Copy;
 
-        /// The entity is guarenteed to be alive a matching
+        /// The entity is guarenteed to be alive and be matching
         fn get<'s, 'a>(
             &'s self,
             world: &'a World,

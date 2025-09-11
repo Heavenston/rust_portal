@@ -15,7 +15,7 @@ use std::iter::{ empty, once };
 
 use utils::{ itertools::{ chain, zip_eq }, prelude::* };
 use derive_more::From;
-use dynvec::{ DrainedDynVecValue, DynVec, DynVecDrain, IncorrectTypeError, InsertionError, RemovedDynVecValue };
+use dynvec::{ DrainedDynVecValue, DynVec, DynVecDrain, IncorrectTypeError, RemovedDynVecValue };
 
 pub struct StorageComponentsRef<'a> {
     idx: usize,
@@ -23,7 +23,7 @@ pub struct StorageComponentsRef<'a> {
 }
 
 impl<'a> StorageComponentsRef<'a> {
-    pub fn for_component(self, component_idx: usize) -> dynvec::DynVecValueRef<'a> {
+    pub fn for_component(&self, component_idx: usize) -> dynvec::DynVecValueRef<'a> {
         self.storage.storages[component_idx]
             .get(self.idx).expect("Valid index")
     }
@@ -74,6 +74,7 @@ impl ComponentDenseStorage {
             .consume_on_drop()
     }
 
+    #[expect(dead_code)]
     pub fn remove_column(&mut self, component_idx: usize) {
         let mut storages = std::mem::take(&mut self.storages).into_vec();
         storages.remove(component_idx);
@@ -144,6 +145,36 @@ pub enum ComponentDenseStorageInput<'a, 'b> {
     Default,
 }
 
+impl<'a, 'b> ComponentDenseStorageInput<'a, 'b> {
+    pub fn push_into(self, dyn_vec: &mut DynVec) -> Result<(), dynvec::IncorrectTypeError> {
+        match self {
+            Self::RemovedDynVecValue(value) => value.push_into(dyn_vec),
+            Self::DrainedDynVecValue(value) => value.push_into(dyn_vec),
+            Self::DynOption(value) => value.take_and_push_into(dyn_vec)
+                .expect("Not already taken"),
+            Self::Default => {
+                dyn_vec.push_default()
+                    .expect("Type must have a default constructor if ComponentDenseStorageInput::Default is used");
+                Ok(())
+            },
+        }
+    }
+
+    pub fn assign_onto(self, mut target: dynvec::DynVecValueRefMut<'_>) -> Result<(), dynvec::IncorrectTypeError> {
+        match self {
+            Self::RemovedDynVecValue(value) => value.assign_onto(target),
+            Self::DrainedDynVecValue(value) => value.assign_onto(target),
+            Self::DynOption(dyn_option) => dyn_option.take_and_assign(target)
+                .expect("Not already taken"),
+            Self::Default => {
+                target.replace_with_default()
+                    .expect("Type must have a default constructor if ComponentDenseStorageInput::Default is used");
+                Ok(())
+            },
+        }
+    }
+}
+
 impl<'a, 'b, T, I> SparseSetDenseStorageInput<I> for ComponentDenseStorage
     where I: IntoIterator<Item = T>,
           T: Into<ComponentDenseStorageInput<'a, 'b>>,
@@ -151,23 +182,7 @@ impl<'a, 'b, T, I> SparseSetDenseStorageInput<I> for ComponentDenseStorage
     fn push(&mut self, comps: I) {
         self.len += 1;
         for (i, (storage, comp)) in zip_eq(self.storages.iter_mut(), comps).enumerate() {
-            let type_result: Result<(), IncorrectTypeError> = match comp.into() {
-                ComponentDenseStorageInput::RemovedDynVecValue(dyn_vec_value) => {
-                    dyn_vec_value.push_into(storage)
-                },
-                ComponentDenseStorageInput::DrainedDynVecValue(dyn_vec_value) => {
-                    dyn_vec_value.push_into(storage)
-                },
-                ComponentDenseStorageInput::DynOption(dyn_option) => {
-                    dyn_option.take_and_push_into(storage)
-                        .expect("Not alredy taken")
-                },
-                ComponentDenseStorageInput::Default => {
-                    storage.push_default()
-                        .expect("Type should have a default constructor if ComponentDenseStorageInput::Default is used");
-                    Ok(())
-                },
-            };
+            let type_result: Result<(), IncorrectTypeError> = comp.into().push_into(storage);
 
             if let Err(err) = type_result {
                 panic!("Error pushing component {i} (with {:?}): {err}", std::fmt::from_fn(|f| self.debug_types(f)));
@@ -178,23 +193,8 @@ impl<'a, 'b, T, I> SparseSetDenseStorageInput<I> for ComponentDenseStorage
     fn set(&mut self, idx: u32, comps: I) {
         assert!(idx < self.len);
         for (i, (storage, comp)) in zip_eq(self.storages.iter_mut(), comps).enumerate() {
-            let type_result: Result<(), InsertionError> = match comp.into() {
-                ComponentDenseStorageInput::RemovedDynVecValue(dyn_vec_value) => {
-                    dyn_vec_value.set_into(storage, ix!(idx))
-                },
-                ComponentDenseStorageInput::DrainedDynVecValue(dyn_vec_value) => {
-                    dyn_vec_value.set_into(storage, ix!(idx))
-                },
-                ComponentDenseStorageInput::DynOption(dyn_option) => {
-                    dyn_option.take_and_set_into(ix!(idx), storage)
-                        .expect("Not alredy taken")
-                },
-                ComponentDenseStorageInput::Default => {
-                    storage.set_default(ix!(idx))
-                        .expect("Type should have a default constructor if ComponentDenseStorageInput::Default is used");
-                    Ok(())
-                }
-            };
+            let type_result = comp.into()
+                .assign_onto(storage.get_mut(ix!(idx)).expect("Index checked before"));
 
             if let Err(err) = type_result {
                 panic!("Error setting component {i} (with {:?}): {err}", std::fmt::from_fn(|f| self.debug_types(f)));
