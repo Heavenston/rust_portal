@@ -1,5 +1,5 @@
 
-mod sealed {
+pub(crate) mod sealed {
     pub trait PrivateBoolValue {
         /// AVOID USING AT ALL COSTS, this requires being sure that this is
         /// only reachable when Self = ()
@@ -45,10 +45,10 @@ impl BoolValue for ! {
     type Not = ();
 
     /// Takes never as argument so we know we could never call this method
-    fn and<O: BoolValue>(self: !, _: O) -> Self::And<O> { unreachable!() }
+    fn and<O: BoolValue>(self: !, _: O) -> Self::And<O> { match self { } }
 
     /// Takes never as argument so we know we could never call this method
-    fn or_left<O: BoolValue>(self: !) -> Self::Or<O> { unreachable!() }
+    fn or_left<O: BoolValue>(self: !) -> Self::Or<O> { match self { } }
     fn or_right<O: BoolValue>(other: O) -> Self::Or<O> { other }
 }
 
@@ -215,8 +215,8 @@ impl From<Bool<!, ()>> for Bool {
 }
 
 impl From<Bool<!, !>> for Bool {
-    fn from(_: Bool<!, !>) -> Bool {
-        unreachable!()
+    fn from(b: Bool<!, !>) -> Bool {
+        match b { }
    }
 }
 
