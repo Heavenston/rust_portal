@@ -6,7 +6,7 @@
 use crate::{
     dyn_option::DynOption,
     sparse_set::{
-        SparseSetDenseStorage, SparseSetDenseStorageInput,
+        SparseSetDenseStorage, SparseSetDenseStorageInput
     },
     world::EntityIndex,
 };
@@ -57,6 +57,15 @@ impl ComponentDenseStorage {
             len: 0,
             storages,
         }
+    }
+
+    pub fn column(&self, component_idx: usize) -> &DynVec {
+        &self.storages[component_idx]
+    }
+
+    #[expect(dead_code)]
+    pub fn column_mut(&mut self, component_idx: usize) -> &mut DynVec {
+        &mut self.storages[component_idx]
     }
 
     pub fn debug_types(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

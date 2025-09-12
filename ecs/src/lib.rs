@@ -6,6 +6,7 @@
 #![feature(debug_closure_helpers)]
 #![feature(never_type)]
 #![feature(min_specialization)]
+#![feature(type_alias_impl_trait)]
 
 #![forbid(unsafe_code)]
 

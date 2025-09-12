@@ -144,6 +144,17 @@ impl<S> SparseSet<S>
         self.dense_values.get_mut(dense_idx)
     }
 
+    pub fn dense_values(&self) -> &S {
+        &self.dense_values
+    }
+
+    /// Allows you to mutate the internal dense value storage
+    ///
+    /// Must *not* change any of the invariants of the [`SparseSetDenseStorage`] trait.
+    pub fn unsafe_dense_values_mut(&mut self) -> &mut S {
+        &mut self.dense_values
+    }
+
     pub fn insert<I>(&mut self, sparse_idx: S::SparseIdx, value: I)
         where S: SparseSetDenseStorageInput<I>
     {
@@ -198,13 +209,6 @@ impl<S> SparseSet<S>
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (S::SparseIdx, S::RefMutItem<'_>)> + DoubleEndedIterator + ExactSizeIterator {
         zip(self.dense_to_sparse_indices.values().copied(), self.dense_values.iter_mut())
-    }
-
-    /// Allows you to mutate the internal dense value storage
-    ///
-    /// Must *not* change any of the invariants of the [`SparseSetDenseStorage`] trait.
-    pub fn unsafely_mutate_dense_values(&mut self, mutator: impl FnOnce(&mut S)) {
-        mutator(&mut self.dense_values);
     }
 }
 

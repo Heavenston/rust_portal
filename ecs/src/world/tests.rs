@@ -1025,6 +1025,7 @@ mod queries {
         // We try to include any internally created entity here
         let components = vec![
             world.component::<ComponentStorageComponent>().0,
+            world.component::<component_traits::ReadOnly>().0,
             world.component::<TestComponent1>().0,
             world.component::<TestComponent2>().0,
         ];

@@ -510,7 +510,7 @@ impl DynVec {
     }
 
     /// Returns an iterator over reference of all elements in this vec
-    pub fn iter(&self) -> impl Iterator<Item = DynVecValueRef<'_>> + DoubleEndedIterator + ExactSizeIterator {
+    pub fn iter(&self) -> impl Iterator<Item = DynVecValueRef<'_>> + DoubleEndedIterator + ExactSizeIterator + Clone {
         (0..self.len).map(|idx| DynVecValueRef {
             metadata: &self.meta,
             ptr: unsafe { self.idx_ptr(idx) },

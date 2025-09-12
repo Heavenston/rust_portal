@@ -1,12 +1,16 @@
 //! Implementing here [`QueryParameter`]s that modify other parameters
 
+use std::iter::{ repeat_n, repeat_with, RepeatN };
+
 use super::{
     QueryParameterImpl, QueryParameterImmutableImpl,
     QueryParameter, QueryParameterImmutable,
+    ImmutableIterParameters,
 };
-use crate::world::{ ArchetypId, EntityIndex, World };
+use crate::world::{ ArchetypId, World };
 
 use utils::prelude::*;
+use utils::itertools::izip;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Optional<C>
@@ -19,56 +23,43 @@ impl<C> QueryParameterImpl for Optional<C>
     where C: QueryParameterImpl,
 {
     type CreationConfig = C::CreationConfig;
-    type RequiresPerEntityMatchingBool = False;
-    type ValueMut<'a> = Option<C::ValueMut<'a>>;
-    type ArchetypMatch = Result<C::ArchetypMatch, C::ArchetypMatchError>;
-    type ArchetypMatchError = !;
+    type ArchetypIterator<'a> = impl Iterator<Item = ArchetypId> + 'a
+        where Self: 'a;
+    type ArchetypMatchBool = True;
 
-    fn new(world: &World, config: C::CreationConfig) -> Self {
+    type Value<'a> = Option<C::Value<'a>>;
+
+    fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
         Self {
-            child: C::new(world, config),
+            child: C::new(world, creation_cfg),
         }
     }
 
-    fn requires_per_entity_matching(&self) -> False {
-        // we never need to check per entity as we always match it (but return None)
-        False
+    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
+        where 's: 'r, 'w: 'r
+    {
+        world.archetypes.indices()
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<Self::ArchetypMatch, !> {
-        Ok(self.child.match_archetyp(world, archetyp_id))
-    }
-
-    fn match_entity(
-        &self, world: &World,
-        archetyp_match: &Self::ArchetypMatch,
-        entity: EntityIndex,
-    ) -> bool {
-        // should not be called
-        unreachable!();
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+        True
     }
 }
 
 impl<C> QueryParameterImmutableImpl for Optional<C>
     where C: QueryParameterImmutableImpl,
 {
-    type Value<'a> = Option<C::Value<'a>>;
+    type ValueIterator<'w> = impl Iterator<Item = Option<C::Value<'w>>>;
 
-    fn get<'s, 'a>(
-        &'s self,
-        world: &'a World,
-        archetyp_match: &Self::ArchetypMatch,
-        archetyp_id: ArchetypId,
-        entity: EntityIndex,
-    ) -> Option<C::Value<'a>> {
-        let child_archetyp_match = archetyp_match.as_ref().ok()?;
-
-        if self.child.requires_per_entity_matching().is_true() &&
-            !self.child.match_entity(world, child_archetyp_match, entity){
-            return None;
-        }
-
-        Some(self.child.get(world, child_archetyp_match, archetyp_id, entity))
+    fn iter_table<'w>(&self, parameters @ ImmutableIterParameters {
+        world, archetyp_id, table_id, ..
+    }: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
+        self.child.match_archetyp(world, archetyp_id).is_true()
+            .then(|| self.child.iter_table(parameters).map(Some))
+            .left_or_else(||
+                repeat_with(|| None)
+                    .take(ix!(world.tables[table_id].sparse_set.len()))
+            )
     }
 }
 
@@ -83,46 +74,39 @@ impl<C> QueryParameterImpl for NoFetch<C>
     where C: QueryParameterImpl,
 {
     type CreationConfig = C::CreationConfig;
-    type RequiresPerEntityMatchingBool = C::RequiresPerEntityMatchingBool;
-    type ValueMut<'a> = C::ValueMut<'a>;
-    type ArchetypMatch = C::ArchetypMatch;
-    type ArchetypMatchError = C::ArchetypMatchError;
+    type ArchetypIterator<'w> = C::ArchetypIterator<'w>
+        where Self: 'w;
+    type ArchetypMatchBool = C::ArchetypMatchBool;
 
-    fn new(world: &World, config: C::CreationConfig) -> Self {
+    type Value<'a> = ();
+
+    fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
         Self {
-            child: C::new(world, config),
+            child: C::new(world, creation_cfg),
         }
     }
 
-    fn requires_per_entity_matching(&self) -> C::RequiresPerEntityMatchingBool {
-        self.child.requires_per_entity_matching()
+    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
+        where 's: 'r, 'w: 'r
+    {
+        C::matching_archetypes(&self.child, world)
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<C::ArchetypMatch, C::ArchetypMatchError> {
-        self.child.match_archetyp(world, archetyp_id)
-    }
-
-    fn match_entity(
-        &self, world: &World,
-        archetyp_match: &Self::ArchetypMatch,
-        entity: EntityIndex,
-    ) -> bool {
-        self.child.match_entity(world, archetyp_match, entity)
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+        C::match_archetyp(&self.child, world, archetyp_id)
     }
 }
 
 impl<C> QueryParameterImmutableImpl for NoFetch<C>
     where C: QueryParameterImmutableImpl,
 {
-    type Value<'a> = ();
+    type ValueIterator<'a> = RepeatN<()>;
 
-    fn get<'s, 'a>(
-        &'s self,
-        world: &'a World,
-        archetyp_match: &C::ArchetypMatch,
-        archetyp_id: ArchetypId,
-        entity: EntityIndex,
-    ) { }
+    fn iter_table<'w>(&self, ImmutableIterParameters {
+        world, table_id, ..
+    }: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
+        repeat_n((), ix!(world.tables[table_id].sparse_set.len()))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -136,55 +120,27 @@ impl<C> QueryParameterImpl for Not<C>
     where C: QueryParameterImpl,
 {
     type CreationConfig = C::CreationConfig;
-    type RequiresPerEntityMatchingBool = C::RequiresPerEntityMatchingBool;
-    type ValueMut<'a> = ();
-    type ArchetypMatch = Result<C::ArchetypMatch, C::ArchetypMatchError>;
-    type ArchetypMatchError = <C::RequiresPerEntityMatchingBool as PartialBool>::F;
+    type ArchetypIterator<'w> = impl Iterator<Item = ArchetypId> + 'w
+        where Self: 'w;
+    type ArchetypMatchBool = BoolNot<C::ArchetypMatchBool>;
 
-    fn new(world: &World, config: C::CreationConfig) -> Self {
+    type Value<'a> = ();
+
+    fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
         Self {
-            child: C::new(world, config),
+            child: C::new(world, creation_cfg),
         }
     }
 
-    fn requires_per_entity_matching(&self) -> C::RequiresPerEntityMatchingBool {
-        self.child.requires_per_entity_matching()
+    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
+        where 's: 'r, 'w: 'r
+    {
+        world.archetypes.indices()
+            .filter(|&archetyp_id| self.match_archetyp(world, archetyp_id).is_true())
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<Self::ArchetypMatch, Self::ArchetypMatchError> {
-        match (
-            self.child.requires_per_entity_matching().into_bool(),
-            self.child.match_archetyp(world, archetyp_id),
-        ) {
-            // The archetype matched but may still refuse some entities so we
-            // still need to go through the whole archetyp
-            (Bool::True(t), Ok(matched)) => {
-                Ok(Ok(matched))
-            },
-            // There is no per-entity matching so the WHOLE archetyp matched
-            // which means we will be able to entierly skip it
-            (Bool::False(f), Ok(matched)) => {
-                Err(f)
-            },
-            // If it didn't match the archetyp, this always means none of the
-            // entitie inside matches its filter, so for us it means we will match
-            // all of them regardless
-            (Bool::True(_) | Bool::False(_), Err(e)) => {
-                Ok(Err(e))
-            },
-        }
-    }
-
-    fn match_entity(
-        &self,
-        world: &World,
-        archetyp_match: &Self::ArchetypMatch,
-        entity: EntityIndex,
-    ) -> bool {
-        match archetyp_match {
-            Ok(child_match) => !self.child.match_entity(world, child_match, entity),
-            Err(_) => true,
-        }
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+        C::match_archetyp(&self.child, world, archetyp_id).not()
     }
 }
 
@@ -192,54 +148,41 @@ impl<C> QueryParameterImpl for Not<C>
 impl<C> QueryParameterImmutableImpl for Not<C>
     where C: QueryParameterImpl,
 {
-    type Value<'a> = ();
+    type ValueIterator<'a> = RepeatN<()>;
 
-    fn get<'s, 'a>(
-        &'s self,
-        world: &'a World,
-        archetyp_match: &Self::ArchetypMatch,
-        archetyp_id: ArchetypId,
-        entity: EntityIndex,
-    ) { }
+    fn iter_table<'w>(&self, ImmutableIterParameters {
+        world, table_id, ..
+    }: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
+        repeat_n((), ix!(world.tables[table_id].sparse_set.len()))
+    }
 }
 
 mod private {
     use super::*;
 
-    pub trait QueryParameterTupleImpl {
-        type RequiresPerEntityMatchingBool: PartialBool;
+    pub trait QueryParameterTupleImpl: Sized {
         type CreationConfig;
 
-        type ArchetypMatchBoolValueTuple: TupleOfBoolValues;
+        type AndArchetypIterator<'a>: Iterator<Item = ArchetypId> + 'a
+            where Self: 'a;
+        type AndArchetypMatchBool: PartialBool;
 
-        type AndValueMut<'a>;
-        type AndArchetypMatch: Clone;
-        type AndArchetypMatchError: BoolValue = <Self::ArchetypMatchBoolValueTuple as TupleOfBoolValues>::Or;
+        type OrArchetypIterator<'a>: Iterator<Item = ArchetypId> + 'a
+            where Self: 'a;
+        type OrArchetypMatchBool: PartialBool;
 
-        type OrValueMut<'a>: EitherOfN;
-        type OrArchetypMatch: Clone;
-        type OrArchetypMatchError: BoolValue = <Self::ArchetypMatchBoolValueTuple as TupleOfBoolValues>::And;
+        type AndValue<'a>;
+        type OrValue<'a>;
 
-        fn new(world: &World, cfg: Self::CreationConfig) -> Self;
+        fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self;
 
-        fn requires_per_entity_matching(&self) -> Self::RequiresPerEntityMatchingBool;
+        fn and_matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::AndArchetypIterator<'r>
+            where 's: 'r, 'w: 'r;
+        fn and_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::AndArchetypMatchBool;
 
-        fn and_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<Self::AndArchetypMatch, Self::AndArchetypMatchError>;
-        fn or_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<Self::OrArchetypMatch, Self::OrArchetypMatchError>;
-
-        fn and_match_entity(
-            &self,
-            world: &World,
-            archetyp_match: &Self::AndArchetypMatch,
-            entity: EntityIndex,
-        ) -> bool;
-
-        fn or_match_entity(
-            &self,
-            orld: &World,
-            archetyp_match: &Self::OrArchetypMatch,
-            entity: EntityIndex,
-        ) -> bool;
+        fn or_matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::OrArchetypIterator<'r>
+            where 's: 'r, 'w: 'r;
+        fn or_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::OrArchetypMatchBool;
     }
 
     macro_rules! bool_or_all {
@@ -249,97 +192,106 @@ mod private {
         };
     }
 
+    macro_rules! bool_and_all {
+        ($first: ty) => { Bool<<$first as PartialBool>::T, <$first as PartialBool>::F> };
+        ($first: ty $(, $rest: ty)+) => {
+            BoolAnd<$first, bool_and_all!($($rest),*)>
+        };
+    }
+
     macro_rules! bool_or_else {
+        () => { False.into_bool() };
         ($first: expr) => { $first.into_bool() };
         ($first: expr $(, $rest: expr)+) => {
             PartialBool::or_else($first, || bool_or_else!($($rest),*))
         };
     }
 
+    macro_rules! bool_and_then {
+        () => { True.into_bool() };
+        ($first: expr) => { $first.into_bool() };
+        ($first: expr $(, $rest: expr)+) => {
+            PartialBool::and_then($first, || bool_and_then!($($rest),*))
+        };
+    }
+
+    macro_rules! bool_and_then_skip_first {
+        ($first: expr $(, $rest: expr)*) => {
+            bool_and_then!($($rest),*)
+        };
+    }
+
+    // Like itertools::izip but when there is only one element it wraps it
+    // into a single element tuple
+    macro_rules! special_izip {
+        ($val: expr) => { ($val).map(|val| (val,)) };
+        ($($vals:expr),*) => { izip!($($vals),*) };
+    }
+
+    // macro_rules! skip_first {
+    //     ($i: tt $(, $T:tt)*) => { $($T),* };
+    // }
+
     macro_rules! impl_query_parameter_tuple {
         ($($T:ident),*) => {
             impl<$($T),*> QueryParameterTupleImpl for ($($T,)*)
                 where $($T: QueryParameter,)*
             {
-                type RequiresPerEntityMatchingBool = bool_or_all!($($T::RequiresPerEntityMatchingBool),*);
                 type CreationConfig = ($($T::CreationConfig,)*);
 
-                type ArchetypMatchBoolValueTuple = ($($T::ArchetypMatchError,)*);
+                type AndArchetypIterator<'a> = impl Iterator<Item = ArchetypId>
+                    where Self: 'a;
+                type AndArchetypMatchBool = bool_and_all!($($T::ArchetypMatchBool),*);
 
-                type AndValueMut<'a> = ($($T::ValueMut::<'a>,)*);
-                type AndArchetypMatch = ($($T::ArchetypMatch,)*);
-                type OrValueMut<'a> = either_of!($($T::ValueMut::<'a>),*);
-                type OrArchetypMatch = either_of!($($T::ArchetypMatch),*);
+                type OrArchetypIterator<'a> = impl Iterator<Item = ArchetypId>
+                    where Self: 'a;
+                type OrArchetypMatchBool = bool_or_all!($($T::ArchetypMatchBool),*);
 
-                fn new(world: &World, config: Self::CreationConfig) -> Self {
-                    ($($T::new(world, config.${index()}),)*)
+                type AndValue<'a> = ($($T::Value<'a>,)*);
+                type OrValue<'a> = either_of!($($T::Value<'a>),*);
+
+                fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
+                    ($($T::new(world, creation_cfg.${index()}),)*)
                 }
 
-                fn requires_per_entity_matching(&self) -> Self::RequiresPerEntityMatchingBool {
-                    bool_or_else!($($T::requires_per_entity_matching(&self.${index()})),*)
+                fn and_matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::AndArchetypIterator<'r>
+                    where 's: 'r, 'w: 'r
+                {
+                    // FIXME: There could be a strategy as to how we chose which one
+                    // we use here
+                    self.0.matching_archetypes(world)
+                        .filter(|&archetyp_id| bool_and_then_skip_first!($($T::match_archetyp(&self.${index()}, world, archetyp_id)),*).is_true())
                 }
 
-                fn and_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<Self::AndArchetypMatch, Self::AndArchetypMatchError> {
-                    Ok(($(match $T::match_archetyp(&self.${index()}, world, archetyp_id) {
-                        Ok(val) => val,
-                        Err(e) => return Err(<Self::ArchetypMatchBoolValueTuple as TupleOfBoolValuesOrFrom<${index()}, $T::ArchetypMatchError>>::from(e)),
-                    },)*))
+                fn and_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::AndArchetypMatchBool {
+                    bool_and_then!($($T::match_archetyp(&self.${index()}, world, archetyp_id)),*)
                 }
 
-                fn or_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<Self::OrArchetypMatch, Self::OrArchetypMatchError> {
-                    Err(<Self::ArchetypMatchBoolValueTuple as TupleOfBoolValues>::and_from_all((
-                        $(match $T::match_archetyp(&self.${index()}, world, archetyp_id) {
-                            Ok(matching) => return Ok(EitherFor::<${index()}>::either_from(matching)),
-                            Err(e) => e,
-                        },)*
-                    )))
+                fn or_matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::OrArchetypIterator<'r>
+                    where 's: 'r, 'w: 'r
+                {
+                    // FIXME: There could be a strategy as to how we chose which one
+                    // we use here
+                    world.archetypes.indices()
+                        .filter(|&archetyp_id| {
+                            bool_or_else!($($T::match_archetyp(&self.${index()}, world, archetyp_id)),*).is_true()
+                        })
                 }
 
-                fn and_match_entity(
-                    &self,
-                    world: &World,
-                    archetyp_match: &Self::AndArchetypMatch,
-                    entity: EntityIndex,
-                ) -> bool {
-                    $($T::match_entity(&self.${index()}, world, &archetyp_match.${index()}, entity))&&*
-                }
-
-                fn or_match_entity(
-                    &self,
-                    world: &World,
-                    archetyp_match: &Self::OrArchetypMatch,
-                    entity: EntityIndex,
-                ) -> bool {
-                    $(if let Some(matching) = EitherFor::<${index()}>::either_for(archetyp_match) {
-                        $T::match_entity(&self.${index()}, world, matching, entity)
-                    } else )* {
-                        unreachable!()
-                    }
+                fn or_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::OrArchetypMatchBool {
+                    bool_or_else!($($T::match_archetyp(&self.${index()}, world, archetyp_id)),*)
                 }
             }
         };
     }
-    variadics_please::all_tuples!(impl_query_parameter_tuple, 1, 3, T);
+    variadics_please::all_tuples!(impl_query_parameter_tuple, 1, 15, T);
 
     pub trait QueryParameterTupleImmutableImpl: QueryParameterTupleImpl {
-        type AndValue<'a>: Copy;
-        type OrValue<'a>: Copy + EitherOfN;
+        type AndValueIterator<'a>: Iterator<Item = Self::AndValue<'a>>;
+        type OrValueIterator<'a>: Iterator<Item = Self::OrValue<'a>>;
 
-        fn and_get<'s, 'a>(
-            &'s self,
-            world: &'a World,
-            archetyp_match: &Self::AndArchetypMatch,
-            archetyp_id: ArchetypId,
-            entity: EntityIndex,
-        ) -> Self::AndValue<'a>;
-
-        fn or_get<'s, 'a>(
-            &'s self,
-            world: &'a World,
-            archetyp_match: &Self::OrArchetypMatch,
-            archetyp_id: ArchetypId,
-            entity: EntityIndex,
-        ) -> Self::OrValue<'a>;
+        fn and_iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::AndValueIterator<'w>;
+        fn or_iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::OrValueIterator<'w>;
     }
 
     macro_rules! impl_query_parameter_tuple_immutable {
@@ -347,36 +299,30 @@ mod private {
             impl<$($T),*> QueryParameterTupleImmutableImpl for ($($T,)*)
                 where $($T: QueryParameterImmutable,)*
             {
-                type AndValue<'a> = ($($T::Value::<'a>,)*);
-                type OrValue<'a> = either_of!($($T::Value::<'a>),*);
+                type AndValueIterator<'a> = impl Iterator<Item = Self::AndValue<'a>>;
+                type OrValueIterator<'a> = impl Iterator<Item = Self::OrValue<'a>>;
 
-                fn and_get<'s, 'a>(
-                    &'s self,
-                    world: &'a World,
-                    archetyp_match: &Self::AndArchetypMatch,
-                    archetyp_id: ArchetypId,
-                    entity: EntityIndex,
-                ) -> Self::AndValue<'a> {
-                    ($($T::get(&self.${index()}, world, &archetyp_match.${index()}, archetyp_id, entity),)*)
+                fn and_iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::AndValueIterator<'w> {
+                    special_izip!(
+                        $($T::iter_table(&self.${index()}, parameters)),*
+                    )
                 }
 
-                fn or_get<'s, 'a>(
-                    &'s self,
-                    world: &'a World,
-                    archetyp_match: &Self::OrArchetypMatch,
-                    archetyp_id: ArchetypId,
-                    entity: EntityIndex,
-                ) -> Self::OrValue<'a> {
-                    $(if let Some(matching) = EitherFor::<${index()}>::either_for(archetyp_match) {
-                        EitherFor::<${index()}>::either_from($T::get(&self.${index()}, world, matching, archetyp_id, entity))
-                    } else )* {
-                        unreachable!()
-                    }
+                fn or_iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::OrValueIterator<'w> {
+                    let archetyp_id = parameters.archetyp_id;
+                    let either_iter: either_of!($($T::ValueIterator<'w>),*) =
+                        $(if $T::match_archetyp(&self.${index()}, parameters.world, parameters.archetyp_id).is_true() {
+                            EitherFor::<${index()}>::either_from($T::iter_table(&self.${index()}, parameters))
+                        } else )* {
+                            unreachable!()
+                        };
+
+                    either_iter.into_either_iter()
                 }
             }
         };
     }
-    variadics_please::all_tuples!(impl_query_parameter_tuple_immutable, 1, 3, T);
+    variadics_please::all_tuples!(impl_query_parameter_tuple_immutable, 1, 15, T);
 
 }
 use private::*;
@@ -395,50 +341,36 @@ impl<Tuple> QueryParameterImpl for And<Tuple>
     where Tuple: QueryParameterTuple,
 {
     type CreationConfig = Tuple::CreationConfig;
-    type RequiresPerEntityMatchingBool = Tuple::RequiresPerEntityMatchingBool;
-    type ValueMut<'a> = Tuple::AndValueMut<'a>;
-    type ArchetypMatch = Tuple::AndArchetypMatch;
-    type ArchetypMatchError = Tuple::AndArchetypMatchError;
+    type ArchetypIterator<'a> = Tuple::AndArchetypIterator<'a>
+        where Self: 'a;
+    type ArchetypMatchBool = Tuple::AndArchetypMatchBool;
 
-    fn new(world: &World, config: Self::CreationConfig) -> Self {
+    type Value<'a> = Tuple::AndValue<'a>;
+
+    fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
         Self {
-            tuple: Tuple::new(world, config),
+            tuple: Tuple::new(world, creation_cfg),
         }
     }
 
-    fn requires_per_entity_matching(&self) -> Tuple::RequiresPerEntityMatchingBool {
-        self.tuple.requires_per_entity_matching()
+    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
+        where 's: 'r, 'w: 'r
+    {
+        self.tuple.and_matching_archetypes(world)
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<Self::ArchetypMatch, Self::ArchetypMatchError> {
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
         self.tuple.and_match_archetyp(world, archetyp_id)
-    }
-
-    fn match_entity(
-        &self,
-        world: &World,
-        archetyp_match: &Self::ArchetypMatch,
-        entity: EntityIndex,
-    ) -> bool {
-        debug_assert!(self.requires_per_entity_matching().is_true());
-
-        self.tuple.and_match_entity(world, archetyp_match, entity)
     }
 }
 
 impl<Tuple> QueryParameterImmutableImpl for And<Tuple>
     where Tuple: QueryParameterTupleImmutable,
 {
-    type Value<'a> = Tuple::AndValue<'a>;
+    type ValueIterator<'a> = Tuple::AndValueIterator<'a>;
 
-    fn get<'s, 'a>(
-        &'s self,
-        world: &'a World,
-        archetyp_match: &Self::ArchetypMatch,
-        archetyp_id: ArchetypId,
-        entity: EntityIndex,
-    ) -> Self::Value<'a> {
-        self.tuple.and_get(world, archetyp_match, archetyp_id, entity)
+    fn iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
+        self.tuple.and_iter_table(parameters)
     }
 }
 
@@ -453,50 +385,36 @@ impl<Tuple> QueryParameterImpl for Or<Tuple>
     where Tuple: QueryParameterTuple,
 {
     type CreationConfig = Tuple::CreationConfig;
-    type RequiresPerEntityMatchingBool = Tuple::RequiresPerEntityMatchingBool;
-    type ValueMut<'a> = Tuple::OrValueMut<'a>;
-    type ArchetypMatch = Tuple::OrArchetypMatch;
-    type ArchetypMatchError = Tuple::OrArchetypMatchError;
+    type ArchetypIterator<'a> = Tuple::OrArchetypIterator<'a>
+        where Self: 'a;
+    type ArchetypMatchBool = Tuple::OrArchetypMatchBool;
 
-    fn new(world: &World, config: Tuple::CreationConfig) -> Self {
+    type Value<'a> = Tuple::OrValue<'a>;
+
+    fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
         Self {
-            tuple: Tuple::new(world, config),
+            tuple: Tuple::new(world, creation_cfg),
         }
     }
 
-    fn requires_per_entity_matching(&self) -> Tuple::RequiresPerEntityMatchingBool {
-        self.tuple.requires_per_entity_matching()
+    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
+        where 's: 'r, 'w: 'r
+    {
+        self.tuple.or_matching_archetypes(world)
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<Self::ArchetypMatch, Self::ArchetypMatchError> {
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
         self.tuple.or_match_archetyp(world, archetyp_id)
-    }
-
-    fn match_entity(
-        &self,
-        world: &World,
-        archetyp_match: &Self::ArchetypMatch,
-        entity: EntityIndex,
-    ) -> bool {
-        debug_assert!(self.requires_per_entity_matching().is_true());
-
-        self.tuple.or_match_entity(world, archetyp_match, entity)
     }
 }
 
 impl<Tuple> QueryParameterImmutableImpl for Or<Tuple>
     where Tuple: QueryParameterTupleImmutable,
 {
-    type Value<'a> = Tuple::OrValue<'a>;
+    type ValueIterator<'a> = Tuple::OrValueIterator<'a>;
 
-    fn get<'s, 'a>(
-        &'s self,
-        world: &'a World,
-        archetyp_match: &Self::ArchetypMatch,
-        archetyp_id: ArchetypId,
-        entity: EntityIndex,
-    ) -> Self::Value<'a> {
-        self.tuple.or_get(world, archetyp_match, archetyp_id, entity)
+    fn iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
+        self.tuple.or_iter_table(parameters)
     }
 }
 

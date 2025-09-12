@@ -1,6 +1,6 @@
-use super::{ QueryParameterImpl, QueryParameterImmutableImpl };
+use super::{ QueryParameterImpl, QueryParameterImmutableImpl, ImmutableIterParameters };
 use crate::world::{
-    component::{ ComponentEntity }, ArchetypId, Entity, EntityIndex, World
+    component::ComponentEntity, ArchetypId, Entity, World
 };
 
 use utils::prelude::*;
@@ -10,44 +10,34 @@ pub struct EntityHandle;
 
 impl QueryParameterImpl for EntityHandle {
     type CreationConfig = ();
-    type RequiresPerEntityMatchingBool = False;
-    type ValueMut<'a> = Entity;
-    type ArchetypMatch = ();
-    type ArchetypMatchError = !;
+    type ArchetypIterator<'w> = impl Iterator<Item = ArchetypId> + 'w;
+    type ArchetypMatchBool = True;
+
+    type Value<'a> = Entity;
 
     fn new(world: &World, (): ()) -> Self {
-        EntityHandle
+        Self
     }
 
-    fn requires_per_entity_matching(&self) -> False {
-        False
+    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
+        where 's: 'r, 'w: 'r
+    {
+        world.archetypes.indices()
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<(), !> {
-        Ok(())
-    }
-
-    fn match_entity(
-        &self,
-        world: &World,
-        archetyp_match: &Self::ArchetypMatch,
-        entity: EntityIndex,
-    ) -> bool {
-        true
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+        True
     }
 }
 
 impl QueryParameterImmutableImpl for EntityHandle {
-    type Value<'a> = Entity;
+    type ValueIterator<'a> = impl Iterator<Item = Entity>;
 
-    fn get<'s, 'a>(
-        &'s self,
-        world: &'a World,
-        archetyp_match: &Self::ArchetypMatch,
-        archetyp_id: ArchetypId,
-        entity_index: EntityIndex,
-    ) -> Self::Value<'a> {
-        Entity::new(entity_index, world.generation_at_index(entity_index))
+    fn iter_table<'w>(&self, ImmutableIterParameters {
+        world, table_id, ..
+    }: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
+        world.tables[table_id].sparse_set.sparse_indices()
+            .map(|index| Entity::new(index, world.generation_at_index(index)))
     }
 }
 
@@ -56,97 +46,86 @@ pub type Never = super::Not<Always>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ComponentRef {
-    component: ComponentEntity,
-    requires_per_entity_matching: bool,
+    pub(super) component: ComponentEntity,
 }
 
 impl QueryParameterImpl for ComponentRef {
     type CreationConfig = ComponentEntity;
-    type RequiresPerEntityMatchingBool = bool;
-    type ValueMut<'a> = dynvec::DynVecValueRef<'a>;
-    type ArchetypMatch = usize;
-    type ArchetypMatchError = ();
+    type ArchetypIterator<'w> = impl Iterator<Item = ArchetypId>;
+    type ArchetypMatchBool = Bool;
+
+    type Value<'a> = dynvec::DynVecValueRef<'a>;
 
     fn new(world: &World, component: ComponentEntity) -> Self {
+        // TODO
+        assert!(world.component_fragments_tables(component));
         Self {
             component,
-            requires_per_entity_matching: !world.component_fragments_tables(component),
         }
     }
 
-    fn requires_per_entity_matching(&self) -> bool {
-        self.requires_per_entity_matching
+    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
+        where 's: 'r, 'w: 'r
+    {
+        let comp = self.component;
+        world.archetypes.iter()
+            .filter(move |(_, archetyp)| archetyp.components.has(comp))
+            .map(|(aid, _)| aid)
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<usize, ()> {
-        Ok(world.archetypes[archetyp_id].components.index_of(self.component).ok_or(())?)
-    }
-
-    fn match_entity(
-        &self,
-        world: &World,
-        _: &usize,
-        entity: EntityIndex,
-    ) -> bool {
-        debug_assert!(self.requires_per_entity_matching);
-        world.archetypes[world.entities_archetypes[entity]]
-            .components.has(self.component)
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+        world.archetypes[archetyp_id].components.has(self.component).into()
     }
 }
 
 impl QueryParameterImmutableImpl for ComponentRef {
-    type Value<'a> = dynvec::DynVecValueRef<'a>;
+    type ValueIterator<'a> = impl Iterator<Item = dynvec::DynVecValueRef<'a>>;
 
-    fn get<'s, 'a>(
-        &'s self,
-        world: &'a World,
-        &component_index: &Self::ArchetypMatch,
-        archetyp_id: ArchetypId,
-        entity: EntityIndex,
-    ) -> Self::Value<'a> {
-        world.tables[world.archetypes[archetyp_id].table_id].sparse_set
-            .get(entity).expect("Is inside")
-            .for_component(component_index)
+    fn iter_table<'w>(&self, ImmutableIterParameters {
+        world, table_id, ..
+    }: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
+        // TODO
+        assert!(world.component_fragments_tables(self.component));
+
+        let Some(comp_idx) = world.tables[table_id].table_components.index_of(self.component)
+        else { unreachable!() };
+
+        world.tables[table_id].sparse_set.dense_values()
+            .column(comp_idx).iter()
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct ComponentRefMut {
-    component: ComponentEntity,
-    requires_per_entity_matching: bool,
+    pub(super) component: ComponentEntity,
 }
 
 impl QueryParameterImpl for ComponentRefMut {
-    type RequiresPerEntityMatchingBool = bool;
     type CreationConfig = ComponentEntity;
-    type ValueMut<'a> = dynvec::DynVecValueRefMut<'a>;
-    type ArchetypMatch = usize;
-    type ArchetypMatchError = ();
+    type ArchetypIterator<'w> = impl Iterator<Item = ArchetypId> + 'w;
+    type ArchetypMatchBool = Bool;
+
+    type Value<'a> = dynvec::DynVecValueRefMut<'a>;
 
     fn new(world: &World, component: ComponentEntity) -> Self {
+        // TODO
+        assert!(world.component_fragments_tables(component));
         Self {
             component,
-            requires_per_entity_matching: !world.component_fragments_tables(component),
         }
     }
 
-    fn requires_per_entity_matching(&self) -> bool {
-        self.requires_per_entity_matching
+    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
+        where 's: 'r, 'w: 'r
+    {
+        let comp = self.component;
+        world.archetypes.iter()
+            .filter(move |(_, archetyp)| archetyp.components.has(comp))
+            .map(|(aid, _)| aid)
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<Self::ArchetypMatch, ()> {
-        Ok(world.archetypes[archetyp_id].components.index_of(self.component).ok_or(())?)
-    }
-
-    fn match_entity(
-        &self,
-        world: &World,
-        archetyp_match: &Self::ArchetypMatch,
-        entity: EntityIndex,
-    ) -> bool {
-        debug_assert!(self.requires_per_entity_matching);
-        world.archetypes[world.entities_archetypes[entity]]
-            .components.has(self.component)
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+        world.archetypes[archetyp_id].components.has(self.component).into()
     }
 }
 

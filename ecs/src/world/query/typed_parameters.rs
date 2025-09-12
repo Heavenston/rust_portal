@@ -1,14 +1,14 @@
 use super::{
     QueryParameterImpl,
     QueryParameterImmutableImpl,
-    runtime_parameters::*
+    ImmutableIterParameters,
+    runtime_parameters::*,
 };
-use crate::world::{
-    component::{ Component }, ArchetypId, EntityIndex, World
-};
+use crate::world::{ ArchetypId, World, Component, };
 
-use std::marker::PhantomData;
+use std::{iter::empty, marker::PhantomData};
 use derive_where::derive_where;
+use utils::prelude::*;
 
 #[derive_where(Debug, Clone, Copy)]
 pub struct Ref<C>
@@ -23,51 +23,50 @@ impl<C> QueryParameterImpl for Ref<C>
     where C: Component,
 {
     type CreationConfig = ();
-    type RequiresPerEntityMatchingBool = bool;
-    type ValueMut<'a> = &'a C;
-    type ArchetypMatch = <ComponentRef as QueryParameterImpl>::ArchetypMatch;
-    type ArchetypMatchError = ();
+    type ArchetypIterator<'w> = impl Iterator<Item = ArchetypId> + 'w;
+    type ArchetypMatchBool = Bool;
+
+    type Value<'a> = &'a C;
 
     fn new(world: &World, (): ()) -> Self {
         Self {
             _component_type: PhantomData,
-            child: world.try_component::<C>().map(|component| ComponentRef::new(world, component)),
+            child: world.try_component::<C>().map(|c| ComponentRef::new(world, c)),
         }
     }
 
-    fn requires_per_entity_matching(&self) -> bool {
-        self.child.is_some_and(|has_component| has_component.requires_per_entity_matching())
+    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
+        where 's: 'r, 'w: 'r
+    {
+        self.child.as_ref().map(|child| child.matching_archetypes(world))
+            .left_or(empty())
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<usize, ()> {
-        self.child.ok_or(())?.match_archetyp(world, archetyp_id)
-    }
-
-    fn match_entity(
-        &self,
-        world: &World,
-        matched: &Self::ArchetypMatch,
-        entity: EntityIndex,
-    ) -> bool {
-        self.child.is_some_and(|has_component| has_component.match_entity(world, matched, entity))
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+        self.child.is_some_and(|child| child.match_archetyp(world, archetyp_id).is_true()).into()
     }
 }
 
 impl<C> QueryParameterImmutableImpl for Ref<C>
     where C: Component,
 {
-    type Value<'a> = &'a C;
+    type ValueIterator<'w> = impl Iterator<Item = &'w C>;
 
-    fn get<'s, 'a>(
-        &'s self,
-        world: &'a World,
-        matched: &Self::ArchetypMatch,
-        archetyp_id: ArchetypId,
-        entity: EntityIndex,
-    ) -> Self::Value<'a> {
-        self.child.as_ref().unwrap()
-            .get(world, matched, archetyp_id, entity)
-            .as_typed::<C>().expect("Must be the correct type")
+    fn iter_table<'w>(&self, ImmutableIterParameters {
+        world, table_id, ..
+    }: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
+        self.child.as_ref().map(|child| {
+            // TODO
+            assert!(world.component_fragments_tables(child.component));
+
+            let Some(comp_idx) = world.tables[table_id].table_components.index_of(child.component)
+            else { unreachable!() };
+
+        world.tables[table_id].sparse_set.dense_values()
+            .column(comp_idx).typed::<C>()
+            .expect("World::try_component should return components with the correct type")
+            .as_slice().iter()
+        }).left_or(empty())
     }
 }
 
@@ -86,32 +85,26 @@ impl<C> QueryParameterImpl for RefMut<C>
     where C: Component,
 {
     type CreationConfig = ();
-    type RequiresPerEntityMatchingBool = bool;
-    type ValueMut<'a> = &'a mut C;
-    type ArchetypMatch = <ComponentRefMut as QueryParameterImpl>::ArchetypMatch;
-    type ArchetypMatchError = ();
+    type ArchetypIterator<'w> = impl Iterator<Item = ArchetypId> + 'w;
+    type ArchetypMatchBool = Bool;
+
+    type Value<'a> = &'a C;
 
     fn new(world: &World, (): ()) -> Self {
         Self {
             _component_type: PhantomData,
-            child: world.try_component::<C>().map(|component| ComponentRefMut::new(world, component)),
+            child: world.try_component::<C>().map(|c| ComponentRefMut::new(world, c)),
         }
     }
 
-    fn requires_per_entity_matching(&self) -> bool {
-        self.child.is_some_and(|has_component| has_component.requires_per_entity_matching())
+    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
+        where 's: 'r, 'w: 'r
+    {
+        self.child.as_ref().map(|child| child.matching_archetypes(world))
+            .left_or(empty())
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Result<usize, ()> {
-        self.child.ok_or(())?.match_archetyp(world, archetyp_id)
-    }
-
-    fn match_entity(
-        &self,
-        world: &World,
-        matched: &Self::ArchetypMatch,
-        entity: EntityIndex,
-    ) -> bool {
-        self.child.is_some_and(|has_component| has_component.match_entity(world, matched, entity))
+    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+        self.child.is_some_and(|child| child.match_archetyp(world, archetyp_id).is_true()).into()
     }
 }
