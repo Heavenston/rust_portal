@@ -61,11 +61,57 @@ macro_rules! impl_either_try_into {
     }
 }
 
+macro_rules! impl_either_iterator {
+    ($name: ident; $first_letter: ident $(,$letter:ident)*) => {
+        impl<$first_letter $(, $letter)*> Iterator for $name<$first_letter $(,$letter)*>
+            where $first_letter: Iterator,
+                  $($letter: Iterator<Item = <$first_letter as Iterator>::Item>,)*
+        {
+            type Item = <$first_letter as Iterator>::Item;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                match self {
+                    Self::$first_letter(val) => val.next(),
+                    $(
+                        Self::$letter(val) => val.next(),
+                    )*
+                }
+            }
+
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                match self {
+                    Self::$first_letter(val) => val.size_hint(),
+                    $(
+                        Self::$letter(val) => val.size_hint(),
+                    )*
+                }
+            }
+        }
+
+        impl<$first_letter $(, $letter)*> ExactSizeIterator for $name<$first_letter $(,$letter)*>
+            where $first_letter: ExactSizeIterator + Iterator,
+                  $($letter: ExactSizeIterator + Iterator<Item = <$first_letter as Iterator>::Item>,)*
+        { }
+    };
+}
+
 macro_rules! impl_either {
     ($name: ident; $($letter: ident),*) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         pub enum $name<$($letter,)*> {
             $($letter($letter)),*
+        }
+
+        impl<$($letter,)*> $name<$($letter,)*> {
+            pub fn into_either_iter(self) -> impl Iterator<Item = $name<$($letter::Item,)*>>
+                where $($letter: Iterator,)*
+            {
+                match self {
+                    $(
+                        Self::$letter(val) => $name::$letter(val.map($name::$letter)),
+                    )*
+                }
+            }
         }
 
         impl<S> $name<$(ignore!($letter, S)),*> {
@@ -89,6 +135,8 @@ macro_rules! impl_either {
                 }
             }
         }
+
+        impl_either_iterator!($name; $($letter),*);
 
         impl_either_try_into!($name ! ; $($letter),*);
     };
