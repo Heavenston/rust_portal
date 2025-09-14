@@ -2,11 +2,12 @@ use crate::partial_bool::{ PartialBool, BoolNot, False, True };
 
 pub trait SomePartialOption {
     type IsSome: PartialBool;
+    type And<O: SomePartialOption>: SomePartialOption;
     type Using<V>: PartialOption<V>;
 }
 
-pub trait PartialOption<T>: SomePartialOption {
-    type Zip<V, O: PartialOption<V>>: PartialOption<(T, V)>;
+pub trait PartialOption<T>: Sized + SomePartialOption {
+    type Zip<V, O: PartialOption<V>>: PartialOption<(T, V)> = <Self::And<O> as SomePartialOption>::Using::<(T, V)>;
 
     fn partial_is_some(&self) -> Self::IsSome;
 
@@ -29,12 +30,11 @@ pub enum AlwaysOption<T> {
 
 impl<T> SomePartialOption for AlwaysOption<T> {
     type IsSome = True;
+    type And<O: SomePartialOption> = O;
     type Using<V> = AlwaysOption<V>;
 }
 
 impl<T> PartialOption<T> for AlwaysOption<T> {
-    type Zip<V, O: PartialOption<V>> = O::Using::<(T, V)>;
-
     fn partial_is_some(&self) -> Self::IsSome {
         True
     }
@@ -66,12 +66,11 @@ pub enum NeverOption {
 
 impl SomePartialOption for NeverOption {
     type IsSome = False;
+    type And<O: SomePartialOption> = NeverOption;
     type Using<V> = NeverOption;
 }
 
 impl<T> PartialOption<T> for NeverOption {
-    type Zip<V, O: PartialOption<V>> = NeverOption;
-
     fn partial_is_some(&self) -> Self::IsSome {
         False
     }
@@ -99,12 +98,11 @@ type FullOption<T> = Option<T>;
 
 impl<T> SomePartialOption for FullOption<T> {
     type IsSome = bool;
+    type And<O: SomePartialOption> = Option<()>;
     type Using<V> = Option<V>;
 }
 
 impl<T> PartialOption<T> for FullOption<T> {
-    type Zip<V, O: PartialOption<V>> = Option<(T, V)>;
-
     fn partial_is_some(&self) -> Self::IsSome {
         Option::is_some(self)
     }
