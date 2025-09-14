@@ -46,6 +46,10 @@ impl<T, I> IndexMap<T, I> {
         }
     }
 
+    pub fn as_slice(&self) -> &[T] {
+        &self.vec
+    }
+
     pub fn last(&self) -> Option<&T> {
         self.vec.last()
     }
@@ -130,6 +134,21 @@ impl<T, I> IndexMap<T, I>
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (I, &mut T)> + ExactSizeIterator + DoubleEndedIterator {
         self.vec.iter_mut().enumerate()
             .map(|(i, val)| (I::from_usize(i), val))
+    }
+
+    pub fn get_sorted_disjoint_mut<D>(&mut self, indices: impl Iterator<Item = (D, I)>) -> impl Iterator<Item = (D, I, &mut T)> {
+        let mut offset: usize = 0;
+        let mut current = self.vec.as_mut_slice();
+
+        indices.map(move |(data, index)| {
+            let i = index.to_usize() - offset;
+
+            let (l, r) = std::mem::take(&mut current).split_at_mut(i + 1);
+            current = r;
+            offset += i + 1;
+
+            (data, index, &mut l[i])
+        })
     }
 }
 
@@ -230,5 +249,27 @@ mod tests {
             *v = 2;
         }
         assert_eq!(m.get(0usize), Some(&2));
+    }
+
+    #[test]
+    fn get_all_disjoint_mut() {
+        let mut m: IndexMap<i32, i32> = IndexMap::new();
+        m.extend_until(8, || -1);
+        m.set_or_push(0, 0);
+        m.set_or_push(3, 6);
+        m.set_or_push(8, 16);
+        m.set_or_push(2, 4);
+
+        let p = m.get_sorted_disjoint_mut([0, 3, 8].into_iter().map(|v| ((), v)))
+            .map(|((), k, v)| (k, *v)).collect::<Vec::<_>>();
+
+        assert_eq!(
+            p,
+            vec![
+                (0, 0),
+                (3, 6),
+                (8, 16),
+            ]
+        );
     }
 }

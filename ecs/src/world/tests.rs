@@ -1200,6 +1200,22 @@ mod queries {
     }
 
     #[test]
+    fn ref_simple_both() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::Ref<TestComponent1>, q::Ref<TestComponent2>)>>::new(&ctx.world);
+
+        assert_eq!(
+            query.iter(&ctx.world)
+            .assert_is_sorted_by_key(|&(entity, _, _)| (ctx.world.entities_archetypes[entity.index()], entity.index()))
+            .collect_vec(),
+            empty::<(Entity, (&TestComponent1, &TestComponent2))>()
+                .chain(zip(ctx.with_both, repeat((&TestComponent1(50), &TestComponent2(99.)))))
+            .map(|(a, (b, c))| (a, b, c))
+            .collect_vec(),
+        );
+    }
+
+    #[test]
     fn ref_and_has() {
         let ctx = create_ctx();
         let query = q::Query::<q::And<(q::EntityHandle, q::Has<TestComponent1>, q::Ref<TestComponent2>)>>::new(&ctx.world);
@@ -1225,6 +1241,60 @@ mod queries {
             .collect_vec(),
             empty::<(Entity, (), &TestComponent2)>()
                 .chain(izip!(ctx.with_test_2, repeat(()), repeat(&TestComponent2(88.))))
+            .collect_vec(),
+        );
+    }
+
+    #[test]
+    fn ref_mut_simple_1() {
+        let mut ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::RefMut<TestComponent1>)>>::new(&ctx.world);
+
+        let entities_archetypes = ctx.world.entities_archetypes.clone();
+        assert_eq!(
+            query.iter_mut(&mut ctx.world)
+            .assert_is_sorted_by_key(|(entity, _)| (entities_archetypes[entity.index()], entity.index()))
+            .map(|(e, &mut r)| (e, r))
+            .collect_vec(),
+            empty::<(Entity, TestComponent1)>()
+                .chain(zip(ctx.with_test_1, repeat(TestComponent1(42))))
+                .chain(zip(ctx.with_both, repeat(TestComponent1(50))))
+            .collect_vec(),
+        );
+    }
+
+    #[test]
+    fn ref_mut_simple_2() {
+        let mut ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::RefMut<TestComponent2>)>>::new(&ctx.world);
+
+        let entities_archetypes = ctx.world.entities_archetypes.clone();
+        assert_eq!(
+            query.iter_mut(&mut ctx.world)
+            .assert_is_sorted_by_key(|(entity, _)| (entities_archetypes[entity.index()], entity.index()))
+            .map(|(e, &mut r)| (e, r))
+            .collect_vec(),
+            empty::<(Entity, TestComponent2)>()
+                .chain(zip(ctx.with_test_2, repeat(TestComponent2(88.))))
+                .chain(zip(ctx.with_both, repeat(TestComponent2(99.))))
+            .collect_vec(),
+        );
+    }
+
+    #[test]
+    fn ref_mut_simple_both() {
+        let mut ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::RefMut<TestComponent1>, q::RefMut<TestComponent2>)>>::new(&ctx.world);
+
+        let entities_archetypes = ctx.world.entities_archetypes.clone();
+        assert_eq!(
+            query.iter_mut(&mut ctx.world)
+            .assert_is_sorted_by_key(|(entity, _, _)| (entities_archetypes[entity.index()], entity.index()))
+            .map(|(e, &mut r1, &mut r2)| (e, r1, r2))
+            .collect_vec(),
+            empty::<(Entity, (TestComponent1, TestComponent2))>()
+                .chain(zip(ctx.with_both, repeat((TestComponent1(50), TestComponent2(99.)))))
+            .map(|(a, (b, c))| (a, b, c))
             .collect_vec(),
         );
     }

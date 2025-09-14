@@ -1,16 +1,29 @@
-//! Implementing here [`QueryParameter`]s that modify other parameters
-
-use std::iter::{ repeat_n, repeat_with, RepeatN };
-
 use super::{
-    QueryParameterImpl, QueryParameterImmutableImpl,
-    QueryParameter, QueryParameterImmutable,
-    ImmutableIterParameters,
+    QueryParameterImpl, QueryParameterImmutableImpl, QueryParameter,
+    ImmutableIterParameters, ImmutableWorldRef, ColumnSelectParameters,
+    MutableIterParameters,
 };
 use crate::world::{ ArchetypId, World };
 
+use std::iter::{ repeat_n, repeat_with, empty, Empty, RepeatN };
 use utils::prelude::*;
-use utils::itertools::izip;
+use utils::itertools::{ izip, chain };
+
+// FIXME: Remove its use here (change iter_table to use an ImmutableWorldRef)
+macro_rules! borrow_world {
+    ($world: expr) => {
+        ImmutableWorldRef {
+            entity_storage: &$world.entity_storage,
+            entities_archetypes: &$world.entities_archetypes,
+            archetypes: &$world.archetypes,
+            components_to_archetypes: &$world.components_to_archetypes,
+            components_typeid_to_entity: &$world.components_typeid_to_entity,
+            components_entity_to_typeid: &$world.components_entity_to_typeid,
+            components_set_to_archetyp: &$world.components_set_to_archetyp,
+            components_set_to_table: &$world.components_set_to_table,
+        }
+    };
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Optional<C>
@@ -23,10 +36,12 @@ impl<C> QueryParameterImpl for Optional<C>
     where C: QueryParameterImpl,
 {
     type CreationConfig = C::CreationConfig;
-    type ArchetypIterator<'a> = impl Iterator<Item = ArchetypId> + 'a
-        where Self: 'a;
+    type ArchetypIterator<'s, 'w> = impl Iterator<Item = ArchetypId> + use<'w, C>;
     type ArchetypMatchBool = True;
 
+    type TableColumns = Either<C::TableColumns, Empty<usize>>;
+
+    type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = impl Iterator<Item = Self::Value<'a>>;
     type Value<'a> = Option<C::Value<'a>>;
 
     fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
@@ -35,14 +50,32 @@ impl<C> QueryParameterImpl for Optional<C>
         }
     }
 
-    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
-        where 's: 'r, 'w: 'r
-    {
+    fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
         world.archetypes.indices()
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+    fn match_archetyp(&self, world: &ImmutableWorldRef<'_>, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
         True
+    }
+
+    fn table_columns(&self, parameters: &ColumnSelectParameters<'_>) -> Self::TableColumns {
+        self.child.match_archetyp(&parameters.world, parameters.archetyp_id).is_true()
+            .then(|| self.child.table_columns(parameters))
+            .left_or(empty())
+    }
+
+    fn iter_table_mut<'w, I>(&self, parameters: &mut MutableIterParameters<'w, I>) -> Self::ValueMutIterator<'w, I>
+        where I: Iterator<Item = &'w mut dynvec::DynVec>,
+    {
+        if self.child.match_archetyp(&parameters.world, parameters.archetyp_id).is_true() {
+            Either::Left(self.child.iter_table_mut(parameters).map(Some))
+        }
+        else {
+            Either::Right(
+                repeat_with(|| None)
+                    .take(parameters.table_entities.len())
+            )
+        }
     }
 }
 
@@ -54,7 +87,7 @@ impl<C> QueryParameterImmutableImpl for Optional<C>
     fn iter_table<'w>(&self, parameters @ ImmutableIterParameters {
         world, archetyp_id, table_id, ..
     }: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
-        self.child.match_archetyp(world, archetyp_id).is_true()
+        self.child.match_archetyp(&borrow_world!(world), archetyp_id).is_true()
             .then(|| self.child.iter_table(parameters).map(Some))
             .left_or_else(||
                 repeat_with(|| None)
@@ -74,10 +107,12 @@ impl<C> QueryParameterImpl for NoFetch<C>
     where C: QueryParameterImpl,
 {
     type CreationConfig = C::CreationConfig;
-    type ArchetypIterator<'w> = C::ArchetypIterator<'w>
-        where Self: 'w;
+    type ArchetypIterator<'s, 'w> = C::ArchetypIterator<'s, 'w>;
     type ArchetypMatchBool = C::ArchetypMatchBool;
 
+    type TableColumns = Empty<usize>;
+
+    type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = RepeatN<()>;
     type Value<'a> = ();
 
     fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
@@ -86,14 +121,22 @@ impl<C> QueryParameterImpl for NoFetch<C>
         }
     }
 
-    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
-        where 's: 'r, 'w: 'r
-    {
+    fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
         C::matching_archetypes(&self.child, world)
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+    fn match_archetyp(&self, world: &ImmutableWorldRef<'_>, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
         C::match_archetyp(&self.child, world, archetyp_id)
+    }
+
+    fn table_columns(&self, parameters: &ColumnSelectParameters<'_>) -> Self::TableColumns {
+        empty()
+    }
+
+    fn iter_table_mut<'w, I>(&self, parameters: &mut MutableIterParameters<'w, I>) -> Self::ValueMutIterator<'w, I>
+        where I: Iterator<Item = &'w mut dynvec::DynVec>,
+    {
+        repeat_n((), parameters.table_entities.len())
     }
 }
 
@@ -120,10 +163,12 @@ impl<C> QueryParameterImpl for Not<C>
     where C: QueryParameterImpl,
 {
     type CreationConfig = C::CreationConfig;
-    type ArchetypIterator<'w> = impl Iterator<Item = ArchetypId> + 'w
-        where Self: 'w;
+    type ArchetypIterator<'s, 'w> = impl Iterator<Item = ArchetypId>;
     type ArchetypMatchBool = BoolNot<C::ArchetypMatchBool>;
 
+    type TableColumns = Empty<usize>;
+
+    type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = RepeatN<()>;
     type Value<'a> = ();
 
     fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
@@ -132,15 +177,25 @@ impl<C> QueryParameterImpl for Not<C>
         }
     }
 
-    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
-        where 's: 'r, 'w: 'r
-    {
+    fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
+        let world = world.reborrow();
+
         world.archetypes.indices()
-            .filter(|&archetyp_id| self.match_archetyp(world, archetyp_id).is_true())
+            .filter(move |&archetyp_id| self.match_archetyp(&world, archetyp_id).is_true())
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+    fn match_archetyp(&self, world: &ImmutableWorldRef<'_>, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
         C::match_archetyp(&self.child, world, archetyp_id).not()
+    }
+
+    fn table_columns(&self, parameters: &ColumnSelectParameters<'_>) -> Self::TableColumns {
+        empty()
+    }
+
+    fn iter_table_mut<'w, I>(&self, parameters: &mut MutableIterParameters<'w, I>) -> Self::ValueMutIterator<'w, I>
+        where I: Iterator<Item = &'w mut dynvec::DynVec>,
+    {
+        repeat_n((), parameters.table_entities.len())
     }
 }
 
@@ -157,265 +212,198 @@ impl<C> QueryParameterImmutableImpl for Not<C>
     }
 }
 
-mod private {
-    use super::*;
+macro_rules! bool_or_all {
+    ($first: ty) => { Bool<<$first as PartialBool>::T, <$first as PartialBool>::F> };
+    ($first: ty $(, $rest: ty)+) => {
+        BoolOr<$first, bool_or_all!($($rest),*)>
+    };
+}
 
-    pub trait QueryParameterTupleImpl: Sized {
-        type CreationConfig;
+macro_rules! bool_and_all {
+    ($first: ty) => { Bool<<$first as PartialBool>::T, <$first as PartialBool>::F> };
+    ($first: ty $(, $rest: ty)+) => {
+        BoolAnd<$first, bool_and_all!($($rest),*)>
+    };
+}
 
-        type AndArchetypIterator<'a>: Iterator<Item = ArchetypId> + 'a
-            where Self: 'a;
-        type AndArchetypMatchBool: PartialBool;
+macro_rules! bool_or_else {
+    () => { False.into_bool() };
+    ($first: expr) => { $first.into_bool() };
+    ($first: expr $(, $rest: expr)+) => {
+        PartialBool::or_else($first, || bool_or_else!($($rest),*))
+    };
+}
 
-        type OrArchetypIterator<'a>: Iterator<Item = ArchetypId> + 'a
-            where Self: 'a;
-        type OrArchetypMatchBool: PartialBool;
+macro_rules! bool_and_then {
+    () => { True.into_bool() };
+    ($first: expr) => { $first.into_bool() };
+    ($first: expr $(, $rest: expr)+) => {
+        PartialBool::and_then($first, || bool_and_then!($($rest),*))
+    };
+}
 
-        type AndValue<'a>;
-        type OrValue<'a>;
+macro_rules! bool_and_then_skip_first {
+    ($first: expr $(, $rest: expr)*) => {
+        bool_and_then!($($rest),*)
+    };
+}
 
-        fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self;
+// Like itertools::izip but when there is only one element it wraps it
+// into a single element tuple
+macro_rules! special_izip {
+    ($val: expr) => { ($val).map(|val| (val,)) };
+    ($($vals:expr),*) => { izip!($($vals),*) };
+}
 
-        fn and_matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::AndArchetypIterator<'r>
-            where 's: 'r, 'w: 'r;
-        fn and_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::AndArchetypMatchBool;
+// macro_rules! skip_first {
+//     ($i: tt $(, $T:tt)*) => { $($T),* };
+// }
 
-        fn or_matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::OrArchetypIterator<'r>
-            where 's: 'r, 'w: 'r;
-        fn or_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::OrArchetypMatchBool;
-    }
+#[derive(Default, Debug, Clone, Copy)]
+pub struct And<Tuple> {
+    tuple: Tuple,
+}
 
-    macro_rules! bool_or_all {
-        ($first: ty) => { Bool<<$first as PartialBool>::T, <$first as PartialBool>::F> };
-        ($first: ty $(, $rest: ty)+) => {
-            BoolOr<$first, bool_or_all!($($rest),*)>
-        };
-    }
+macro_rules! impl_and {
+    ($($T:ident),*) => {
+        impl<$($T,)*> QueryParameterImpl for And<($($T,)*)>
+            where $($T: QueryParameterImpl,)*
+        {
+            type CreationConfig = ($($T::CreationConfig,)*);
+            type ArchetypIterator<'s, 'w> = impl Iterator<Item = ArchetypId>;
+            type ArchetypMatchBool = bool_and_all!($($T::ArchetypMatchBool),*);
 
-    macro_rules! bool_and_all {
-        ($first: ty) => { Bool<<$first as PartialBool>::T, <$first as PartialBool>::F> };
-        ($first: ty $(, $rest: ty)+) => {
-            BoolAnd<$first, bool_and_all!($($rest),*)>
-        };
-    }
+            type TableColumns = impl Iterator<Item = usize>;
 
-    macro_rules! bool_or_else {
-        () => { False.into_bool() };
-        ($first: expr) => { $first.into_bool() };
-        ($first: expr $(, $rest: expr)+) => {
-            PartialBool::or_else($first, || bool_or_else!($($rest),*))
-        };
-    }
+            type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = impl Iterator<Item = Self::Value<'a>>;
+            type Value<'a> = ($($T::Value<'a>,)*);
 
-    macro_rules! bool_and_then {
-        () => { True.into_bool() };
-        ($first: expr) => { $first.into_bool() };
-        ($first: expr $(, $rest: expr)+) => {
-            PartialBool::and_then($first, || bool_and_then!($($rest),*))
-        };
-    }
-
-    macro_rules! bool_and_then_skip_first {
-        ($first: expr $(, $rest: expr)*) => {
-            bool_and_then!($($rest),*)
-        };
-    }
-
-    // Like itertools::izip but when there is only one element it wraps it
-    // into a single element tuple
-    macro_rules! special_izip {
-        ($val: expr) => { ($val).map(|val| (val,)) };
-        ($($vals:expr),*) => { izip!($($vals),*) };
-    }
-
-    // macro_rules! skip_first {
-    //     ($i: tt $(, $T:tt)*) => { $($T),* };
-    // }
-
-    macro_rules! impl_query_parameter_tuple {
-        ($($T:ident),*) => {
-            impl<$($T),*> QueryParameterTupleImpl for ($($T,)*)
-                where $($T: QueryParameter,)*
-            {
-                type CreationConfig = ($($T::CreationConfig,)*);
-
-                type AndArchetypIterator<'a> = impl Iterator<Item = ArchetypId>
-                    where Self: 'a;
-                type AndArchetypMatchBool = bool_and_all!($($T::ArchetypMatchBool),*);
-
-                type OrArchetypIterator<'a> = impl Iterator<Item = ArchetypId>
-                    where Self: 'a;
-                type OrArchetypMatchBool = bool_or_all!($($T::ArchetypMatchBool),*);
-
-                type AndValue<'a> = ($($T::Value<'a>,)*);
-                type OrValue<'a> = either_of!($($T::Value<'a>),*);
-
-                fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
-                    ($($T::new(world, creation_cfg.${index()}),)*)
-                }
-
-                fn and_matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::AndArchetypIterator<'r>
-                    where 's: 'r, 'w: 'r
-                {
-                    // FIXME: There could be a strategy as to how we chose which one
-                    // we use here
-                    self.0.matching_archetypes(world)
-                        .filter(|&archetyp_id| bool_and_then_skip_first!($($T::match_archetyp(&self.${index()}, world, archetyp_id)),*).is_true())
-                }
-
-                fn and_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::AndArchetypMatchBool {
-                    bool_and_then!($($T::match_archetyp(&self.${index()}, world, archetyp_id)),*)
-                }
-
-                fn or_matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::OrArchetypIterator<'r>
-                    where 's: 'r, 'w: 'r
-                {
-                    // FIXME: There could be a strategy as to how we chose which one
-                    // we use here
-                    world.archetypes.indices()
-                        .filter(|&archetyp_id| {
-                            bool_or_else!($($T::match_archetyp(&self.${index()}, world, archetyp_id)),*).is_true()
-                        })
-                }
-
-                fn or_match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::OrArchetypMatchBool {
-                    bool_or_else!($($T::match_archetyp(&self.${index()}, world, archetyp_id)),*)
+            fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
+                Self {
+                    tuple: ($($T::new(world, creation_cfg.${index()}),)*),
                 }
             }
-        };
-    }
-    variadics_please::all_tuples!(impl_query_parameter_tuple, 1, 15, T);
 
-    pub trait QueryParameterTupleImmutableImpl: QueryParameterTupleImpl {
-        type AndValueIterator<'a>: Iterator<Item = Self::AndValue<'a>>;
-        type OrValueIterator<'a>: Iterator<Item = Self::OrValue<'a>>;
+            fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
+                let world = world.reborrow();
 
-        fn and_iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::AndValueIterator<'w>;
-        fn or_iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::OrValueIterator<'w>;
-    }
+                // FIXME: There could be a strategy as to how we chose which one
+                // we use here
+                self.tuple.0.matching_archetypes(&world)
+                    .filter(move |&archetyp_id| bool_and_then_skip_first!($($T::match_archetyp(&self.tuple.${index()}, &world, archetyp_id)),*).is_true())
+            }
 
-    macro_rules! impl_query_parameter_tuple_immutable {
-        ($($T:ident),*) => {
-            impl<$($T),*> QueryParameterTupleImmutableImpl for ($($T,)*)
-                where $($T: QueryParameterImmutable,)*
+            fn match_archetyp(&self, world: &ImmutableWorldRef<'_>, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+                bool_and_then!($($T::match_archetyp(&self.tuple.${index()}, world, archetyp_id)),*)
+            }
+
+            fn table_columns(&self, parameters: &ColumnSelectParameters<'_>) -> Self::TableColumns {
+                chain!($($T::table_columns(&self.tuple.${index()}, parameters)),*)
+            }
+ 
+            fn iter_table_mut<'w, I>(&self, parameters: &mut MutableIterParameters<'w, I>) -> Self::ValueMutIterator<'w, I>
+                where I: Iterator<Item = &'w mut dynvec::DynVec>,
             {
-                type AndValueIterator<'a> = impl Iterator<Item = Self::AndValue<'a>>;
-                type OrValueIterator<'a> = impl Iterator<Item = Self::OrValue<'a>>;
+                special_izip!($($T::iter_table_mut(&self.tuple.${index()}, parameters)),*)
+            }
+        }
 
-                fn and_iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::AndValueIterator<'w> {
-                    special_izip!(
-                        $($T::iter_table(&self.${index()}, parameters)),*
+        impl<$($T,)*> QueryParameterImmutableImpl for And<($($T,)*)>
+            where $($T: QueryParameterImmutableImpl,)*
+        {
+            type ValueIterator<'a> = impl Iterator<Item = Self::Value<'a>>;
+
+            fn iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
+                special_izip!($($T::iter_table(&self.tuple.${index()}, parameters)),*)
+            }
+        }
+    };
+}
+variadics_please::all_tuples!(impl_and, 1, 3, T);
+
+#[derive(Default, Debug, Clone, Copy)]
+pub struct Or<Tuple> {
+    tuple: Tuple,
+}
+
+macro_rules! impl_or {
+    ($($T:ident),*) => {
+        impl<$($T,)*> QueryParameterImpl for Or<($($T,)*)>
+            where $($T: QueryParameterImpl,)*
+        {
+            type CreationConfig = ($($T::CreationConfig,)*);
+            type ArchetypIterator<'s, 'w> = impl Iterator<Item = ArchetypId>;
+            type ArchetypMatchBool = bool_or_all!($($T::ArchetypMatchBool),*);
+
+            type TableColumns = either_of!($($T::TableColumns),*);
+
+            type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = EitherIterator<either_of!($($T::ValueMutIterator<'a, I>),*)>;
+            type Value<'a> = either_of!($($T::Value<'a>),*);
+
+            fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
+                Self {
+                    tuple: ($($T::new(world, creation_cfg.${index()}),)*),
+                }
+            }
+
+            fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
+                let world = world.reborrow();
+
+                // FIXME: Better algorithm ?
+                world.archetypes.indices()
+                    .filter(move |&archetyp_id| {
+                        bool_or_else!($($T::match_archetyp(&self.tuple.${index()}, &world, archetyp_id)),*).is_true()
+                    })
+            }
+
+            fn match_archetyp(&self, world: &ImmutableWorldRef<'_>, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+                bool_or_else!($($T::match_archetyp(&self.tuple.${index()}, world, archetyp_id)),*)
+            }
+
+            fn table_columns(&self, parameters: &ColumnSelectParameters<'_>) -> Self::TableColumns {
+                $(if $T::match_archetyp(&self.tuple.${index()}, &parameters.world, parameters.archetyp_id).is_true() {
+                    EitherFor::<${index()}>::either_from(
+                        $T::table_columns(&self.tuple.${index()}, parameters)
                     )
-                }
-
-                fn or_iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::OrValueIterator<'w> {
-                    let archetyp_id = parameters.archetyp_id;
-                    let either_iter: either_of!($($T::ValueIterator<'w>),*) =
-                        $(if $T::match_archetyp(&self.${index()}, parameters.world, parameters.archetyp_id).is_true() {
-                            EitherFor::<${index()}>::either_from($T::iter_table(&self.${index()}, parameters))
-                        } else )* {
-                            unreachable!()
-                        };
-
-                    either_iter.into_either_iter()
+                } else)* {
+                    unreachable!()
                 }
             }
-        };
-    }
-    variadics_please::all_tuples!(impl_query_parameter_tuple_immutable, 1, 15, T);
 
-}
-use private::*;
-
-trait_alias!(pub trait QueryParameterTuple = 'static + QueryParameterTupleImpl);
-trait_alias!(pub trait QueryParameterTupleImmutable = QueryParameterTuple + QueryParameterTupleImmutableImpl);
-
-#[derive(Default, Debug, Clone, Copy)]
-pub struct And<Tuple>
-    where Tuple: QueryParameterTuple,
-{
-    tuple: Tuple,
-}
-
-impl<Tuple> QueryParameterImpl for And<Tuple>
-    where Tuple: QueryParameterTuple,
-{
-    type CreationConfig = Tuple::CreationConfig;
-    type ArchetypIterator<'a> = Tuple::AndArchetypIterator<'a>
-        where Self: 'a;
-    type ArchetypMatchBool = Tuple::AndArchetypMatchBool;
-
-    type Value<'a> = Tuple::AndValue<'a>;
-
-    fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
-        Self {
-            tuple: Tuple::new(world, creation_cfg),
+            fn iter_table_mut<'w, I>(&self, parameters: &mut MutableIterParameters<'w, I>) -> Self::ValueMutIterator<'w, I>
+                where I: Iterator<Item = &'w mut dynvec::DynVec>,
+            {
+                EitherIterator(
+                    $(if $T::match_archetyp(&self.tuple.${index()}, &parameters.world, parameters.archetyp_id).is_true() {
+                        EitherFor::<${index()}>::either_from(
+                            $T::iter_table_mut(&self.tuple.${index()}, parameters)
+                        )
+                    } else)* {
+                        unreachable!()
+                    }
+                )
+            }
         }
-    }
 
-    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
-        where 's: 'r, 'w: 'r
-    {
-        self.tuple.and_matching_archetypes(world)
-    }
+        impl<$($T,)*> QueryParameterImmutableImpl for Or<($($T,)*)>
+            where $($T: QueryParameterImmutableImpl,)*
+        {
+            type ValueIterator<'a> = EitherIterator<either_of!($($T::ValueIterator<'a>),*)>;
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
-        self.tuple.and_match_archetyp(world, archetyp_id)
-    }
-}
-
-impl<Tuple> QueryParameterImmutableImpl for And<Tuple>
-    where Tuple: QueryParameterTupleImmutable,
-{
-    type ValueIterator<'a> = Tuple::AndValueIterator<'a>;
-
-    fn iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
-        self.tuple.and_iter_table(parameters)
-    }
-}
-
-#[derive(Default, Debug, Clone, Copy)]
-pub struct Or<Tuple>
-    where Tuple: QueryParameterTuple,
-{
-    tuple: Tuple,
-}
-
-impl<Tuple> QueryParameterImpl for Or<Tuple>
-    where Tuple: QueryParameterTuple,
-{
-    type CreationConfig = Tuple::CreationConfig;
-    type ArchetypIterator<'a> = Tuple::OrArchetypIterator<'a>
-        where Self: 'a;
-    type ArchetypMatchBool = Tuple::OrArchetypMatchBool;
-
-    type Value<'a> = Tuple::OrValue<'a>;
-
-    fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
-        Self {
-            tuple: Tuple::new(world, creation_cfg),
+            fn iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
+                EitherIterator(
+                    $(if $T::match_archetyp(&self.tuple.${index()}, &borrow_world!(parameters.world), parameters.archetyp_id).is_true() {
+                        EitherFor::<${index()}>::either_from(
+                            $T::iter_table(&self.tuple.${index()}, parameters)
+                        )
+                    } else)* {
+                        unreachable!()
+                    }
+                )
+            }
         }
-    }
-
-    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
-        where 's: 'r, 'w: 'r
-    {
-        self.tuple.or_matching_archetypes(world)
-    }
-
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
-        self.tuple.or_match_archetyp(world, archetyp_id)
-    }
+    };
 }
-
-impl<Tuple> QueryParameterImmutableImpl for Or<Tuple>
-    where Tuple: QueryParameterTupleImmutable,
-{
-    type ValueIterator<'a> = Tuple::OrValueIterator<'a>;
-
-    fn iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
-        self.tuple.or_iter_table(parameters)
-    }
-}
+variadics_please::all_tuples!(impl_or, 1, 3, T);
 
 pub type Xor<Tuple> = And<(Or<Tuple>, Not<And<Tuple>>)>;

@@ -95,7 +95,7 @@ pub struct DiconstructedSparseSet<S: SparseSetDenseStorage> {
 }
 
 /// Basically a Map<SparseIdx, T>, where the 'SparseIdx' is the sparse idx
-#[derive(Default, Debug, TryClone)]
+#[derive(Default, TryClone)]
 pub struct SparseSet<S: SparseSetDenseStorage> {
     sparse_to_dense_indices: IndexMap<Option<PlusOneNonZero<S::PrimitiveDenseIdx>>, S::SparseIdx>,
     dense_to_sparse_indices: IndexMap<S::SparseIdx, S::DenseIdx>,
@@ -144,8 +144,16 @@ impl<S> SparseSet<S>
         self.dense_values.get_mut(dense_idx)
     }
 
+    pub fn dense_to_sparse_indices(&self) -> &IndexMap<S::SparseIdx, S::DenseIdx> {
+        &self.dense_to_sparse_indices
+    }
+
     pub fn dense_values(&self) -> &S {
         &self.dense_values
+    }
+
+    pub(crate) fn split(&mut self) -> (&IndexMap<S::SparseIdx, S::DenseIdx>, &mut S) {
+        (&self.dense_to_sparse_indices, &mut self.dense_values)
     }
 
     /// Allows you to mutate the internal dense value storage
@@ -209,6 +217,22 @@ impl<S> SparseSet<S>
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (S::SparseIdx, S::RefMutItem<'_>)> + DoubleEndedIterator + ExactSizeIterator {
         zip(self.dense_to_sparse_indices.values().copied(), self.dense_values.iter_mut())
+    }
+}
+
+impl<S: SparseSetDenseStorage + Debug> Debug for SparseSet<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SparseSet")
+            .field_with("sparse_to_dense_indices", |f| {
+                let mut m = f.debug_map();
+                for (i, v) in self.sparse_to_dense_indices.iter().filter(|(_, p)| p.is_some()) {
+                    let v = v.unwrap().get().into();
+                    m.entry(&i, &v);
+                }
+                m.finish()
+            })
+            .field("dense_to_sparse_indices", &self.dense_to_sparse_indices)
+            .field("dense_values", &self.dense_values).finish()
     }
 }
 

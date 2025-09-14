@@ -1,32 +1,50 @@
-use super::{ QueryParameterImpl, QueryParameterImmutableImpl, ImmutableIterParameters };
+use super::{
+    QueryParameterImpl, QueryParameterImmutableImpl, ImmutableWorldRef,
+    MutableIterParameters, ImmutableIterParameters, ColumnSelectParameters,
+};
 use crate::world::{
     component::ComponentEntity, ArchetypId, Entity, World
 };
 
 use utils::prelude::*;
+use std::iter::{ empty, Empty, once, Once };
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct EntityHandle;
 
 impl QueryParameterImpl for EntityHandle {
     type CreationConfig = ();
-    type ArchetypIterator<'w> = impl Iterator<Item = ArchetypId> + 'w;
+    type ArchetypIterator<'s, 'w> = impl Iterator<Item = ArchetypId> + use<'w>;
     type ArchetypMatchBool = True;
 
+    type TableColumns = Empty<usize>;
+
+    type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = impl Iterator<Item = Self::Value<'a>>;
     type Value<'a> = Entity;
 
     fn new(world: &World, (): ()) -> Self {
         Self
     }
 
-    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
-        where 's: 'r, 'w: 'r
-    {
+    fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
         world.archetypes.indices()
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+    fn match_archetyp(&self, world: &ImmutableWorldRef<'_>, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
         True
+    }
+
+    fn table_columns(&self, parameters: &ColumnSelectParameters<'_>) -> Self::TableColumns {
+        empty()
+    }
+
+    fn iter_table_mut<'w, I>(&self, MutableIterParameters {
+        world, table_entities, table_columns, ..
+    }: &mut MutableIterParameters<'w, I>) -> Self::ValueMutIterator<'w, I>
+        where I: Iterator<Item = &'w mut dynvec::DynVec>,
+    {
+        table_entities.iter()
+            .map(|&index| Entity::new(index, world.entity_storage.generation_at_index(index)))
     }
 }
 
@@ -46,14 +64,17 @@ pub type Never = super::Not<Always>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ComponentRef {
-    pub(super) component: ComponentEntity,
+    component: ComponentEntity,
 }
 
 impl QueryParameterImpl for ComponentRef {
     type CreationConfig = ComponentEntity;
-    type ArchetypIterator<'w> = impl Iterator<Item = ArchetypId>;
+    type ArchetypIterator<'s, 'w> = impl Iterator<Item = ArchetypId> + use<'w>;
     type ArchetypMatchBool = Bool;
 
+    type TableColumns = Once<usize>;
+
+    type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = impl Iterator<Item = Self::Value<'a>>;
     type Value<'a> = dynvec::DynVecValueRef<'a>;
 
     fn new(world: &World, component: ComponentEntity) -> Self {
@@ -64,17 +85,32 @@ impl QueryParameterImpl for ComponentRef {
         }
     }
 
-    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
-        where 's: 'r, 'w: 'r
-    {
+    fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
         let comp = self.component;
-        world.archetypes.iter()
-            .filter(move |(_, archetyp)| archetyp.components.has(comp))
-            .map(|(aid, _)| aid)
+        world.components_to_archetypes[self.component.index()].iter()
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+    fn match_archetyp(&self, world: &ImmutableWorldRef<'_>, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
         world.archetypes[archetyp_id].components.has(self.component).into()
+    }
+
+    fn table_columns(&self, ColumnSelectParameters {
+        table, ..
+    }: &ColumnSelectParameters<'_>) -> Self::TableColumns {
+        match table.table_components.index_of(self.component) {
+            Some(p) => once(p),
+            // TODO
+            None => todo!("Components with None storage cannot be queried for a value. Though this error should be handled before."),
+        }
+    }
+
+    fn iter_table_mut<'w, I>(&self, MutableIterParameters {
+        table_columns, ..
+    }: &mut MutableIterParameters<'w, I>) -> Self::ValueMutIterator<'w, I>
+        where I: Iterator<Item = &'w mut dynvec::DynVec>,
+    {
+        let column = table_columns.next().expect("Requested column should be given");
+        column.iter()
     }
 }
 
@@ -85,26 +121,29 @@ impl QueryParameterImmutableImpl for ComponentRef {
         world, table_id, ..
     }: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
         // TODO
-        assert!(world.component_fragments_tables(self.component));
+        debug_assert!(world.component_fragments_tables(self.component));
 
         let Some(comp_idx) = world.tables[table_id].table_components.index_of(self.component)
         else { unreachable!() };
 
         world.tables[table_id].sparse_set.dense_values()
-            .column(comp_idx).iter()
+            .columns()[comp_idx].iter()
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct ComponentRefMut {
-    pub(super) component: ComponentEntity,
+    component: ComponentEntity,
 }
 
 impl QueryParameterImpl for ComponentRefMut {
     type CreationConfig = ComponentEntity;
-    type ArchetypIterator<'w> = impl Iterator<Item = ArchetypId> + 'w;
+    type ArchetypIterator<'s, 'w> = impl Iterator<Item = ArchetypId> + use<'w>;
     type ArchetypMatchBool = Bool;
 
+    type TableColumns = Once<usize>;
+
+    type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = impl Iterator<Item = Self::Value<'a>>;
     type Value<'a> = dynvec::DynVecValueRefMut<'a>;
 
     fn new(world: &World, component: ComponentEntity) -> Self {
@@ -115,17 +154,31 @@ impl QueryParameterImpl for ComponentRefMut {
         }
     }
 
-    fn matching_archetypes<'s, 'w, 'r>(&'s self, world: &'w World) -> Self::ArchetypIterator<'r>
-        where 's: 'r, 'w: 'r
-    {
-        let comp = self.component;
-        world.archetypes.iter()
-            .filter(move |(_, archetyp)| archetyp.components.has(comp))
-            .map(|(aid, _)| aid)
+    fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
+        world.components_to_archetypes[self.component.index()].iter()
     }
 
-    fn match_archetyp(&self, world: &World, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
+    fn match_archetyp(&self, world: &ImmutableWorldRef<'_>, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool {
         world.archetypes[archetyp_id].components.has(self.component).into()
+    }
+
+    fn table_columns(&self, ColumnSelectParameters {
+        table, ..
+    }: &ColumnSelectParameters<'_>) -> Self::TableColumns {
+        match table.table_components.index_of(self.component) {
+            Some(p) => once(p),
+            // TODO
+            None => todo!("Components with None storage cannot be queried for a value. Though this error should be handled before."),
+        }
+    }
+
+    fn iter_table_mut<'w, I>(&self, MutableIterParameters {
+        table_columns, ..
+    }: &mut MutableIterParameters<'w, I>) -> Self::ValueMutIterator<'w, I>
+        where I: Iterator<Item = &'w mut dynvec::DynVec>,
+    {
+        let column = table_columns.next().expect("Requested column should be given");
+        column.iter_mut()
     }
 }
 

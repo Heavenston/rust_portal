@@ -672,7 +672,6 @@ impl World {
                     })
                     .collect();
                 let table_id = self.tables.push(Table {
-                    table_components: table_components.clone(),
                     sparse_set: SparseSet::new(ComponentDenseStorage::new(
                         table_components.iter()
                             .map(|component| {
@@ -686,6 +685,7 @@ impl World {
                             .collect::<Vec<_>>()
                             .into_boxed_slice()
                     )),
+                    table_components,
                 });
 
                 self.components_set_to_table.insert(components, table_id);

@@ -18,6 +18,8 @@ pub trait EitherFor<const IDX: usize> {
     fn either_for_into(self) -> Option<Self::N>;
 }
 
+pub struct EitherIterator<E: EitherOfN>(pub E);
+
 macro_rules! ignore {
     ($i: ident, $b: ident) => { $b };
 }
@@ -103,14 +105,10 @@ macro_rules! impl_either {
         }
 
         impl<$($letter,)*> $name<$($letter,)*> {
-            pub fn into_either_iter(self) -> impl Iterator<Item = $name<$($letter::Item,)*>>
+            pub fn into_either_iter(self) -> EitherIterator<$name<$($letter,)*>>
                 where $($letter: Iterator,)*
             {
-                match self {
-                    $(
-                        Self::$letter(val) => $name::$letter(val.map($name::$letter)),
-                    )*
-                }
+                EitherIterator(self)
             }
         }
 
@@ -137,6 +135,18 @@ macro_rules! impl_either {
         }
 
         impl_either_iterator!($name; $($letter),*);
+
+        impl<$($letter,)*> Iterator for EitherIterator<$name<$($letter,)*>>
+            where $($letter: Iterator,)*
+        {
+            type Item = $name<$(<$letter as Iterator>::Item),*>;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                match &mut self.0 {
+                    $($name::$letter(i) => i.next().map($name::$letter),)*
+                }
+            }
+        }
 
         impl_either_try_into!($name ! ; $($letter),*);
     };

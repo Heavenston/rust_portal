@@ -12,6 +12,7 @@ use crate::{
 };
 
 use std::iter::{ empty, once };
+use std::fmt::Debug;
 
 use utils::{ itertools::{ chain, zip_eq }, prelude::* };
 use derive_more::From;
@@ -41,12 +42,10 @@ impl<'a> StorageComponentsRefMut<'a> {
     }
 }
 
-#[derive_where::derive_where(Debug)]
 #[derive(TryClone, Default)]
 pub struct ComponentDenseStorage {
     #[try_clone(use_clone)]
     len: u32,
-    #[derive_where(skip)]
     #[try_clone(error_type = "dynvec::NoCloneError", clone_with = try_clone_boxed_slice)]
     storages: Box<[DynVec]>,
 }
@@ -59,13 +58,12 @@ impl ComponentDenseStorage {
         }
     }
 
-    pub fn column(&self, component_idx: usize) -> &DynVec {
-        &self.storages[component_idx]
+    pub fn columns(&self) -> &[DynVec] {
+        &self.storages
     }
 
-    #[expect(dead_code)]
-    pub fn column_mut(&mut self, component_idx: usize) -> &mut DynVec {
-        &mut self.storages[component_idx]
+    pub fn columns_mut(&mut self) -> &mut [DynVec] {
+        &mut self.storages
     }
 
     pub fn debug_types(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -143,6 +141,26 @@ impl SparseSetDenseStorage for ComponentDenseStorage {
         // TODO: Implement (do i need unsafe ?? x( )
         todo!();
         empty()
+    }
+}
+
+impl Debug for ComponentDenseStorage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ComponentDenseStorage")
+            .field("len", &self.len)
+            .field_with("storages", |f| {
+                let mut l = f.debug_list();
+                for column in self.storages.iter() {
+                    l.entry_with(|f| {
+                        f.debug_struct("DynVec")
+                            .field("len", &column.len())
+                            .field("metadata", column.metadata())
+                            .finish()
+                    });
+                }
+                l.finish()
+            })
+            .finish()
     }
 }
 
