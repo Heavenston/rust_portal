@@ -1,8 +1,11 @@
 use crate::partial_bool::{ PartialBool, BoolNot, False, True };
 
-pub trait PartialOption<T> {
+pub trait SomePartialOption {
     type IsSome: PartialBool;
-    type Mapped<V>: PartialOption<V>;
+    type Using<V>: PartialOption<V>;
+}
+
+pub trait PartialOption<T>: SomePartialOption {
     type Zip<V, O: PartialOption<V>>: PartialOption<(T, V)>;
 
     fn partial_is_some(&self) -> Self::IsSome;
@@ -14,7 +17,7 @@ pub trait PartialOption<T> {
     fn into_result(self) -> Result<T, <Self::IsSome as PartialBool>::F>;
     fn into_option(self) -> Option<T>;
 
-    fn partial_map<V>(self, mapper: impl FnOnce(T) -> V) -> Self::Mapped<V>;
+    fn partial_map<V>(self, mapper: impl FnOnce(T) -> V) -> Self::Using<V>;
 
     fn partial_zip<V, O: PartialOption<V>>(self, other: O) -> Self::Zip<V, O>;
 }
@@ -24,10 +27,13 @@ pub enum AlwaysOption<T> {
     Some(T),
 }
 
-impl<T> PartialOption<T> for AlwaysOption<T> {
+impl<T> SomePartialOption for AlwaysOption<T> {
     type IsSome = True;
-    type Mapped<V> = AlwaysOption<V>;
-    type Zip<V, O: PartialOption<V>> = O::Mapped::<(T, V)>;
+    type Using<V> = AlwaysOption<V>;
+}
+
+impl<T> PartialOption<T> for AlwaysOption<T> {
+    type Zip<V, O: PartialOption<V>> = O::Using::<(T, V)>;
 
     fn partial_is_some(&self) -> Self::IsSome {
         True
@@ -43,7 +49,7 @@ impl<T> PartialOption<T> for AlwaysOption<T> {
         Some(value)
     }
 
-    fn partial_map<V>(self, mapper: impl FnOnce(T) -> V) -> Self::Mapped<V> {
+    fn partial_map<V>(self, mapper: impl FnOnce(T) -> V) -> Self::Using<V> {
         let AlwaysOption::Some(value) = self;
         AlwaysOption::Some(mapper(value))
     }
@@ -58,9 +64,12 @@ pub enum NeverOption {
     None,
 }
 
-impl<T> PartialOption<T> for NeverOption {
+impl SomePartialOption for NeverOption {
     type IsSome = False;
-    type Mapped<V> = NeverOption;
+    type Using<V> = NeverOption;
+}
+
+impl<T> PartialOption<T> for NeverOption {
     type Zip<V, O: PartialOption<V>> = NeverOption;
 
     fn partial_is_some(&self) -> Self::IsSome {
@@ -75,7 +84,7 @@ impl<T> PartialOption<T> for NeverOption {
         None
     }
 
-    fn partial_map<V>(self, mapper: impl FnOnce(T) -> V) -> Self::Mapped<V> {
+    fn partial_map<V>(self, mapper: impl FnOnce(T) -> V) -> Self::Using<V> {
         let _ = mapper;
         NeverOption::None
     }
@@ -88,9 +97,12 @@ impl<T> PartialOption<T> for NeverOption {
 
 type FullOption<T> = Option<T>;
 
-impl<T> PartialOption<T> for FullOption<T> {
+impl<T> SomePartialOption for FullOption<T> {
     type IsSome = bool;
-    type Mapped<V> = Option<V>;
+    type Using<V> = Option<V>;
+}
+
+impl<T> PartialOption<T> for FullOption<T> {
     type Zip<V, O: PartialOption<V>> = Option<(T, V)>;
 
     fn partial_is_some(&self) -> Self::IsSome {
@@ -105,7 +117,7 @@ impl<T> PartialOption<T> for FullOption<T> {
         self
     }
 
-    fn partial_map<V>(self, mapper: impl FnOnce(T) -> V) -> Self::Mapped<V> {
+    fn partial_map<V>(self, mapper: impl FnOnce(T) -> V) -> Self::Using<V> {
         Option::map(self, mapper)
     }
 

@@ -51,7 +51,7 @@ pub mod prelude {
             BoolValueAnd, BoolValueNot, BoolValueOr,
             BoolAnd, BoolOr, BoolNot
         },
-        partial_option::{ PartialOption, AlwaysOption, NeverOption },
+        partial_option::{ SomePartialOption, PartialOption, AlwaysOption, NeverOption },
         either_utils::{ OptionExt, zip_left, zip_right },
         try_clone::{ try_clone_boxed_slice, TryClone },
     };
