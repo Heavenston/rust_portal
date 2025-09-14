@@ -1,26 +1,9 @@
-use crate::partial_bool::{
-    sealed as partial_bool_sealed, BoolValue, PartialBool, BoolNot, False, True, Bool
-};
-
-mod private {
-    use super::*;
-
-    pub trait PartialValueImpl {
-        type Constructible: BoolValue;
-    }
-
-    impl<T> PartialValueImpl for T {
-        default type Constructible = ();
-    }
-
-    impl PartialValueImpl for ! {
-        type Constructible = !;
-    }
-}
-use private::*;
+use crate::partial_bool::{ PartialBool, BoolNot, False, True };
 
 pub trait PartialOption<T> {
     type IsSome: PartialBool;
+    type Mapped<V>: PartialOption<V>;
+    type Zip<V, O: PartialOption<V>>: PartialOption<(T, V)>;
 
     fn partial_is_some(&self) -> Self::IsSome;
 
@@ -29,6 +12,11 @@ pub trait PartialOption<T> {
     }
 
     fn into_result(self) -> Result<T, <Self::IsSome as PartialBool>::F>;
+    fn into_option(self) -> Option<T>;
+
+    fn partial_map<V>(self, mapper: impl FnOnce(T) -> V) -> Self::Mapped<V>;
+
+    fn partial_zip<V, O: PartialOption<V>>(self, other: O) -> Self::Zip<V, O>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -38,6 +26,8 @@ pub enum AlwaysOption<T> {
 
 impl<T> PartialOption<T> for AlwaysOption<T> {
     type IsSome = True;
+    type Mapped<V> = AlwaysOption<V>;
+    type Zip<V, O: PartialOption<V>> = O::Mapped::<(T, V)>;
 
     fn partial_is_some(&self) -> Self::IsSome {
         True
@@ -47,6 +37,21 @@ impl<T> PartialOption<T> for AlwaysOption<T> {
         let Self::Some(value) = self;
         Ok(value)
     }
+
+    fn into_option(self) -> Option<T> {
+        let Self::Some(value) = self;
+        Some(value)
+    }
+
+    fn partial_map<V>(self, mapper: impl FnOnce(T) -> V) -> Self::Mapped<V> {
+        let AlwaysOption::Some(value) = self;
+        AlwaysOption::Some(mapper(value))
+    }
+
+    fn partial_zip<V, O: PartialOption<V>>(self, other: O) -> Self::Zip<V, O> {
+        let Self::Some(value) = self;
+        other.partial_map(|o| (value, o))
+    }
 }
 
 pub enum NeverOption {
@@ -55,6 +60,8 @@ pub enum NeverOption {
 
 impl<T> PartialOption<T> for NeverOption {
     type IsSome = False;
+    type Mapped<V> = NeverOption;
+    type Zip<V, O: PartialOption<V>> = NeverOption;
 
     fn partial_is_some(&self) -> Self::IsSome {
         False
@@ -63,35 +70,46 @@ impl<T> PartialOption<T> for NeverOption {
     fn into_result(self) -> Result<T, ()> {
         Err(())
     }
+
+    fn into_option(self) -> Option<T> {
+        None
+    }
+
+    fn partial_map<V>(self, mapper: impl FnOnce(T) -> V) -> Self::Mapped<V> {
+        let _ = mapper;
+        NeverOption::None
+    }
+
+    fn partial_zip<V, O: PartialOption<V>>(self, other: O) -> Self::Zip<V, O> {
+        let _ = other;
+        NeverOption::None
+    }
 }
 
-impl<T> PartialOption<T> for Option<T> {
-    type IsSome = Bool<<T as PartialValueImpl>::Constructible, ()>;
+type FullOption<T> = Option<T>;
+
+impl<T> PartialOption<T> for FullOption<T> {
+    type IsSome = bool;
+    type Mapped<V> = Option<V>;
+    type Zip<V, O: PartialOption<V>> = Option<(T, V)>;
 
     fn partial_is_some(&self) -> Self::IsSome {
-        match self {
-            Some(_) => Bool::True(partial_bool_sealed::PrivateBoolValue::value()),
-            None => Bool::False(()),
-        }
+        Option::is_some(self)
     }
 
     fn into_result(self) -> Result<T, ()> {
-        match self {
-            Some(value) => Ok(value),
-            None => Err(()),
-        }
-    }
-}
-
-impl<T, O: BoolValue> PartialOption<T> for Result<T, O> {
-    type IsSome = Bool<<T as PartialValueImpl>::Constructible, O>;
-
-    fn partial_is_some(&self) -> Self::IsSome {
-        match self {
-            Ok(_) => Bool::True(partial_bool_sealed::PrivateBoolValue::value()),
-            &Err(o) => Bool::False(o),
-        }
+        Option::ok_or(self, ())
     }
 
-    fn into_result(self) -> Result<T, O> { self }
+    fn into_option(self) -> Option<T> {
+        self
+    }
+
+    fn partial_map<V>(self, mapper: impl FnOnce(T) -> V) -> Self::Mapped<V> {
+        Option::map(self, mapper)
+    }
+
+    fn partial_zip<V, O: PartialOption<V>>(self, other: O) -> Self::Zip<V, O> {
+        Option::zip(self, other.into_option())
+    }
 }
