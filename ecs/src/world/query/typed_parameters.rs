@@ -68,8 +68,8 @@ impl<C> QueryParameterImpl for Ref<C>
 
         match table.table_components.index_of(component) {
             Some(p) => once(p),
-            // TODO
-            None => todo!("Components with None storage cannot be queried for a value. Though this error should be handled before."),
+            // TODO: Make this error more explicit
+            None => panic!("Components with None storage cannot be queried for a value. Though this error should be handled before."),
         }
     }
 
@@ -167,8 +167,8 @@ impl<C> QueryParameterImpl for RefMut<C>
 
         match table.table_components.index_of(component) {
             Some(p) => once(p),
-            // TODO
-            None => todo!("Components with None storage cannot be queried for a value. Though this error should be handled before."),
+            // TODO: Make this error more explicit
+            None => panic!("Components with None storage cannot be queried for a value. Though this error should be handled before."),
         }
     }
 
