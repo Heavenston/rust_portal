@@ -5,14 +5,9 @@
 #![feature(macro_metavar_expr)]
 #![feature(debug_closure_helpers)]
 #![feature(specialization)]
-#![feature(assert_matches)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(auto_traits)]
-#![feature(negative_impls)]
 #![feature(associated_type_defaults)]
-#![feature(associated_const_equality)]
-#![feature(macro_metavar_expr_concat)]
 #![feature(iterator_try_collect)]
 
 #![expect(internal_features)]
@@ -22,8 +17,7 @@
 
 pub mod prelude {
     pub use crate::{
-        ix, dix, trait_alias, macros::TryClone, unwrap_matches,
-        uid::Uid,
+        ix, trait_alias, macros::TryClone, uid::Uid,
         default, concat_arrays, flatten_array, hash_value,
         itertools::Itertools as _,
         either::{ self, Either },
@@ -132,13 +126,6 @@ macro_rules! ix {
 }
 
 #[macro_export]
-macro_rules! dix {
-    ($val: expr) => {
-        TryInto::<usize>::try_into($val).ok().expect("no overflow")
-    };
-}
-
-#[macro_export]
 macro_rules! count_args {
     () => { 0 };
     ($head:tt $(, $tail:tt)* $(,)?) => {
@@ -177,24 +164,3 @@ macro_rules! trait_alias {
         impl<T: $($cond)+> $name for T { }
     };
 }
-
-#[macro_export]
-macro_rules! unwrap_matches {
-    ($e:expr, $pat:pat) => {
-        let value = $e;
-        let $pat = value else {
-            ::core::panic!(
-                "match assertion failed\n pattern: `{}`\n   value: `{:?}`",
-                ::core::stringify!($pat), value,
-            );
-        };
-    };
-    ($e:expr, $pat:pat, $($arg:tt)*) => {
-        let value = $e;
-        let $pat = value else {
-            ::core::panic!(
-                "match assertion failed: {}\n pattern: `{}`\n   value: `{:?}`",
-                ::core::format_args!($($arg)*), ::core::stringify!($pat), value,
-            );
-        };
-    };}
