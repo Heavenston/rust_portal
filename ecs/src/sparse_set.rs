@@ -144,6 +144,12 @@ impl<S> SparseSet<S>
         self.dense_values.get_mut(dense_idx)
     }
 
+    pub fn dense_index_of(&self, sparse: S::SparseIdx) -> Option<S::DenseIdx> {
+        self.sparse_to_dense_indices
+            .get(sparse).copied().flatten()
+            .map(|dense| dense.get().into())
+    }
+
     pub fn dense_to_sparse_indices(&self) -> &IndexMap<S::SparseIdx, S::DenseIdx> {
         &self.dense_to_sparse_indices
     }
@@ -152,15 +158,11 @@ impl<S> SparseSet<S>
         &self.dense_values
     }
 
-    pub(crate) fn split(&mut self) -> (&IndexMap<S::SparseIdx, S::DenseIdx>, &mut S) {
-        (&self.dense_to_sparse_indices, &mut self.dense_values)
-    }
-
     /// Allows you to mutate the internal dense value storage
     ///
     /// Must *not* change any of the invariants of the [`SparseSetDenseStorage`] trait.
-    pub fn unsafe_dense_values_mut(&mut self) -> &mut S {
-        &mut self.dense_values
+    pub(crate) fn split(&mut self) -> (&IndexMap<S::SparseIdx, S::DenseIdx>, &mut S) {
+        (&self.dense_to_sparse_indices, &mut self.dense_values)
     }
 
     pub fn insert<I>(&mut self, sparse_idx: S::SparseIdx, value: I)

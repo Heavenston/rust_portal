@@ -1,9 +1,9 @@
 use super::{
     QueryParameterImpl, QueryParameterImmutableImpl, QueryParameter,
     ImmutableIterParameters, ImmutableWorldRef, ColumnSelectParameters,
-    MutableIterParameters,
+    MutableIterParameters, MutableGetParameters,
 };
-use crate::world::{ ArchetypId, World };
+use crate::world::{ ArchetypId, Entity, World };
 
 use std::iter::{ repeat_n, repeat_with, empty, Empty, RepeatN };
 use utils::prelude::*;
@@ -77,6 +77,17 @@ impl<C> QueryParameterImpl for Optional<C>
             )
         }
     }
+
+    fn get_mut<'w, I>(&self, parameters: &mut MutableGetParameters<'w, I>) -> Self::Value<'w>
+        where I: Iterator<Item = &'w mut dynvec::DynVec>
+    {
+        if self.child.match_archetyp(&parameters.world, parameters.archetyp_id).is_true() {
+            Some(self.child.get_mut(parameters))
+        }
+        else {
+            None
+        }
+    }
 }
 
 impl<C> QueryParameterImmutableImpl for Optional<C>
@@ -93,6 +104,13 @@ impl<C> QueryParameterImmutableImpl for Optional<C>
                 repeat_with(|| None)
                     .take(ix!(world.tables[table_id].sparse_set.len()))
             )
+    }
+
+    fn get<'w>(&self, parameters @ ImmutableIterParameters {
+        world, archetyp_id, table_id, ..
+    }: ImmutableIterParameters<'w>, entity: Entity) -> Self::Value<'w> {
+        self.child.match_archetyp(&borrow_world!(world), archetyp_id).is_true()
+            .then(|| self.child.get(parameters, entity))
     }
 }
 
@@ -138,6 +156,10 @@ impl<C> QueryParameterImpl for NoFetch<C>
     {
         repeat_n((), parameters.table_entities.len())
     }
+
+    fn get_mut<'w, I>(&self, parameters: &mut MutableGetParameters<'w, I>)
+        where I: Iterator<Item = &'w mut dynvec::DynVec>
+    { }
 }
 
 impl<C> QueryParameterImmutableImpl for NoFetch<C>
@@ -147,9 +169,11 @@ impl<C> QueryParameterImmutableImpl for NoFetch<C>
 
     fn iter_table<'w>(&self, ImmutableIterParameters {
         world, table_id, ..
-    }: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
+    }: ImmutableIterParameters<'w>) -> RepeatN<()> {
         repeat_n((), ix!(world.tables[table_id].sparse_set.len()))
     }
+
+    fn get<'w>(&self, parameters: ImmutableIterParameters<'w>, entity: Entity) { }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -197,6 +221,10 @@ impl<C> QueryParameterImpl for Not<C>
     {
         repeat_n((), parameters.table_entities.len())
     }
+
+    fn get_mut<'w, I>(&self, parameters: &mut MutableGetParameters<'w, I>)
+        where I: Iterator<Item = &'w mut dynvec::DynVec>
+    { }
 }
 
 // Always immutable event with mutable parameter (the value is dropped)
@@ -207,9 +235,11 @@ impl<C> QueryParameterImmutableImpl for Not<C>
 
     fn iter_table<'w>(&self, ImmutableIterParameters {
         world, table_id, ..
-    }: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
+    }: ImmutableIterParameters<'w>) -> RepeatN<()> {
         repeat_n((), ix!(world.tables[table_id].sparse_set.len()))
     }
+
+    fn get<'w>(&self, parameters: ImmutableIterParameters<'w>, entity: Entity) { }
 }
 
 macro_rules! bool_or_all {
@@ -306,6 +336,12 @@ macro_rules! impl_and {
             {
                 special_izip!($($T::iter_table_mut(&self.tuple.${index()}, parameters)),*)
             }
+
+            fn get_mut<'w, I>(&self, parameters: &mut MutableGetParameters<'w, I>) -> Self::Value<'w>
+                where I: Iterator<Item = &'w mut dynvec::DynVec>
+            {
+                ($($T::get_mut(&self.tuple.${index()}, parameters),)*)
+            }
         }
 
         impl<$($T,)*> QueryParameterImmutableImpl for And<($($T,)*)>
@@ -316,10 +352,14 @@ macro_rules! impl_and {
             fn iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
                 special_izip!($($T::iter_table(&self.tuple.${index()}, parameters)),*)
             }
+
+            fn get<'w>(&self, parameters: ImmutableIterParameters<'w>, entity: Entity) -> Self::Value<'w> {
+                ($($T::get(&self.tuple.${index()}, parameters, entity),)*)
+            }
         }
     };
 }
-variadics_please::all_tuples!(impl_and, 1, 16, T);
+variadics_please::all_tuples!(impl_and, 1, 3, T);
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct Or<Tuple> {
@@ -383,6 +423,18 @@ macro_rules! impl_or {
                     }
                 )
             }
+
+            fn get_mut<'w, I>(&self, parameters: &mut MutableGetParameters<'w, I>) -> Self::Value<'w>
+                where I: Iterator<Item = &'w mut dynvec::DynVec>
+            {
+                $(if $T::match_archetyp(&self.tuple.${index()}, &borrow_world!(parameters.world), parameters.archetyp_id).is_true() {
+                    EitherFor::<${index()}>::either_from(
+                        $T::get_mut(&self.tuple.${index()}, parameters)
+                    )
+                } else)* {
+                    unreachable!()
+                }
+            }
         }
 
         impl<$($T,)*> QueryParameterImmutableImpl for Or<($($T,)*)>
@@ -401,9 +453,19 @@ macro_rules! impl_or {
                     }
                 )
             }
+
+            fn get<'w>(&self, parameters: ImmutableIterParameters<'w>, entity: Entity) -> Self::Value<'w> {
+                $(if $T::match_archetyp(&self.tuple.${index()}, &borrow_world!(parameters.world), parameters.archetyp_id).is_true() {
+                    EitherFor::<${index()}>::either_from(
+                        $T::get(&self.tuple.${index()}, parameters, entity)
+                    )
+                } else)* {
+                    unreachable!()
+                }
+            }
         }
     };
 }
-variadics_please::all_tuples!(impl_or, 1, 16, T);
+variadics_please::all_tuples!(impl_or, 1, 3, T);
 
 pub type Xor<Tuple> = And<(Or<Tuple>, Not<And<Tuple>>)>;

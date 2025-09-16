@@ -85,6 +85,20 @@ mod private {
         pub(super) table_columns: I,
     }
 
+    #[derive(Debug)]
+    pub struct MutableGetParameters<'w, I>
+        where I: Iterator<Item = &'w mut dynvec::DynVec>
+    {
+        pub(super) world: ImmutableWorldRef<'w>,
+        pub(super) archetyp_id: ArchetypId,
+        pub(super) archetyp: &'w Archetyp,
+        pub(super) table_id: TableId,
+        pub(super) table_entities: &'w [EntityIndex],
+        pub(super) table_columns: I,
+        pub(super) entity: Entity,
+        pub(super) entity_dense_idx: u32,
+    }
+
     #[derive(Debug, Clone, Copy)]
     pub struct ImmutableIterParameters<'w> {
         pub(super) world: &'w World,
@@ -126,12 +140,17 @@ mod private {
         /// columns returned by Self::table_column
         fn iter_table_mut<'w, I>(&self, parameters: &mut MutableIterParameters<'w, I>) -> Self::ValueMutIterator<'w, I>
             where I: Iterator<Item = &'w mut dynvec::DynVec>;
+
+        fn get_mut<'w, I>(&self, parameters: &mut MutableGetParameters<'w, I>) -> Self::Value<'w>
+            where I: Iterator<Item = &'w mut dynvec::DynVec>;
     }
 
     pub trait QueryParameterImmutableImpl: QueryParameterImpl {
         type ValueIterator<'a>: Iterator<Item = Self::Value<'a>>;
 
         fn iter_table<'w>(&self, parameters: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w>;
+
+        fn get<'w>(&self, parameters: ImmutableIterParameters<'w>, entity: Entity) -> Self::Value<'w>;
     }
 }
 use private::*;
@@ -283,7 +302,17 @@ impl<P: QueryParameterImpl> Query<P> {
             return Err(QueryGetError::EntityIsNotAlive { entity });
         }
 
-        todo!()
+        let archetyp_id = world.entities_archetypes[entity.index()];
+        if !self.parameters.match_archetyp(&borrow_world!(world), archetyp_id).is_true() {
+            return Err(QueryGetError::NotMatched { entity });
+        }
+        let table_id = world.archetypes[archetyp_id].table_id;
+
+        Ok(self.parameters.get(ImmutableIterParameters {
+            world,
+            archetyp_id,
+            table_id,
+        }, entity))
     }
 
     pub fn get_mut<'a, 'b>(&'a self, world: &'b mut World, entity: Entity) -> Result<P::Value<'b>, QueryGetError> {
@@ -291,6 +320,46 @@ impl<P: QueryParameterImpl> Query<P> {
             return Err(QueryGetError::EntityIsNotAlive { entity });
         }
 
-        todo!()
+        let archetyp_id = world.entities_archetypes[entity.index()];
+        if !self.parameters.match_archetyp(&borrow_world!(world), archetyp_id).is_true() {
+            return Err(QueryGetError::NotMatched { entity });
+        }
+
+        let tables = &mut world.tables;
+        let world = borrow_world!(world);
+
+        let archetyp = &world.archetypes[archetyp_id];
+        let table_id = archetyp.table_id;
+        let table = &mut tables[table_id];
+
+        let asked_columns = self.parameters.table_columns(&ColumnSelectParameters {
+            world: world.reborrow(),
+            archetyp_id,
+            archetyp,
+            table_id,
+            table: &table,
+        });
+        let entity_dense_idx = table.sparse_set.dense_index_of(entity.index())
+            .expect("This entity is in this sparse set");
+        let (table_entities, dense_values) = table.sparse_set.split();
+
+        // FIXME: Annoying allocation here, not sure how to fix it
+        // especialy without unsafe
+        let mut columns_refs = dense_values.columns_mut().iter_mut()
+            .map(Some)
+            .collect_vec();
+
+        Ok(self.parameters.get_mut(&mut MutableGetParameters {
+            world,
+            archetyp_id,
+            archetyp,
+            table_id,
+            table_entities: table_entities.as_slice(),
+            table_columns: asked_columns.map(move |column_idx| {
+                columns_refs[column_idx].take().expect("Cannot use a component column multiple time in the same query")
+            }),
+            entity,
+            entity_dense_idx,
+        }))
     }
 }

@@ -1,11 +1,10 @@
 use super::{
-    QueryParameterImpl,
-    QueryParameterImmutableImpl,
-    ImmutableIterParameters,
+    QueryParameterImpl, QueryParameterImmutableImpl, ImmutableIterParameters,
     // runtime_parameters::*,
     ColumnSelectParameters, ImmutableWorldRef, MutableIterParameters,
+    MutableGetParameters,
 };
-use crate::world::{ component::ComponentEntity, ArchetypId, Component, World };
+use crate::world::{ component::ComponentEntity, ArchetypId, Component, Entity, World };
 
 use derive_where::derive_where;
 use utils::prelude::*;
@@ -85,6 +84,19 @@ impl<C> QueryParameterImpl for Ref<C>
             typed_column.as_slice().iter()
         }).left_or(empty())
     }
+
+    fn get_mut<'w, I>(&self, MutableGetParameters {
+        table_columns, entity_dense_idx, ..
+    }: &mut MutableGetParameters<'w, I>) -> Self::Value<'w>
+        where I: Iterator<Item = &'w mut dynvec::DynVec>
+    {
+        let component = self.component.expect("Wouldn't be matching if this was None");
+        let column = table_columns.next().expect("Requested column should be given");
+
+        column.get(ix!(*entity_dense_idx)).expect("Correct index")
+            .as_typed::<C>()
+            .expect("Should have requested the column with the correct type")
+    }
 }
 
 impl<C> QueryParameterImmutableImpl for Ref<C>
@@ -99,13 +111,30 @@ impl<C> QueryParameterImmutableImpl for Ref<C>
             // TODO
             debug_assert!(world.component_fragments_tables(component));
 
-            let Some(comp_idx) = world.tables[table_id].table_components.index_of(component)
-            else { unreachable!() };
+            let comp_idx = world.tables[table_id].table_components.index_of(component)
+                .expect("This component should be in this table");
 
             world.tables[table_id].sparse_set.dense_values()
                 .columns()[comp_idx].typed::<C>().expect("This column should have this type")
                 .as_slice().iter()
         }).left_or(empty())
+    }
+
+    fn get<'w>(&self, ImmutableIterParameters {
+        world, table_id, ..
+    }: ImmutableIterParameters<'w>, entity: Entity) -> Self::Value<'w> {
+        let table = &world.tables[table_id];
+
+        let component = self.component
+            .expect("Entity would not match if this was None");
+        let comp_idx = world.tables[table_id].table_components.index_of(component)
+            .expect("This component should be in this table");
+
+        table.sparse_set.get(entity.index())
+            .expect("Entity is in this table")
+            .for_component(comp_idx)
+            .as_typed::<C>()
+            .expect("This column should have this type")
     }
 }
 
@@ -183,5 +212,18 @@ impl<C> QueryParameterImpl for RefMut<C>
                 .expect("Should have requested the column with the correct type");
             typed_column.as_mut_slice().iter_mut()
         }).left_or(empty())
+    }
+
+    fn get_mut<'w, I>(&self, MutableGetParameters {
+        table_columns, entity_dense_idx, ..
+    }: &mut MutableGetParameters<'w, I>) -> Self::Value<'w>
+        where I: Iterator<Item = &'w mut dynvec::DynVec>
+    {
+        let component = self.component.expect("Wouldn't be matching if this was None");
+        let column = table_columns.next().expect("Requested column should be given");
+
+        column.get_mut(ix!(*entity_dense_idx)).expect("Correct index")
+            .as_typed::<C>()
+            .expect("Should have requested the column with the correct type")
     }
 }

@@ -1431,7 +1431,6 @@ mod queries {
     }
 
     #[test]
-    #[ignore]
     fn query_get_simple_ref() {
         let ctx = create_ctx();
         let query = q::Query::<q::And<(q::EntityHandle, q::Ref<TestComponent1>)>>::new(&ctx.world);
@@ -1446,7 +1445,6 @@ mod queries {
     }
 
     #[test]
-    #[ignore]
     fn query_get_simple_ref_mut() {
         let mut ctx = create_ctx();
         let query = q::Query::<q::And<(q::EntityHandle, q::RefMut<TestComponent1>)>>::new(&ctx.world);
@@ -1461,7 +1459,6 @@ mod queries {
     }
 
     #[test]
-    #[ignore]
     fn query_get_complex_ref() {
         let ctx = create_ctx();
         let query = q::Query::<q::And<(q::EntityHandle, q::Ref<TestComponent1>, q::Has<TestComponent2>)>>::new(&ctx.world);
@@ -1474,7 +1471,6 @@ mod queries {
     }
 
     #[test]
-    #[ignore]
     fn query_get_multiple_refs() {
         let ctx = create_ctx();
         let query = q::Query::<q::And<(q::EntityHandle, q::Ref<TestComponent1>, q::Ref<TestComponent2>)>>::new(&ctx.world);
@@ -1487,7 +1483,6 @@ mod queries {
     }
 
     #[test]
-    #[ignore]
     fn query_get_with_not() {
         let ctx = create_ctx();
         let query = q::Query::<q::And<(q::EntityHandle, q::Ref<TestComponent2>, q::Not<q::Has<TestComponent1>>)>>::new(&ctx.world);
@@ -1521,7 +1516,6 @@ mod queries {
     }
 
     #[test]
-    #[ignore]
     fn iter_mut_on_ref_and_has_query() {
         let mut ctx = create_ctx();
         let query = q::Query::<q::And<(q::EntityHandle, q::RefMut<TestComponent1>, q::Has<TestComponent2>)>>::new(&ctx.world);
@@ -1539,7 +1533,6 @@ mod queries {
     }
 
     #[test]
-    #[ignore]
     fn runtime_component_get() {
         let mut ctx = create_ctx();
         let comp = ctx.world.spawn_component();
@@ -1564,7 +1557,6 @@ mod queries {
     }
 
     #[test]
-    #[ignore]
     fn runtime_component_get_mut() {
         let mut ctx = create_ctx();
         let comp = ctx.world.spawn_component();
@@ -1589,7 +1581,6 @@ mod queries {
     }
 
     #[test]
-    #[ignore]
     fn complex_or_query_get() {
         let ctx = create_ctx();
         let query = q::Query::<q::And<(q::EntityHandle, q::Or<(q::Ref<TestComponent1>, q::Ref<TestComponent2>)>)>>::new(&ctx.world);
@@ -1606,7 +1597,6 @@ mod queries {
     }
 
     #[test]
-    #[ignore]
     fn complex_xor_query_iter_mut() {
         let mut ctx = create_ctx();
         let query = q::Query::<q::And<(q::EntityHandle, q::Xor<(q::RefMut<TestComponent1>, q::RefMut<TestComponent2>)>)>>::new(&ctx.world);
@@ -1622,7 +1612,6 @@ mod queries {
     }
 
     #[test]
-    #[ignore]
     fn get_on_always_query() {
         let ctx = create_ctx();
         let query = q::Query::<q::And<(q::EntityHandle, q::Always)>>::new(&ctx.world);
@@ -1635,7 +1624,6 @@ mod queries {
     }
 
     #[test]
-    #[ignore]
     fn get_on_never_query() {
         let ctx = create_ctx();
         let query = q::Query::<q::And<(q::EntityHandle, q::Never)>>::new(&ctx.world);
@@ -1667,7 +1655,6 @@ mod queries {
     }
 
     #[test]
-    #[ignore]
     fn get_mut_on_complex_query() {
         let mut ctx = create_ctx();
         let query = q::Query::<q::And<(q::EntityHandle, q::RefMut<TestComponent1>, q::RefMut<TestComponent2>)>>::new(&ctx.world);

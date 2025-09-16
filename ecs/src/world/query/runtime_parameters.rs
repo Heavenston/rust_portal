@@ -1,6 +1,7 @@
 use super::{
     QueryParameterImpl, QueryParameterImmutableImpl, ImmutableWorldRef,
     MutableIterParameters, ImmutableIterParameters, ColumnSelectParameters,
+    MutableGetParameters,
 };
 use crate::world::{
     component::ComponentEntity, ArchetypId, Entity, World
@@ -46,6 +47,14 @@ impl QueryParameterImpl for EntityHandle {
         table_entities.iter()
             .map(|&index| Entity::new(index, world.entity_storage.generation_at_index(index)))
     }
+
+    fn get_mut<'w, I>(&self, MutableGetParameters {
+        entity, ..
+    }: &mut MutableGetParameters<'w, I>) -> Self::Value<'w>
+        where I: Iterator<Item = &'w mut dynvec::DynVec>
+    {
+        *entity
+    }
 }
 
 impl QueryParameterImmutableImpl for EntityHandle {
@@ -56,6 +65,10 @@ impl QueryParameterImmutableImpl for EntityHandle {
     }: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
         world.tables[table_id].sparse_set.sparse_indices()
             .map(|index| Entity::new(index, world.generation_at_index(index)))
+    }
+
+    fn get<'w>(&self, parameters: ImmutableIterParameters<'w>, entity: Entity) -> Self::Value<'w> {
+        entity
     }
 }
 
@@ -112,6 +125,15 @@ impl QueryParameterImpl for ComponentRef {
         let column = table_columns.next().expect("Requested column should be given");
         column.iter()
     }
+
+    fn get_mut<'w, I>(&self, MutableGetParameters {
+        table_columns, entity_dense_idx, ..
+    }: &mut MutableGetParameters<'w, I>) -> Self::Value<'w>
+        where I: Iterator<Item = &'w mut dynvec::DynVec>
+    {
+        let column = table_columns.next().expect("Requested column should be given");
+        column.get(ix!(*entity_dense_idx)).expect("Correct index")
+    }
 }
 
 impl QueryParameterImmutableImpl for ComponentRef {
@@ -128,6 +150,19 @@ impl QueryParameterImmutableImpl for ComponentRef {
 
         world.tables[table_id].sparse_set.dense_values()
             .columns()[comp_idx].iter()
+    }
+
+    fn get<'w>(&self, ImmutableIterParameters {
+        world, table_id, ..
+    }: ImmutableIterParameters<'w>, entity: Entity) -> Self::Value<'w> {
+        let table = &world.tables[table_id];
+
+        let Some(comp_idx) = table.table_components.index_of(self.component)
+        else { unreachable!() };
+
+        table.sparse_set.get(entity.index())
+            .expect("Entity is in this table")
+            .for_component(comp_idx)
     }
 }
 
@@ -179,6 +214,15 @@ impl QueryParameterImpl for ComponentRefMut {
     {
         let column = table_columns.next().expect("Requested column should be given");
         column.iter_mut()
+    }
+
+    fn get_mut<'w, I>(&self, MutableGetParameters {
+        table_columns, entity_dense_idx, ..
+    }: &mut MutableGetParameters<'w, I>) -> Self::Value<'w>
+        where I: Iterator<Item = &'w mut dynvec::DynVec>
+    {
+        let column = table_columns.next().expect("Requested column should be given");
+        column.get_mut(ix!(*entity_dense_idx)).expect("Correct index")
     }
 }
 
