@@ -10,7 +10,7 @@
 
 #![forbid(unsafe_code)]
 
-pub mod sparse_set;
+pub mod sparse_map;
 mod world_utils;
 pub mod world;
 pub mod index_map;

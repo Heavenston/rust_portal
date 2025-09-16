@@ -14,7 +14,7 @@ pub use bundle::*;
 use crate::{
     dyn_option::FunDynOption,
     index_map::IndexMap,
-    sparse_set::SparseSet, world_utils::GetComponentTypedError,
+    sparse_map::SparseMap, world_utils::GetComponentTypedError,
 };
 
 use std::{
@@ -87,11 +87,11 @@ struct Archetyp {
 struct Table {
     /// NOTE: This is a subset of the components used to find this table,
     /// as only components that have table storage are stored in this set
-    /// but components that have no storage or are stored in sparse sets
+    /// but components that have no storage or are stored in sparse maps
     /// may still 'fragment' tables.
     table_components: ComponentSet,
     #[try_clone(use_try_clone)]
-    sparse_set: SparseSet<ComponentDenseStorage>,
+    sparse_map: SparseMap<ComponentDenseStorage>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -384,7 +384,7 @@ impl World {
         for reserved in this.entity_storage.reserved_entities() {
             this.entities_archetypes.set_or_push(reserved.index(), empty_archetyp);
             this.tables[this.archetypes[empty_archetyp].table_id]
-                .sparse_set.insert(reserved.index(), empty::<ComponentDenseStorageInput>());
+                .sparse_map.insert(reserved.index(), empty::<ComponentDenseStorageInput>());
         }
 
         // Register this component first as it is required in the code paths
@@ -417,7 +417,7 @@ impl World {
 
         archetyp.entities.insert(entity.index());
         let table = &mut self.tables[archetyp.table_id];
-        table.sparse_set.insert(entity.index(), empty::<ComponentDenseStorageInput>());
+        table.sparse_map.insert(entity.index(), empty::<ComponentDenseStorageInput>());
 
         entity
     }
@@ -488,7 +488,7 @@ impl World {
          */
 
         let old_table = std::mem::take(&mut self.tables[old_table_id]);
-        if old_table.sparse_set.len() == 0 {
+        if old_table.sparse_map.len() == 0 {
             // To this is a bit weird, because we are running this on all
             // archetypes with the given component, some way share the same
             // table_id, which mean we may reach this point on multiple table_ids
@@ -516,7 +516,7 @@ impl World {
         // now we remove everything (drain) the old table and insert everything
         // but the component we are unregistering into the new table
 
-        let mut deconstructed_table = old_table.sparse_set.into_deconstructed();
+        let mut deconstructed_table = old_table.sparse_map.into_deconstructed();
         let mut column_drains = deconstructed_table.dense_values.drain()
             .collect_vec();
 
@@ -532,7 +532,7 @@ impl World {
                     })
                 });
 
-            new_table.sparse_set.insert(entity, components);
+            new_table.sparse_map.insert(entity, components);
         }
     }
 
@@ -574,7 +574,7 @@ impl World {
 
         let table_id: TableId = archetyp.table_id;
 
-        self.tables[table_id].sparse_set.remove(entity.index());
+        self.tables[table_id].sparse_map.remove(entity.index());
 
         Ok(())
     }
@@ -672,7 +672,7 @@ impl World {
                     })
                     .collect();
                 let table_id = self.tables.push(Table {
-                    sparse_set: SparseSet::new(ComponentDenseStorage::new(
+                    sparse_map: SparseMap::new(ComponentDenseStorage::new(
                         table_components.iter()
                             .map(|component| {
                                 let Some(ComponentStorageKind::Table {
@@ -731,7 +731,7 @@ impl World {
 
         let component_idx = table.table_components.index_of(component)
             .expect("Tried to get component in table where it is not present");
-        let component_ref = table.sparse_set.get(entity_index)
+        let component_ref = table.sparse_map.get(entity_index)
             .expect("Tried to get an entity's component in a table where it is not present")
             .for_component(component_idx);
 
@@ -747,7 +747,7 @@ impl World {
 
         let component_idx = table.table_components.index_of(component)
             .expect("Tried to get component in table where it is not present");
-        let component_ref = table.sparse_set.get_mut(entity_index)
+        let component_ref = table.sparse_map.get_mut(entity_index)
             .expect("Tried to get an entity's component in a table where it is not present")
             .for_component(component_idx);
 
@@ -871,7 +871,7 @@ impl World {
             if override_existing_value {
                 let old_table = &mut self.tables[old_table_id];
                 if let Some(comp_idx) = old_table.table_components.index_of(component) {
-                    let component_ref = old_table.sparse_set.get_mut(entity.index())
+                    let component_ref = old_table.sparse_map.get_mut(entity.index())
                         .expect("Got table from the entity's archetyp")
                         .for_component(comp_idx);
                     input.assign_onto(component_ref).expect("Correct type");
@@ -908,7 +908,7 @@ impl World {
             old_table_id, new_table_id,
         ]).expect("Old table and new table are not equal");
 
-        let components = old_table.sparse_set.remove(entity.index())
+        let components = old_table.sparse_map.remove(entity.index())
             .expect("Got table from the entity's archetyp")
             .map(ComponentDenseStorageInput::RemovedDynVecValue);
 
@@ -919,13 +919,13 @@ impl World {
                 // inserts the component into the list at its index
                 let new_components = components.chain_after(new_idx, once(input));
 
-                new_table.sparse_set.insert(entity.index(), new_components);
+                new_table.sparse_map.insert(entity.index(), new_components);
             },
             // This necessarily means that the component uses None storage
             // unless
             // TODO: Sparse storage makes this not sufficient
             None => {
-                new_table.sparse_set.insert(entity.index(), components);
+                new_table.sparse_map.insert(entity.index(), components);
             },
         }
 
@@ -1154,7 +1154,7 @@ impl World {
             old_table_id, new_table_id,
         ]).expect("Old table and new table are not equal");
 
-        let components = old_table.sparse_set.remove(entity.index())
+        let components = old_table.sparse_map.remove(entity.index())
             .expect("entity is in table");
 
         let component_ref = match old_table.table_components.index_of(component) {
@@ -1165,7 +1165,7 @@ impl World {
                 let components = components
                     .extract_nth(component_idx, |comp| extracted_component = Some(comp));
 
-                new_table.sparse_set.insert(entity.index(), components);
+                new_table.sparse_map.insert(entity.index(), components);
 
                 let extracted_component = extracted_component
                     .expect("Exist in iterator so should have been extracted");
@@ -1175,7 +1175,7 @@ impl World {
             None => {
                 debug_assert_matches!(component_storage, ComponentStorageKind::None);
 
-                new_table.sparse_set.insert(entity.index(), components);
+                new_table.sparse_map.insert(entity.index(), components);
 
                 OptionalComponentRef::NoStorage
             },

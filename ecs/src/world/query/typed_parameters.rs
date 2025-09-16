@@ -114,7 +114,7 @@ impl<C> QueryParameterImmutableImpl for Ref<C>
             let comp_idx = world.tables[table_id].table_components.index_of(component)
                 .expect("This component should be in this table");
 
-            world.tables[table_id].sparse_set.dense_values()
+            world.tables[table_id].sparse_map.dense_values()
                 .columns()[comp_idx].typed::<C>().expect("This column should have this type")
                 .as_slice().iter()
         }).left_or(empty())
@@ -130,7 +130,7 @@ impl<C> QueryParameterImmutableImpl for Ref<C>
         let comp_idx = world.tables[table_id].table_components.index_of(component)
             .expect("This component should be in this table");
 
-        table.sparse_set.get(entity.index())
+        table.sparse_map.get(entity.index())
             .expect("Entity is in this table")
             .for_component(comp_idx)
             .as_typed::<C>()

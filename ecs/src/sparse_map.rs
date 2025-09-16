@@ -95,15 +95,16 @@ pub struct DiconstructedSparseSet<S: SparseSetDenseStorage> {
 }
 
 /// Basically a Map<SparseIdx, T>, where the 'SparseIdx' is the sparse idx
+/// Also known as a SparseSet: [`https://manenko.com/2021/05/23/sparse-sets.html`]
 #[derive(Default, TryClone)]
-pub struct SparseSet<S: SparseSetDenseStorage> {
+pub struct SparseMap<S: SparseSetDenseStorage> {
     sparse_to_dense_indices: IndexMap<Option<PlusOneNonZero<S::PrimitiveDenseIdx>>, S::SparseIdx>,
     dense_to_sparse_indices: IndexMap<S::SparseIdx, S::DenseIdx>,
     #[try_clone(use_try_clone)]
     dense_values: S,
 }
 
-impl<S> SparseSet<S>
+impl<S> SparseMap<S>
     where S: SparseSetDenseStorage,
 {
     pub fn new(dense_values: S) -> Self {
@@ -222,7 +223,7 @@ impl<S> SparseSet<S>
     }
 }
 
-impl<S: SparseSetDenseStorage + Debug> Debug for SparseSet<S> {
+impl<S: SparseSetDenseStorage + Debug> Debug for SparseMap<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SparseSet")
             .field_with("sparse_to_dense_indices", |f| {
@@ -240,11 +241,11 @@ impl<S: SparseSetDenseStorage + Debug> Debug for SparseSet<S> {
 
 #[cfg(test)]
 mod tests {
-    use super::SparseSet;
+    use super::SparseMap;
 
     #[test]
     fn insert_and_get_and_mutate() {
-        let mut set = SparseSet::<Vec<i32>>::default();
+        let mut set = SparseMap::<Vec<i32>>::default();
 
         assert!(!set.has(3));
         assert_eq!(set.get(3), None);
@@ -259,7 +260,7 @@ mod tests {
 
     #[test]
     fn insert_overwrite_same_sparse_index() {
-        let mut set = SparseSet::<Vec<&'static str>>::default();
+        let mut set = SparseMap::<Vec<&'static str>>::default();
 
         set.insert(1, "first");
         // Overwrite value at the same sparse index should not grow dense storage
@@ -271,7 +272,7 @@ mod tests {
 
     #[test]
     fn remove_last_element_updates_state() {
-        let mut set = SparseSet::<Vec<i32>>::default();
+        let mut set = SparseMap::<Vec<i32>>::default();
 
         set.insert(1, 100);
         set.insert(7, 200); // this is last in dense order
@@ -286,7 +287,7 @@ mod tests {
 
     #[test]
     fn remove_middle_element_swaps_with_last_and_clears_mapping() {
-        let mut set = SparseSet::<Vec<&'static str>>::default();
+        let mut set = SparseMap::<Vec<&'static str>>::default();
 
         set.insert(10, "a"); // dense 0
         set.insert(20, "b"); // dense 1 (middle)
@@ -310,7 +311,7 @@ mod tests {
 
     #[test]
     fn remove_nonexistent_returns_none_and_noop() {
-        let mut set = SparseSet::<Vec<i32>>::default();
+        let mut set = SparseMap::<Vec<i32>>::default();
         set.insert(2, 5);
         assert_eq!(set.remove(999), None);
         assert!(set.has(2));
@@ -319,7 +320,7 @@ mod tests {
 
     #[test]
     fn iter_yields_pairs_in_dense_order_and_rev() {
-        let mut set = SparseSet::<Vec<&'static str>>::default();
+        let mut set = SparseMap::<Vec<&'static str>>::default();
         set.insert(10, "a");
         set.insert(20, "b");
         set.insert(30, "c");
@@ -338,7 +339,7 @@ mod tests {
 
     #[test]
     fn iter_exact_size_and_clone_and_double_ended() {
-        let mut set = SparseSet::<Vec<i32>>::default();
+        let mut set = SparseMap::<Vec<i32>>::default();
         set.insert(1, 1);
         set.insert(2, 2);
         set.insert(3, 3);
@@ -360,7 +361,7 @@ mod tests {
 
     #[test]
     fn iter_mut_allows_in_place_updates() {
-        let mut set = SparseSet::<Vec<i64>>::default();
+        let mut set = SparseMap::<Vec<i64>>::default();
         set.insert(4, 10);
         set.insert(7, 20);
         set.insert(9, 30);
@@ -377,7 +378,7 @@ mod tests {
 
     #[test]
     fn len_and_sparse_indices_match_insertions() {
-        let mut set = SparseSet::<Vec<i32>>::default();
+        let mut set = SparseMap::<Vec<i32>>::default();
         assert_eq!(set.len(), 0);
         set.insert(4, 10);
         set.insert(7, 20);

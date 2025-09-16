@@ -274,7 +274,7 @@ impl<P: QueryParameterImpl> Query<P> {
                 table_id,
                 table: &table,
             });
-            let (entities, dense_values) = table.sparse_set.split();
+            let (entities, dense_values) = table.sparse_map.split();
 
             // FIXME: Annoying allocation here, not sure how to fix it
             // especialy without unsafe
@@ -339,9 +339,9 @@ impl<P: QueryParameterImpl> Query<P> {
             table_id,
             table: &table,
         });
-        let entity_dense_idx = table.sparse_set.dense_index_of(entity.index())
-            .expect("This entity is in this sparse set");
-        let (table_entities, dense_values) = table.sparse_set.split();
+        let entity_dense_idx = table.sparse_map.dense_index_of(entity.index())
+            .expect("This entity is in this sparse map");
+        let (table_entities, dense_values) = table.sparse_map.split();
 
         // FIXME: Annoying allocation here, not sure how to fix it
         // especialy without unsafe

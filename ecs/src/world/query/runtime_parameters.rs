@@ -63,7 +63,7 @@ impl QueryParameterImmutableImpl for EntityHandle {
     fn iter_table<'w>(&self, ImmutableIterParameters {
         world, table_id, ..
     }: ImmutableIterParameters<'w>) -> Self::ValueIterator<'w> {
-        world.tables[table_id].sparse_set.sparse_indices()
+        world.tables[table_id].sparse_map.sparse_indices()
             .map(|index| Entity::new(index, world.generation_at_index(index)))
     }
 
@@ -148,7 +148,7 @@ impl QueryParameterImmutableImpl for ComponentRef {
         let Some(comp_idx) = world.tables[table_id].table_components.index_of(self.component)
         else { unreachable!() };
 
-        world.tables[table_id].sparse_set.dense_values()
+        world.tables[table_id].sparse_map.dense_values()
             .columns()[comp_idx].iter()
     }
 
@@ -160,7 +160,7 @@ impl QueryParameterImmutableImpl for ComponentRef {
         let Some(comp_idx) = table.table_components.index_of(self.component)
         else { unreachable!() };
 
-        table.sparse_set.get(entity.index())
+        table.sparse_map.get(entity.index())
             .expect("Entity is in this table")
             .for_component(comp_idx)
     }

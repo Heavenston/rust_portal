@@ -5,7 +5,7 @@
 
 use crate::{
     dyn_option::DynOption,
-    sparse_set::{
+    sparse_map::{
         SparseSetDenseStorage, SparseSetDenseStorageInput
     },
     world::EntityIndex,

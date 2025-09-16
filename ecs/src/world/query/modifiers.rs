@@ -102,7 +102,7 @@ impl<C> QueryParameterImmutableImpl for Optional<C>
             .then(|| self.child.iter_table(parameters).map(Some))
             .left_or_else(||
                 repeat_with(|| None)
-                    .take(ix!(world.tables[table_id].sparse_set.len()))
+                    .take(ix!(world.tables[table_id].sparse_map.len()))
             )
     }
 
@@ -170,7 +170,7 @@ impl<C> QueryParameterImmutableImpl for NoFetch<C>
     fn iter_table<'w>(&self, ImmutableIterParameters {
         world, table_id, ..
     }: ImmutableIterParameters<'w>) -> RepeatN<()> {
-        repeat_n((), ix!(world.tables[table_id].sparse_set.len()))
+        repeat_n((), ix!(world.tables[table_id].sparse_map.len()))
     }
 
     fn get<'w>(&self, parameters: ImmutableIterParameters<'w>, entity: Entity) { }
@@ -236,7 +236,7 @@ impl<C> QueryParameterImmutableImpl for Not<C>
     fn iter_table<'w>(&self, ImmutableIterParameters {
         world, table_id, ..
     }: ImmutableIterParameters<'w>) -> RepeatN<()> {
-        repeat_n((), ix!(world.tables[table_id].sparse_set.len()))
+        repeat_n((), ix!(world.tables[table_id].sparse_map.len()))
     }
 
     fn get<'w>(&self, parameters: ImmutableIterParameters<'w>, entity: Entity) { }
