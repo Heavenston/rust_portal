@@ -1300,6 +1300,81 @@ mod queries {
     }
 
     #[test]
+    #[should_panic = "Cannot use a component column multiple time in the same query"]
+    fn ref_mut_fail() {
+        let mut ctx = create_ctx();
+        // This should fail because we are requesting two mut reference to the same obj
+        let query = q::Query::<q::And<(q::RefMut<TestComponent1>, q::RefMut<TestComponent1>)>>::new(&ctx.world);
+
+        for _ in query.iter_mut(&mut ctx.world) { }
+    }
+
+    #[test]
+    fn runtime_has_component_simple() {
+        let mut ctx = create_ctx();
+        let comp = ctx.world.spawn_component();
+
+        let with_comp = (0..5).map(|_| {
+            let e = ctx.world.spawn();
+            ctx.world.add_component(e, comp).unwrap();
+            e
+        }).collect_vec();
+        
+        let query = q::Query::<q::And<(q::EntityHandle, q::HasComponent)>>::new_with_config(&ctx.world, ((), comp));
+
+        assert_eq!(
+            query.iter(&ctx.world).map(|(entity, ())| entity).collect_vec(),
+            with_comp,
+        )
+    }
+
+    #[test]
+    fn runtime_component_ref_custom_comp() {
+        let mut ctx = create_ctx();
+        let comp = ctx.world.spawn_component();
+        ctx.world.set(comp, ComponentStorageComponent {
+            dynvec_meta: DynVecMetadata::new::<String>(),
+        }).unwrap();
+
+        let with_comp = (0..5).map(|i| {
+            let e = ctx.world.spawn();
+            let value = format!("{i}");
+            ctx.world.add_component_with(e, comp, || value.clone()).unwrap();
+            (e, value)
+        }).collect_vec();
+        
+        let query = q::Query::<q::And<(q::EntityHandle, q::ComponentRef)>>::new_with_config(&ctx.world, ((), comp));
+
+        assert_eq!(
+            query.iter(&ctx.world).map(|(entity, ref_)| (entity, ref_.as_typed::<String>().unwrap().as_str())).collect_vec(),
+            with_comp.iter().map(|(e, str)| (*e, str.as_str())).collect_vec(),
+        )
+    }
+
+    #[test]
+    fn runtime_component_ref_mut_custom_comp() {
+        let mut ctx = create_ctx();
+        let comp = ctx.world.spawn_component();
+        ctx.world.set(comp, ComponentStorageComponent {
+            dynvec_meta: DynVecMetadata::new::<String>(),
+        }).unwrap();
+
+        let with_comp = (0..5).map(|i| {
+            let e = ctx.world.spawn();
+            let value = format!("{i}");
+            ctx.world.add_component_with(e, comp, || value.clone()).unwrap();
+            (e, value)
+        }).collect_vec();
+        
+        let query = q::Query::<q::And<(q::EntityHandle, q::ComponentRefMut)>>::new_with_config(&ctx.world, ((), comp));
+
+        assert_eq!(
+            query.iter_mut(&mut ctx.world).map(|(entity, ref_)| (entity, ref_.as_typed::<String>().unwrap().as_str())).collect_vec(),
+            with_comp.iter().map(|(e, str)| (*e, str.as_str())).collect_vec(),
+        )
+    }
+
+    #[test]
     fn stays_up_to_date() {
         let mut ctx = create_ctx();
         let query = q::Query::<q::And<(q::EntityHandle, q::Ref<TestComponent1>)>>::new(&ctx.world);

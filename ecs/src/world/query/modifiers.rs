@@ -319,7 +319,7 @@ macro_rules! impl_and {
         }
     };
 }
-variadics_please::all_tuples!(impl_and, 1, 3, T);
+variadics_please::all_tuples!(impl_and, 1, 16, T);
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct Or<Tuple> {
@@ -404,6 +404,6 @@ macro_rules! impl_or {
         }
     };
 }
-variadics_please::all_tuples!(impl_or, 1, 3, T);
+variadics_please::all_tuples!(impl_or, 1, 16, T);
 
 pub type Xor<Tuple> = And<(Or<Tuple>, Not<And<Tuple>>)>;

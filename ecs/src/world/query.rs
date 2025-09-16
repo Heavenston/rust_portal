@@ -234,44 +234,46 @@ impl<P: QueryParameterImpl> Query<P> {
         let tables = &mut world.tables;
         let world = borrow_world!(world);
 
-        tables.get_sorted_disjoint_mut(
-            // FIXME: Archetyps are sorted but their tables ids are NOT
-            // so this WILL break with anykind of table id reuse or non-table-fragmenting components
+        // FIXME: Archetyp ids are sorted but when getting their table
+        // ids, if any sort of id reuse is done they will **NOT** be sorted
+        // so this will break at some point.
+        let matched_tables = tables.get_sorted_disjoint_mut(
             self.archetypes(&world)
                 .map(|archetyp_id| {
                     let table_id = world.archetypes[archetyp_id].table_id;
                     (archetyp_id, table_id)
                 })
-        )
-            .flat_map(move |(archetyp_id, table_id, table)| {
-                let archetyp = &world.archetypes[archetyp_id];
+        );
 
-                let asked_columns = self.parameters.table_columns(&ColumnSelectParameters {
-                    world: world.reborrow(),
-                    archetyp_id,
-                    archetyp,
-                    table_id,
-                    table: &table,
-                });
-                let (entities, dense_values) = table.sparse_set.split();
+        matched_tables.flat_map(move |(archetyp_id, table_id, table)| {
+            let archetyp = &world.archetypes[archetyp_id];
 
-                // FIXME: Annoying allocation here, not sure how to fix it
-                // especialy without unsafe
-                let mut columns_refs = dense_values.columns_mut().iter_mut()
-                    .map(Some)
-                    .collect_vec();
+            let asked_columns = self.parameters.table_columns(&ColumnSelectParameters {
+                world: world.reborrow(),
+                archetyp_id,
+                archetyp,
+                table_id,
+                table: &table,
+            });
+            let (entities, dense_values) = table.sparse_set.split();
 
-                self.parameters.iter_table_mut(&mut MutableIterParameters {
-                    world: world.reborrow(),
-                    archetyp_id,
-                    archetyp,
-                    table_id,
-                    table_entities: entities.as_slice(),
-                    table_columns: asked_columns.map(move |column_idx| {
-                        columns_refs[column_idx].take().expect("Cannot use a component column multiple time in the same query")
-                    }),
-                })
+            // FIXME: Annoying allocation here, not sure how to fix it
+            // especialy without unsafe
+            let mut columns_refs = dense_values.columns_mut().iter_mut()
+                .map(Some)
+                .collect_vec();
+
+            self.parameters.iter_table_mut(&mut MutableIterParameters {
+                world: world.reborrow(),
+                archetyp_id,
+                archetyp,
+                table_id,
+                table_entities: entities.as_slice(),
+                table_columns: asked_columns.map(move |column_idx| {
+                    columns_refs[column_idx].take().expect("Cannot use a component column multiple time in the same query")
+                }),
             })
+        })
     }
 
     pub fn get<'a, 'b>(&'a self, world: &'b World, entity: Entity) -> Result<P::Value<'b>, QueryGetError>

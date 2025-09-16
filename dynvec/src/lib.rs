@@ -520,12 +520,11 @@ impl DynVec {
 
     /// Returns an iterator over reference of all elements in this vec
     pub fn iter_mut(&mut self) -> impl Iterator<Item = DynVecValueRefMut<'_>> + DoubleEndedIterator + ExactSizeIterator {
-        // (0..self.len).map(|idx| DynVecValueRefMut {
-        //     vec: self,
-        //     idx,
-        // })
-        todo!();
-        std::iter::empty()
+        (0..self.len).map(|idx| DynVecValueRefMut {
+            metadata: &self.meta,
+            ptr: unsafe { self.idx_ptr(idx) },
+            _data: PhantomData,
+        })
     }
 
     /// Removes all elements from the vec like [`DynVec::clear`], but
