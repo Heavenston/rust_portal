@@ -1429,4 +1429,261 @@ mod queries {
             .collect_vec(),
         );
     }
+
+    #[test]
+    #[ignore]
+    fn query_get_simple_ref() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::Ref<TestComponent1>)>>::new(&ctx.world);
+        
+        let first_test_1 = ctx.with_test_1[0];
+        let first_both = ctx.with_both[0];
+        let first_nothing = ctx.with_nothing[0];
+        
+        assert_matches!(query.get(&ctx.world, first_test_1), Ok((entity, &TestComponent1(42))) if entity == first_test_1);
+        assert_matches!(query.get(&ctx.world, first_both), Ok((entity, &TestComponent1(50))) if entity == first_both);
+        assert!(query.get(&ctx.world, first_nothing).is_err());
+    }
+
+    #[test]
+    #[ignore]
+    fn query_get_simple_ref_mut() {
+        let mut ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::RefMut<TestComponent1>)>>::new(&ctx.world);
+        
+        let first_test_1 = ctx.with_test_1[0];
+        let first_both = ctx.with_both[0];
+        let first_nothing = ctx.with_nothing[0];
+        
+        assert_matches!(query.get_mut(&mut ctx.world, first_test_1), Ok((entity, ref mut comp)) if entity == first_test_1 && **comp == TestComponent1(42));
+        assert_matches!(query.get_mut(&mut ctx.world, first_both), Ok((entity, ref mut comp)) if entity == first_both && **comp == TestComponent1(50));
+        assert!(query.get_mut(&mut ctx.world, first_nothing).is_err());
+    }
+
+    #[test]
+    #[ignore]
+    fn query_get_complex_ref() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::Ref<TestComponent1>, q::Has<TestComponent2>)>>::new(&ctx.world);
+        
+        let first_test_1 = ctx.with_test_1[0];
+        let first_both = ctx.with_both[0];
+        
+        assert!(query.get(&ctx.world, first_test_1).is_err());
+        assert_matches!(query.get(&ctx.world, first_both), Ok((entity, &TestComponent1(50), ())) if entity == first_both);
+    }
+
+    #[test]
+    #[ignore]
+    fn query_get_multiple_refs() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::Ref<TestComponent1>, q::Ref<TestComponent2>)>>::new(&ctx.world);
+        
+        let first_test_1 = ctx.with_test_1[0];
+        let first_both = ctx.with_both[0];
+        
+        assert!(query.get(&ctx.world, first_test_1).is_err());
+        assert_matches!(query.get(&ctx.world, first_both), Ok((entity, &TestComponent1(50), &TestComponent2(99.))) if entity == first_both);
+    }
+
+    #[test]
+    #[ignore]
+    fn query_get_with_not() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::Ref<TestComponent2>, q::Not<q::Has<TestComponent1>>)>>::new(&ctx.world);
+        
+        let first_test_2 = ctx.with_test_2[0];
+        let first_both = ctx.with_both[0];
+        
+        assert_matches!(query.get(&ctx.world, first_test_2), Ok((entity, &TestComponent2(88.), ())) if entity == first_test_2);
+        assert!(query.get(&ctx.world, first_both).is_err());
+    }
+
+    #[test]
+    fn mixed_iter_and_iter_mut_on_ref_query() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::Ref<TestComponent1>)>>::new(&ctx.world);
+        
+        let iter_results: Vec<_> = query.iter(&ctx.world)
+            .map(|(e, &comp)| (e, comp))
+            .collect();
+        
+        let expected: Vec<_> = empty::<(Entity, TestComponent1)>()
+            .chain(zip(ctx.with_test_1.iter().copied(), repeat(TestComponent1(42))))
+            .chain(zip(ctx.with_both.iter().copied(), repeat(TestComponent1(50))))
+            .collect();
+        
+        assert_eq!(iter_results.len(), expected.len());
+        
+        for (entity, _) in iter_results {
+            assert!(expected.iter().any(|&(e, _)| e == entity));
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn iter_mut_on_ref_and_has_query() {
+        let mut ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::RefMut<TestComponent1>, q::Has<TestComponent2>)>>::new(&ctx.world);
+        
+        let mut results = Vec::new();
+        for (entity, comp, _) in query.iter_mut(&mut ctx.world) {
+            results.push((entity, *comp));
+            *comp = TestComponent1(999);
+        }
+        
+        assert_eq!(results.len(), ctx.with_both.len());
+        for &entity in &ctx.with_both {
+            assert_eq!(ctx.world.get::<TestComponent1>(entity).unwrap(), &TestComponent1(999));
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn runtime_component_get() {
+        let mut ctx = create_ctx();
+        let comp = ctx.world.spawn_component();
+        ctx.world.set(comp, ComponentStorageComponent {
+            dynvec_meta: DynVecMetadata::new::<u32>(),
+        }).unwrap();
+
+        let test_entity = ctx.world.spawn();
+        ctx.world.add_component_with(test_entity, comp, || 42u32).unwrap();
+        
+        let query = q::Query::<q::And<(q::EntityHandle, q::ComponentRef)>>::new_with_config(&ctx.world, ((), comp));
+        
+        let result = query.get(&ctx.world, test_entity);
+        assert!(result.is_ok());
+        if let Ok((entity, comp_ref)) = result {
+            assert_eq!(entity, test_entity);
+            assert_eq!(comp_ref.as_typed::<u32>().unwrap(), &42u32);
+        }
+        
+        let other_entity = ctx.world.spawn();
+        assert!(query.get(&ctx.world, other_entity).is_err());
+    }
+
+    #[test]
+    #[ignore]
+    fn runtime_component_get_mut() {
+        let mut ctx = create_ctx();
+        let comp = ctx.world.spawn_component();
+        ctx.world.set(comp, ComponentStorageComponent {
+            dynvec_meta: DynVecMetadata::new::<String>(),
+        }).unwrap();
+
+        let test_entity = ctx.world.spawn();
+        ctx.world.add_component_with(test_entity, comp, || "initial".to_string()).unwrap();
+        
+        let query = q::Query::<q::And<(q::EntityHandle, q::ComponentRefMut)>>::new_with_config(&ctx.world, ((), comp));
+        
+        if let Ok((entity, comp_ref)) = query.get_mut(&mut ctx.world, test_entity) {
+            assert_eq!(entity, test_entity);
+            *comp_ref.as_typed::<String>().unwrap() = "modified".to_string();
+        }
+        
+        assert_eq!(
+            ctx.world.get_component(test_entity, comp).unwrap().as_typed::<String>().unwrap(),
+            "modified"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn complex_or_query_get() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::Or<(q::Ref<TestComponent1>, q::Ref<TestComponent2>)>)>>::new(&ctx.world);
+        
+        let first_test_1 = ctx.with_test_1[0];
+        let first_test_2 = ctx.with_test_2[0];
+        let first_both = ctx.with_both[0];
+        let first_nothing = ctx.with_nothing[0];
+        
+        assert!(query.get(&ctx.world, first_test_1).is_ok());
+        assert!(query.get(&ctx.world, first_test_2).is_ok());
+        assert!(query.get(&ctx.world, first_both).is_ok());
+        assert!(query.get(&ctx.world, first_nothing).is_err());
+    }
+
+    #[test]
+    #[ignore]
+    fn complex_xor_query_iter_mut() {
+        let mut ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::Xor<(q::RefMut<TestComponent1>, q::RefMut<TestComponent2>)>)>>::new(&ctx.world);
+        
+        let mut count = 0;
+        for (entity, _) in query.iter_mut(&mut ctx.world) {
+            count += 1;
+            assert!(ctx.with_test_1.contains(&entity) || ctx.with_test_2.contains(&entity));
+            assert!(!ctx.with_both.contains(&entity));
+        }
+        
+        assert_eq!(count, ctx.with_test_1.len() + ctx.with_test_2.len());
+    }
+
+    #[test]
+    #[ignore]
+    fn get_on_always_query() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::Always)>>::new(&ctx.world);
+        
+        let first_nothing = ctx.with_nothing[0];
+        assert_matches!(query.get(&ctx.world, first_nothing), Ok((entity, ())) if entity == first_nothing);
+        
+        let first_test_1 = ctx.with_test_1[0];
+        assert_matches!(query.get(&ctx.world, first_test_1), Ok((entity, ())) if entity == first_test_1);
+    }
+
+    #[test]
+    #[ignore]
+    fn get_on_never_query() {
+        let ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::Never)>>::new(&ctx.world);
+        
+        let first_nothing = ctx.with_nothing[0];
+        assert!(query.get(&ctx.world, first_nothing).is_err());
+        
+        let first_test_1 = ctx.with_test_1[0];
+        assert!(query.get(&ctx.world, first_test_1).is_err());
+    }
+
+    #[test]
+    fn iter_mut_on_mixed_ref_refmut() {
+        let mut ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::Ref<TestComponent1>, q::RefMut<TestComponent2>)>>::new(&ctx.world);
+        
+        let mut modified_entities = Vec::new();
+        for (entity, test1_ref, test2_mut) in query.iter_mut(&mut ctx.world) {
+            assert_eq!(test1_ref, &TestComponent1(50));
+            *test2_mut = TestComponent2(999.0);
+            modified_entities.push(entity);
+        }
+        
+        assert_eq!(modified_entities.len(), ctx.with_both.len());
+        for &entity in &ctx.with_both {
+            assert_eq!(ctx.world.get::<TestComponent2>(entity).unwrap(), &TestComponent2(999.0));
+            assert_eq!(ctx.world.get::<TestComponent1>(entity).unwrap(), &TestComponent1(50));
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn get_mut_on_complex_query() {
+        let mut ctx = create_ctx();
+        let query = q::Query::<q::And<(q::EntityHandle, q::RefMut<TestComponent1>, q::RefMut<TestComponent2>)>>::new(&ctx.world);
+        
+        let first_both = ctx.with_both[0];
+        let first_test_1 = ctx.with_test_1[0];
+        
+        if let Ok((entity, comp1, comp2)) = query.get_mut(&mut ctx.world, first_both) {
+            assert_eq!(entity, first_both);
+            *comp1 = TestComponent1(777);
+            *comp2 = TestComponent2(888.0);
+        }
+        
+        assert!(query.get_mut(&mut ctx.world, first_test_1).is_err());
+        
+        assert_eq!(ctx.world.get::<TestComponent1>(first_both).unwrap(), &TestComponent1(777));
+        assert_eq!(ctx.world.get::<TestComponent2>(first_both).unwrap(), &TestComponent2(888.0));
+    }
 }

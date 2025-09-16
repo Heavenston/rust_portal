@@ -285,4 +285,12 @@ impl<P: QueryParameterImpl> Query<P> {
 
         todo!()
     }
+
+    pub fn get_mut<'a, 'b>(&'a self, world: &'b mut World, entity: Entity) -> Result<P::Value<'b>, QueryGetError> {
+        if !world.alive(entity) {
+            return Err(QueryGetError::EntityIsNotAlive { entity });
+        }
+
+        todo!()
+    }
 }
