@@ -11,3 +11,6 @@ derive-where = { version = "1.5.0", features = ["nightly"] }
 derive_more = { version = "2.0.1", features = ["from", "into", "is_variant"] }
 thiserror = "2.0.16"
 variadics_please = "1.1.0"
+
+[lints]
+workspace = true

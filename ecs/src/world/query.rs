@@ -49,7 +49,7 @@ mod private {
         pub(super) components_set_to_table: &'w HashMap<ComponentSet, TableId>,
     }
 
-    impl<'w> ImmutableWorldRef<'w> {
+    impl ImmutableWorldRef<'_> {
         pub fn reborrow(&self) -> Self {
             Self {
                 entity_storage: self.entity_storage,
@@ -221,7 +221,7 @@ impl<P: QueryParameterImpl> Query<P> {
         self.cache = Some(self.generate_cache(world));
     }
 
-    fn archetypes<'s, 'b, 'w>(&'s self, world: &'b ImmutableWorldRef<'w>) -> impl Iterator<Item = ArchetypId> + use<'s, 'w, P> {
+    fn archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> impl Iterator<Item = ArchetypId> + use<'s, 'w, P> {
         let world = world.reborrow();
 
         self.cache.as_ref()
@@ -229,7 +229,7 @@ impl<P: QueryParameterImpl> Query<P> {
             .left_or_else(move || self.parameters.matching_archetypes(&world))
     }
 
-    fn tables<'a, 'w>(&'a self, world: &'w World) -> impl Iterator<Item = (ArchetypId, TableId)> + use<'a, 'w, P> {
+    fn tables(&self, world: &World) -> impl Iterator<Item = (ArchetypId, TableId)> {
         self.archetypes(&borrow_world!(world))
             .map(|archetyp_id| (archetyp_id, world.archetypes[archetyp_id].table_id))
     }
@@ -240,7 +240,7 @@ impl<P: QueryParameterImpl> Query<P> {
             .map(|index| Entity::new(index, world.generation_at_index(index)))
     }
 
-    pub fn iter<'s, 'w>(&'s self, world: &'w World) -> impl Iterator<Item = P::Value<'w>>
+    pub fn iter<'w>(&self, world: &'w World) -> impl Iterator<Item = P::Value<'w>>
         where P: QueryParameterImmutable,
     {
         self.tables(world)
@@ -249,7 +249,7 @@ impl<P: QueryParameterImpl> Query<P> {
             }))
     }
 
-    pub fn iter_mut<'s, 'w>(&'s self, world: &'w mut World) -> impl Iterator<Item = P::Value<'w>> {
+    pub fn iter_mut<'w>(&self, world: &'w mut World) -> impl Iterator<Item = P::Value<'w>> {
         let tables = &mut world.tables;
         let world = borrow_world!(world);
 
@@ -295,7 +295,7 @@ impl<P: QueryParameterImpl> Query<P> {
         })
     }
 
-    pub fn get<'a, 'b>(&'a self, world: &'b World, entity: Entity) -> Result<P::Value<'b>, QueryGetError>
+    pub fn get<'b>(&self, world: &'b World, entity: Entity) -> Result<P::Value<'b>, QueryGetError>
         where P: QueryParameterImmutable,
     {
         if !world.alive(entity) {
@@ -315,7 +315,7 @@ impl<P: QueryParameterImpl> Query<P> {
         }, entity))
     }
 
-    pub fn get_mut<'a, 'b>(&'a self, world: &'b mut World, entity: Entity) -> Result<P::Value<'b>, QueryGetError> {
+    pub fn get_mut<'b>(&self, world: &'b mut World, entity: Entity) -> Result<P::Value<'b>, QueryGetError> {
         if !world.alive(entity) {
             return Err(QueryGetError::EntityIsNotAlive { entity });
         }

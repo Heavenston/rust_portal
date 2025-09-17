@@ -5,7 +5,6 @@ use super::{
 };
 use crate::world::{ ArchetypId, Entity, World };
 
-use std::iter::{ repeat_n, repeat_with, empty, Empty, RepeatN };
 use utils::prelude::*;
 use utils::itertools::{ izip, chain };
 
@@ -167,13 +166,13 @@ impl<C> QueryParameterImmutableImpl for NoFetch<C>
 {
     type ValueIterator<'a> = RepeatN<()>;
 
-    fn iter_table<'w>(&self, ImmutableIterParameters {
+    fn iter_table(&self, ImmutableIterParameters {
         world, table_id, ..
-    }: ImmutableIterParameters<'w>) -> RepeatN<()> {
+    }: ImmutableIterParameters<'_>) -> RepeatN<()> {
         repeat_n((), ix!(world.tables[table_id].sparse_map.len()))
     }
 
-    fn get<'w>(&self, parameters: ImmutableIterParameters<'w>, entity: Entity) { }
+    fn get(&self, parameters: ImmutableIterParameters<'_>, entity: Entity) { }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -233,13 +232,13 @@ impl<C> QueryParameterImmutableImpl for Not<C>
 {
     type ValueIterator<'a> = RepeatN<()>;
 
-    fn iter_table<'w>(&self, ImmutableIterParameters {
+    fn iter_table(&self, ImmutableIterParameters {
         world, table_id, ..
-    }: ImmutableIterParameters<'w>) -> RepeatN<()> {
+    }: ImmutableIterParameters<'_>) -> RepeatN<()> {
         repeat_n((), ix!(world.tables[table_id].sparse_map.len()))
     }
 
-    fn get<'w>(&self, parameters: ImmutableIterParameters<'w>, entity: Entity) { }
+    fn get(&self, parameters: ImmutableIterParameters<'_>, entity: Entity) { }
 }
 
 macro_rules! bool_or_all {
@@ -257,7 +256,6 @@ macro_rules! bool_and_all {
 }
 
 macro_rules! bool_or_else {
-    () => { False.into_bool() };
     ($first: expr) => { $first.into_bool() };
     ($first: expr $(, $rest: expr)+) => {
         PartialBool::or_else($first, || bool_or_else!($($rest),*))

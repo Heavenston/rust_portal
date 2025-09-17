@@ -88,6 +88,7 @@ impl<T> SparseSetDenseStorage for Vec<T> {
     }
 }
 
+#[derive(Debug)]
 pub struct DiconstructedSparseSet<S: SparseSetDenseStorage> {
     pub sparse_to_dense_indices: IndexMap<Option<PlusOneNonZero<S::PrimitiveDenseIdx>>, S::SparseIdx>,
     pub dense_to_sparse_indices: IndexMap<S::SparseIdx, S::DenseIdx>,
@@ -95,7 +96,7 @@ pub struct DiconstructedSparseSet<S: SparseSetDenseStorage> {
 }
 
 /// Basically a Map<SparseIdx, T>, where the 'SparseIdx' is the sparse idx
-/// Also known as a SparseSet: [`https://manenko.com/2021/05/23/sparse-sets.html`]
+/// Also known as a SparseSet: [https://manenko.com/2021/05/23/sparse-sets.html]
 #[derive(Default, TryClone)]
 pub struct SparseMap<S: SparseSetDenseStorage> {
     sparse_to_dense_indices: IndexMap<Option<PlusOneNonZero<S::PrimitiveDenseIdx>>, S::SparseIdx>,

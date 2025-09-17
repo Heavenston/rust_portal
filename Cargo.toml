@@ -10,3 +10,25 @@ pgk = { path = "./graphics-kernel", package = "portal-graphics-kernel" }
 engine = { path = "./engine", package = "portal-engine" }
 shader-preprocessor = { path = "./shader-preprocessor", package = "portal-shader-preprocessor" }
 dynvec = { path = "./dynvec", package = "portal-dynvec" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+impl_trait_redundant_captures = "warn"
+redundant_imports = "warn"
+refining_impl_trait = "allow"
+let_underscore_drop = "warn"
+macro_use_extern_crate = "deny"
+missing_debug_implementations = "warn"
+# non_exhaustive_omitted_patterns = "deny"
+redundant_lifetimes = "deny"
+single_use_lifetimes = "warn"
+# supertrait_item_shadowing_definition = "warn"
+unit_bindings = "warn"
+unused_crate_dependencies = "warn"
+unused_import_braces = "warn"
+unused_macro_rules = "warn"
+unused_qualifications = "warn"
+
+# TODO: Switch both to warn if possible(?)
+unnameable_types = "allow"
+unreachable_pub = "allow"

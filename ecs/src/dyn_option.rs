@@ -38,6 +38,7 @@ impl<T: 'static> DynOption for Option<T> {
     }
 }
 
+#[derive(Debug)]
 pub struct FunDynOption<F>(Option<F>);
 
 impl<F> FunDynOption<F> {

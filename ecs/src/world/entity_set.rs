@@ -60,6 +60,14 @@ impl<P> EntitySet<P>
     }
 }
 
+impl<P> Extend<P> for EntitySet<P>
+    where P: Ord + Into<Entity> + Default + Copy,
+{
+    fn extend<T: IntoIterator<Item = P>>(&mut self, iter: T) {
+        self.entities.extend(iter.into_iter());
+    }
+}
+
 impl<P> From<&[P]> for EntitySet<P>
     where P: Ord + Into<Entity> + Default + Copy,
 {
@@ -84,7 +92,7 @@ pub type ComponentSet = EntitySet<super::ComponentEntity>;
 
 #[cfg(test)]
 mod tests {
-    use super::{EntitySet};
+    use super::EntitySet;
     use crate::world::{Entity, EntityIndex, EntityGeneration};
 
     fn e(i: u32, _g: u32) -> Entity {

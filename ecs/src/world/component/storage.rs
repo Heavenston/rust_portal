@@ -11,12 +11,11 @@ use crate::{
     world::EntityIndex,
 };
 
-use std::iter::{ empty, once };
 use std::fmt::Debug;
 
 use utils::{ itertools::{ chain, zip_eq }, prelude::* };
 use derive_more::From;
-use dynvec::{ DrainedDynVecValue, DynVec, DynVecDrain, IncorrectTypeError, RemovedDynVecValue };
+use dynvec::{ DrainedDynVecValue, DynVec, DynVecDrain, RemovedDynVecValue };
 
 pub struct StorageComponentsRef<'a> {
     idx: usize,
@@ -172,7 +171,7 @@ pub enum ComponentDenseStorageInput<'a, 'b> {
     Default,
 }
 
-impl<'a, 'b> ComponentDenseStorageInput<'a, 'b> {
+impl ComponentDenseStorageInput<'_, '_> {
     pub fn push_into(self, dyn_vec: &mut DynVec) -> Result<(), dynvec::IncorrectTypeError> {
         match self {
             Self::RemovedDynVecValue(value) => value.push_into(dyn_vec),
@@ -209,7 +208,7 @@ impl<'a, 'b, T, I> SparseSetDenseStorageInput<I> for ComponentDenseStorage
     fn push(&mut self, comps: I) {
         self.len += 1;
         for (i, (storage, comp)) in zip_eq(self.storages.iter_mut(), comps).enumerate() {
-            let type_result: Result<(), IncorrectTypeError> = comp.into().push_into(storage);
+            let type_result: Result<(), dynvec::IncorrectTypeError> = comp.into().push_into(storage);
 
             if let Err(err) = type_result {
                 panic!("Error pushing component {i} (with {:?}): {err}", std::fmt::from_fn(|f| self.debug_types(f)));

@@ -105,7 +105,7 @@ mod entity {
         }
     }
 
-    impl<'a> Into<Entity> for &'a Entity {
+    impl Into<Entity> for &Entity {
         fn into(self) -> Entity {
             *self
         }

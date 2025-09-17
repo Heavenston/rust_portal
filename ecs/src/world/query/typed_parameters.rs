@@ -8,7 +8,6 @@ use crate::world::{ component::ComponentEntity, ArchetypId, Component, Entity, W
 
 use derive_where::derive_where;
 use utils::prelude::*;
-use std::iter::{ empty, once, Once };
 use std::marker::PhantomData;
 
 #[derive_where(Debug, Clone, Copy)]

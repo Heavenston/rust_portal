@@ -8,10 +8,8 @@
 #![feature(min_specialization)]
 #![feature(type_alias_impl_trait)]
 
-#![forbid(unsafe_code)]
-
 pub mod sparse_map;
-mod world_utils;
-pub mod world;
 pub mod index_map;
 pub mod dyn_option;
+pub mod world;
+mod world_utils;

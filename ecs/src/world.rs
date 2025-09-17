@@ -21,11 +21,10 @@ use std::{
     any::TypeId,
     assert_matches::debug_assert_matches,
     borrow::Cow,
-    collections::HashMap,
-    iter::{ empty, once }, ops::Deref
+    collections::HashMap, ops::Deref
 };
 use utils::{ extract_nth::ExtractNthExt, itertools::Itertools, prelude::* };
-use derive_more::{ IsVariant };
+use derive_more::IsVariant;
 use dynvec::{ DynVec, DynVecMetadata, DynVecValueRef, DynVecValueRefMut, RemovedDynVecValue };
 
 const RESERVED_ENTITY_COUNT: u32 = 100;
@@ -160,7 +159,7 @@ impl<'a, C> MaybeReadOnlyComponentRef<'a, C> {
     }
 }
 
-impl<'a, C> Deref for MaybeReadOnlyComponentRef<'a, C> {
+impl<C> Deref for MaybeReadOnlyComponentRef<'_, C> {
     type Target = C;
 
     fn deref(&self) -> &Self::Target {
@@ -844,24 +843,17 @@ impl World {
     /// If ComponentDenseStorageInput::Default is provided as input the
     /// component must have a default constructor, otherwise there will be a
     /// panic internally.
-    /// 
-    /// A mutable ref is returned wether the component is ReadOnly or not
-    /// it is the responsability of the caller to not provide the mutable ref
-    /// to an external caller
-    // TODO: Be able to insert mutliple components at once, what would be the
-    // best api for this ? (something like bevy's bundles I guess)
-    fn add_component_internal<'b>(
+    fn add_component_internal(
         &'_ mut self,
         entity: Entity,
         component: ComponentEntity,
-        input: ComponentDenseStorageInput<'_, 'b>,
+        input: ComponentDenseStorageInput<'_, '_>,
         override_existing_value: bool,
     ) -> AddComponent {
         // things that should be checked before calling this function
         debug_assert!(self.alive(entity));
         debug_assert!(self.alive(component));
-        // In theory (it does not implement Eq)
-        // debug_assert_eq!(self.component_storage(component), Some(component_storage));
+        // debug_assert_eq!(self.component_storage(component), Some(component_storage)); // -> in theory (it does not implement Eq)
 
         let old_archetyp_id = self.entities_archetypes[entity.index()];
         let old_archetyp = &mut self.archetypes[old_archetyp_id];

@@ -8,7 +8,6 @@ use crate::world::{
 };
 
 use utils::prelude::*;
-use std::iter::{ empty, Empty, once, Once };
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct EntityHandle;

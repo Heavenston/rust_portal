@@ -57,7 +57,7 @@ impl ComponentEntity {
     }
 }
 
-impl<'a> Into<Entity> for &'a ComponentEntity {
+impl Into<Entity> for &ComponentEntity {
     fn into(self) -> Entity {
         self.0
     }
