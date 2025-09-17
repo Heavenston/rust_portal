@@ -205,7 +205,7 @@ impl<T> IntoIterator for BitSet<T>
     }
 }
 
-impl<'a, T> IntoIterator for &'a BitSet<T>
+impl<T> IntoIterator for &BitSet<T>
     where T: BitSetIndex,
 {
     type Item = T;

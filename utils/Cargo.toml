@@ -7,7 +7,6 @@ edition = "2024"
 utils-macros = { workspace = true }
 
 derive-where = { version = "1.5.0", features = ["nightly"] }
-getset = "0.1.6"
 readonly = "0.2.13"
 itertools = "0.14.0"
 glam = { version = "0.30.4", features = ["bytemuck"] }
@@ -16,3 +15,6 @@ dyn-clone = "1.0.20"
 either = "1.15.0"
 smallvec = { version = "1.15.1", features = ["union", "const_generics", "specialization", "const_new"] }
 variadics_please = "1.1.0"
+
+[lints]
+workspace = true

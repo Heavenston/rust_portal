@@ -13,8 +13,6 @@
 #![expect(internal_features)]
 #![expect(incomplete_features)]
 
-#![deny(unsafe_code)]
-
 pub mod prelude {
     pub use crate::{
         ix, trait_alias, macros::TryClone, uid::Uid,
@@ -30,15 +28,15 @@ pub mod prelude {
         sorted_vec::{ SortedVec, SortedSet },
         dyn_clone,
         smallvec::{ smallvec, SmallVec },
-        consume_on_drop::{ ConsumeOnDropExt as _ },
-        chain_after::{ ChainAfterExt as _ },
-        skip_after::{ SkipAfterExt as _ },
-        extract_nth::{ ExtractNthExt as _ },
-        assert_is_sorted::{ AssertIsSortedExt as _ },
+        consume_on_drop::ConsumeOnDropExt as _,
+        chain_after::ChainAfterExt as _,
+        skip_after::SkipAfterExt as _,
+        extract_nth::ExtractNthExt as _,
+        assert_is_sorted::AssertIsSortedExt as _,
         either_of, either_of::*,
         bitset::{ BitSetIndex, BitSet },
-        maybe_default::{ MaybeDefault },
-        maybe_clone::{ MaybeClone },
+        maybe_default::MaybeDefault,
+        maybe_clone::MaybeClone,
         tuple_traits::{ HomogeneousTuple, Tuple, TupleAt, TupleIteratorExt },
         partial_bool::{
             BoolValue, Bool, PartialBool, True, False,

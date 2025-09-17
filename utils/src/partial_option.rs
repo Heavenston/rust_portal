@@ -23,7 +23,7 @@ pub trait PartialOption<T>: Sized + SomePartialOption {
     fn partial_zip<V, O: PartialOption<V>>(self, other: O) -> Self::Zip<V, O>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AlwaysOption<T> {
     Some(T),
 }
@@ -60,6 +60,7 @@ impl<T> PartialOption<T> for AlwaysOption<T> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum NeverOption {
     None,
 }

@@ -1,4 +1,4 @@
-use super::{ Axis };
+use super::Axis;
 
 use std::ops::{ Index, IndexMut };
 

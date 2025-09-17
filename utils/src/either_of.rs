@@ -18,6 +18,7 @@ pub trait EitherFor<const IDX: usize> {
     fn either_for_into(self) -> Option<Self::N>;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EitherIterator<E: EitherOfN>(pub E);
 
 macro_rules! ignore {

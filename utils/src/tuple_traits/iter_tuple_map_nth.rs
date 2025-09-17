@@ -2,6 +2,7 @@ use std::iter::FusedIterator;
 
 use super::*;
 
+#[derive(Debug)]
 pub struct TupleMapNth<const N: usize, I, M, O>
     where I: Iterator,
           I::Item: TupleAt<N>,

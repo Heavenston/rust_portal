@@ -1,31 +1,23 @@
 // macros are easier this way
 #![allow(non_snake_case)]
 
-use crate::count_args_literal;
-use std::{ iter::empty, mem::MaybeUninit };
-
 mod iter_tuple_nth;
 pub use iter_tuple_nth::*;
-
 mod iter_tuple_map_nth;
 pub use iter_tuple_map_nth::*;
 
+use crate::count_args_literal;
+
+use std::iter::empty;
+use itertools::Itertools;
+
 /// Used to circumvant rust thinking A may not be equal to B
 /// Hopefully gets turned into a noop
-#[allow(unsafe_code)]
 fn transmute_array_i_assure_you_its_the_same_size<const A: usize, const B: usize, T>(
     a: [T; A],
 ) -> [T; B] {
-    // Both should be equivalent anyway
     assert_eq!(A, B);
-    assert_eq!(size_of::<[T; A]>(), size_of::<[T; B]>());
-
-    let mut maybe_a = MaybeUninit::new(a);
-    // they **ARE** the same size
-    let ptr_b = &raw mut maybe_a as *mut _;
-    let ref_b: &mut MaybeUninit<[T; B]> = unsafe { &mut *ptr_b };
-    // Created already init
-    unsafe { ref_b.assume_init_read() }
+    a.into_iter().collect_array().expect("They are the same length!")
 }
 
 /// Simple mapper for mapping any type T to another one
