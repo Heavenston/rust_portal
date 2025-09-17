@@ -18,6 +18,7 @@
 pub mod prelude {
     pub use crate::{
         ix, trait_alias, macros::TryClone, uid::Uid,
+        count_args_literal,
         default, concat_arrays, flatten_array, hash_value,
         itertools::Itertools as _,
         either::{ self, Either },
@@ -49,6 +50,8 @@ pub mod prelude {
         either_utils::{ OptionExt, zip_left, zip_right },
         try_clone::{ try_clone_boxed_slice, TryClone },
     };
+
+    pub use std::iter::{ empty, Empty, once, Once, repeat, Repeat, repeat_n, RepeatN, repeat_with, RepeatWith };
 }
 
 pub use readonly;
