@@ -1,6 +1,14 @@
 mod typed;
+mod named;
+pub use named::{ NamedBundle, NamedBundleItem };
+mod lazy;
+pub use lazy::LazyBundle;
+mod lazy_named;
+pub use lazy_named::{ LazyNamedBundle, LazyNamedBundleItem };
+mod type_erased;
+pub use type_erased::TypeErasedBundle;
 
-use crate::dyn_option::CellDynOption;
+use crate::dyn_option::{ CellDynOption, FunDynOption };
 use super::{
     ComponentInputDefaultOrNot, World, Component, ComponentEntity
 };
