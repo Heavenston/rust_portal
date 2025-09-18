@@ -30,6 +30,7 @@ pub mod prelude {
         smallvec::{ smallvec, SmallVec },
         consume_on_drop::ConsumeOnDropExt as _,
         chain_after::ChainAfterExt as _,
+        interleave_indexed::InterleaveIndexedExt as _,
         skip_after::SkipAfterExt as _,
         extract_nth::ExtractNthExt as _,
         assert_is_sorted::AssertIsSortedExt as _,
@@ -49,7 +50,14 @@ pub mod prelude {
         try_clone::{ try_clone_boxed_slice, TryClone },
     };
 
-    pub use std::iter::{ empty, Empty, once, Once, repeat, Repeat, repeat_n, RepeatN, repeat_with, RepeatWith };
+    pub use itertools::{ ZipEq, zip_eq };
+    pub use std::{
+        convert::identity,
+        iter::{
+            empty, Empty, once, Once, repeat, Repeat, repeat_n, RepeatN,
+            repeat_with, RepeatWith, zip, Zip, chain, Chain,
+        },
+    };
 }
 
 pub use readonly;
@@ -69,6 +77,7 @@ pub mod axis_direction;
 pub mod mapped_nonzero;
 pub mod consume_on_drop;
 pub mod chain_after;
+pub mod interleave_indexed;
 pub mod skip_after;
 pub mod extract_nth;
 pub mod assert_is_sorted;

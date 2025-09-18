@@ -924,6 +924,75 @@ impl World {
         AddComponent::Added
     }
 
+    #[inline(always)] /* < mostly just for explicit intent */
+    fn add_bundle_internal(
+        &mut self,
+        entity: impl Into<Entity>,
+        bundle: impl Bundle,
+        override_existing_values: bool,
+    ) {
+        let entity = entity.into();
+        assert!(self.alive(entity));
+        let new_components = bundle.accumulate_components(self);
+        assert!(new_components.as_ref().iter().copied().all(|comp| self.alive(comp)));
+
+        let old_archetyp_id = self.entities_archetypes[entity.index()];
+        let old_archetyp: &mut Archetyp = &mut self.archetypes[old_archetyp_id];
+        let old_table_id = old_archetyp.table_id;
+
+        let new_component_set = new_components.as_ref().iter().copied()
+            .fold(old_archetyp.components.clone(), |components, new_component| {
+                components.with(new_component).1
+            });
+
+        if new_component_set == old_archetyp.components {
+            // Nothing to do, it has all the same components already
+            return;
+        }
+
+        old_archetyp.entities.remove(entity.index());
+
+        let new_archectyp_id = self.archtyp_for(Cow::Borrowed(&new_component_set));
+        debug_assert_ne!(old_archetyp_id, new_archectyp_id);
+        let new_archetyp = &mut self.archetypes[new_archectyp_id];
+        let new_table_id = new_archetyp.table_id;
+
+        self.entities_archetypes[entity.index()] = new_archectyp_id;
+
+        if old_table_id != new_table_id {
+            let [old_table, new_table] = self.tables.get_disjoint_mut([
+                old_table_id, new_table_id,
+            ]).expect("Just checked inequality");
+
+            let old_components = old_table.sparse_map.remove(entity.index())
+                .expect("This is the table of this entity's archetyp!")
+                .zip(old_table.table_components.iter())
+                .filter_map(|(val, comp)| (!override_existing_values || new_components.as_ref().contains(&comp))
+                    .then_some(val)
+                );
+
+            let mut additional_components_values = bundle.into_component_values();
+            let additional_table_components = additional_components_values.bundle_values_iter()
+                .zip_eq(new_components.as_ref().iter().copied())
+                // Skip the new value of components that were already present
+                .filter(|&(_, comp)| override_existing_values || !old_table.table_components.has(comp))
+                // TODO: FIXME: Values that do not pass this check are supposedly
+                // only components with None storage, so we can just discard them
+                // here
+                .filter_map(|(val, comp)| new_table.table_components.index_of(comp).zip(Some(val)))
+                .tuple_map_nth::<1, _, _>(Into::<ComponentDenseStorageInput>::into)
+            ;
+
+            let new_components = old_components.map(ComponentDenseStorageInput::RemovedDynVecValue)
+                .interleave_indexed(additional_table_components);
+
+            new_table.sparse_map.insert(entity.index(), new_components);
+        }
+        else {
+            todo!();
+        }
+    }
+
     /// The component must have no storage or its storage type must implement Default.
     pub fn add_component(
         &mut self,
@@ -1076,6 +1145,24 @@ impl World {
             ComponentDenseStorageInput::DynOption(&mut FunDynOption::new(f)),
             true
         ))
+    }
+
+    pub fn add_bundle(
+        &mut self,
+        entity: impl Into<Entity>,
+        bundle: impl Bundle,
+    ) {
+        self.add_bundle_internal(entity, bundle, false);
+    }
+
+    /// Like [`World::add_bundle`] but overrides components that are already
+    /// present.
+    pub fn set_bundle(
+        &mut self,
+        entity: impl Into<Entity>,
+        bundle: impl Bundle,
+    ) {
+        self.add_bundle_internal(entity, bundle, true);
     }
 
     pub fn remove_component(

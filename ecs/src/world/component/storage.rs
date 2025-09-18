@@ -13,7 +13,7 @@ use crate::{
 
 use std::fmt::Debug;
 
-use utils::{ itertools::{ chain, zip_eq }, prelude::* };
+use utils::prelude::*;
 use derive_more::From;
 use dynvec::{ DrainedDynVecValue, DynVec, DynVecDrain, RemovedDynVecValue };
 

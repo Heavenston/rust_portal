@@ -1,7 +1,6 @@
 use crate::index_map::{IndexMap, IndexMapIndex};
 
 use std::fmt::Debug;
-use std::iter::zip;
 use utils::prelude::*;
 use utils::mapped_nonzero::{
     NonZeroPrimitive,

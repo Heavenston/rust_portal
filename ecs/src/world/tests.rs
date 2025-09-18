@@ -669,6 +669,146 @@ mod entities_with_untyped_components {
     }
 }
 
+mod bundles {
+    use super::*;
+
+    #[test]
+    fn empty_bundle_on_empty_entity() {
+        let mut world = World::new();
+        let e = world.spawn();
+        let a_id = world.entities_archetypes[e.index()];
+        world.add_bundle(e, ());
+        assert_eq!(a_id, world.entities_archetypes[e.index()]);
+    }
+
+    #[test]
+    fn empty_bundle_on_non_empty_entity() {
+        let mut world = World::new();
+        let e = world.spawn();
+        world.add(e, TestComponent1(42)).unwrap();
+        let a_id = world.entities_archetypes[e.index()];
+        world.add_bundle(e, ());
+        assert_eq!(a_id, world.entities_archetypes[e.index()]);
+        assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(42));
+    }
+
+    #[test]
+    fn single_comp_bundle_on_empty_entity() {
+        let mut world = World::new();
+        let e = world.spawn();
+        let a_id = world.entities_archetypes[e.index()];
+        world.add_bundle(e, (TestComponent1(42),));
+        assert_ne!(a_id, world.entities_archetypes[e.index()]);
+        assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(42));
+    }
+
+    #[test]
+    fn couple_comp_bundle_on_empty_entity() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        let a_id = world.entities_archetypes[e.index()];
+        world.add_bundle(e, (TestComponent1(42), TestComponent2(90.)));
+        assert_ne!(a_id, world.entities_archetypes[e.index()]);
+
+        assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(42));
+        assert_eq!(world.get::<TestComponent2>(e).unwrap(), &TestComponent2(90.));
+    }
+
+    #[test]
+    #[ignore = "to be fixed"]
+    fn couple_comp_bundle_reversed_on_empty_entity() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        world.component::<TestComponent1>();
+        world.component::<TestComponent2>();
+
+        let a_id = world.entities_archetypes[e.index()];
+        world.add_bundle(e, (TestComponent2(90.), TestComponent1(42)));
+        assert_ne!(a_id, world.entities_archetypes[e.index()]);
+
+        assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(42));
+        assert_eq!(world.get::<TestComponent2>(e).unwrap(), &TestComponent2(90.));
+    }
+
+    #[test]
+    fn single_comp_bundle_on_non_empty_entity() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        world.add(e, TestComponent1(42)).unwrap();
+
+        let a_id = world.entities_archetypes[e.index()];
+        world.add_bundle(e, (TestComponent2(90.),));
+        assert_ne!(a_id, world.entities_archetypes[e.index()]);
+
+        assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(42));
+        assert_eq!(world.get::<TestComponent2>(e).unwrap(), &TestComponent2(90.));
+    }
+
+    #[test]
+    fn couple_comp_bundle_on_non_empty_entity() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        world.add(e, DefaultComponent(format!("feur"))).unwrap();
+
+        let a_id = world.entities_archetypes[e.index()];
+        world.add_bundle(e, (TestComponent1(42), TestComponent2(90.)));
+        assert_ne!(a_id, world.entities_archetypes[e.index()]);
+
+        assert_eq!(world.get::<DefaultComponent>(e).unwrap(), &DefaultComponent(format!("feur")));
+        assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(42));
+        assert_eq!(world.get::<TestComponent2>(e).unwrap(), &TestComponent2(90.));
+    }
+
+    #[test]
+    fn single_comp_on_empty_with_already_the_component() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        world.add(e, TestComponent1(50)).unwrap();
+
+        let a_id = world.entities_archetypes[e.index()];
+        world.add_bundle(e, (TestComponent1(42),));
+        assert_eq!(a_id, world.entities_archetypes[e.index()]);
+
+        assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(50));
+    }
+
+    #[test]
+    fn couple_comp_on_empty_with_already_one_component() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        world.add(e, TestComponent1(50)).unwrap();
+
+        let a_id = world.entities_archetypes[e.index()];
+        world.add_bundle(e, (TestComponent1(42), TestComponent2(90.)));
+        assert_ne!(a_id, world.entities_archetypes[e.index()]);
+
+        assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(50));
+        assert_eq!(world.get::<TestComponent2>(e).unwrap(), &TestComponent2(90.));
+    }
+
+    #[test]
+    fn couple_comp_on_empty_with_already_both_components() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        world.add(e, TestComponent1(50)).unwrap();
+        world.add(e, TestComponent2(30.)).unwrap();
+
+        let a_id = world.entities_archetypes[e.index()];
+        world.add_bundle(e, (TestComponent1(42), TestComponent2(90.)));
+        assert_eq!(a_id, world.entities_archetypes[e.index()]);
+
+        assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(50));
+        assert_eq!(world.get::<TestComponent2>(e).unwrap(), &TestComponent2(30.));
+    }
+}
+
 mod misc {
     use super::*;
 
