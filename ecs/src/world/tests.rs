@@ -404,7 +404,7 @@ mod torturing_components {
         // like that
         assert_matches!(
             world.remove::<ComponentStorageComponent>(c),
-            Err(RemoveComponentTypedError::Forbidden { reason: _ })
+            Err(RemoveComponentTypedError::Forbidden(_))
         );
 
         world.add(e, TestComponent1(42)).unwrap();
@@ -412,7 +412,7 @@ mod torturing_components {
 
         assert_matches!(
             world.remove::<ComponentStorageComponent>(c),
-            Err(RemoveComponentTypedError::Forbidden { reason: _ })
+            Err(RemoveComponentTypedError::Forbidden(_))
         );
     }
 
@@ -488,7 +488,7 @@ mod torturing_components {
         assert_matches!(world.add_component(e, c), Ok(AddComponent::Added));
         assert_matches!(
             world.get_component(e, c),
-            Err(GetComponentError::ComponentHasNoStorage { .. }),
+            Err(GetComponentError::ComponentDoesNotHaveStorage { .. }),
         );
     }
 
@@ -528,10 +528,10 @@ mod torturing_components {
             world.add(c, ComponentStorageComponent {
                 dynvec_meta: DynVecMetadata::new::<TestComponent1>(),
             }),
-            Err(AddComponentTypedError::Forbidden { reason: _ })
+            Err(AddComponentTypedError::Forbidden(_))
         );
 
-        assert_matches!(world.get_component(e, c), Err(GetComponentError::ComponentHasNoStorage { .. }));
+        assert_matches!(world.get_component(e, c), Err(GetComponentError::ComponentDoesNotHaveStorage { .. }));
         assert!(world.has_component(e, c).is_present());
     }
 
@@ -590,7 +590,7 @@ mod entities_with_untyped_components {
         assert_matches!(world.add_component(e, c), Ok(AddComponent::Added));
         assert_eq!(world.has_component(e, c), HasComponent::Present);
 
-        assert_matches!(world.get_component(e, c), Err(GetComponentError::ComponentHasNoStorage { .. }));
+        assert_matches!(world.get_component(e, c), Err(GetComponentError::ComponentDoesNotHaveStorage { .. }));
 
         assert_matches!(world.remove_component(e, c).unwrap(), OptionalComponentRef::NoStorage);
     }
@@ -856,7 +856,7 @@ mod misc {
 
         assert_matches!(
             world.add_component(e, c),
-            Err(AddComponentError::ComponentNeedsValue { .. }),
+            Err(AddComponentError::ComponentRequiresValue { .. }),
         );
     }
 

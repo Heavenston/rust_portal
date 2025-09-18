@@ -208,124 +208,96 @@ pub enum ComponentStorageKind {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error("Forbidden: {reason}")]
+pub struct ForbiddenError {
+    pub reason: &'static str,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{entity} is not alive")]
+pub struct EntityIsNotAliveError {
+    pub entity: Entity,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{component} is not alive")]
+pub struct ComponentIsNotAliveError {
+    pub component: ComponentEntity,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("The type given does not match the type used for storage of {component}. Expected: '{expected}', given: '{given}'")]
+pub struct TypeMismatchedError {
+    pub component: ComponentEntity,
+    pub given: &'static str,
+    pub expected: &'static str,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{component} does NOT have storage. (Does not have a ComponentStorageComponent)")]
+pub struct ComponentDoesNotHaveStorageError {
+    pub component: ComponentEntity,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{component} requires a value. Meaning it uses a type that does not implement Default as its storage.")]
+pub struct ComponentRequiresValueError {
+    pub component: ComponentEntity,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{component} is not present in {entity}")]
+pub struct ComponentNotPresentError {
+    pub component: ComponentEntity,
+    pub entity: Entity,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 pub enum GetComponentError {
-    #[error("Tried to get component of dead entity {entity}")]
-    EntityIsNotAlive {
-        entity: Entity,
-    },
-    #[error("Entity of the component {component} is not alive")]
-    ComponentIsNotAlive {
-        component: ComponentEntity,
-    },
-    #[error("Component from entity {component} is not present in the entity {entity}")]
-    ComponentNotPresent {
-        component: ComponentEntity,
-        entity: Entity,
-    },
-    /// Only returned if the Entity *has* the component but this component
-    /// doesn't have storage so nothing can be returned.
-    #[error("Component from entity {component} doesn't have any storage (doesn't have the ComponentStorageComponent)")]
-    ComponentHasNoStorage {
-        component: ComponentEntity,
-        entity: Entity,
-    },
-    #[error("Cannot get this component's value: {reason}")]
-    Forbidden {
-        reason: &'static str,
-    },
+    EntityIsNotAlive(#[from] EntityIsNotAliveError),
+    ComponentIsNotAlive(#[from] ComponentIsNotAliveError),
+    ComponentNotPresent(#[from] ComponentNotPresentError),
+    ComponentDoesNotHaveStorage(#[from] ComponentDoesNotHaveStorageError),
+    Forbidden(#[from] ForbiddenError),
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 pub enum AddComponentError {
-    #[error("Tried to add a component to a dead entity {entity}")]
-    EntityIsNotAlive {
-        entity: Entity,
-    },
-    #[error("Entity of the component {component} is not alive")]
-    ComponentIsNotAlive {
-        component: ComponentEntity,
-    },
-    #[error("The component {component} needs a value when inserting (Has a storage attached with a type that does not implement Default)")]
-    ComponentNeedsValue {
-        component: ComponentEntity,
-    },
-    #[error("Adding this component to this entity is forbidden: {reason}")]
-    Forbidden {
-        reason: &'static str
-    },
+    EntityIsNotAlive(#[from] EntityIsNotAliveError),
+    ComponentIsNotAlive(#[from] ComponentIsNotAliveError),
+    ComponentRequiresValue(#[from] ComponentRequiresValueError),
+    Forbidden(#[from] ForbiddenError),
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 pub enum AddComponentWithError {
-    #[error("Tried to add a component to a dead entity {entity}")]
-    EntityIsNotAlive {
-        entity: Entity,
-    },
-    #[error("The type given does not match the type used for storage of {component}. Expected: '{expected}', given: '{given}'")]
-    TypeMismatched {
-        component: ComponentEntity,
-        given: &'static str,
-        expected: &'static str,
-    },
-    #[error("{component} is not alive")]
-    ComponentIsNotAlive {
-        component: ComponentEntity,
-    },
-    #[error("{component} does NOT have storage. (Does not have a ComponentStorageComponent)")]
-    ComponentDoesNotHaveStorage {
-        component: ComponentEntity,
-    },
-    #[error("Adding this component to this entity is forbidden: {reason}")]
-    Forbidden {
-        reason: &'static str
-    },
+    EntityIsNotAlive(#[from] EntityIsNotAliveError),
+    TypeMismatched(#[from] TypeMismatchedError),
+    ComponentIsNotAlive(#[from] ComponentIsNotAliveError),
+    ComponentDoesNotHaveStorage(#[from] ComponentDoesNotHaveStorageError),
+    Forbidden(#[from] ForbiddenError),
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 pub enum SetComponentWithError {
-    #[error("Tried to set a component to a dead entity {entity}")]
-    EntityIsNotAlive {
-        entity: Entity,
-    },
-    #[error("The type given does not match the type used for storage of {component}. Expected: '{expected}', given: '{given}'")]
-    TypeMismatched {
-        component: ComponentEntity,
-        given: &'static str,
-        expected: &'static str,
-    },
-    #[error("{component} is not alive")]
-    ComponentIsNotAlive {
-        component: ComponentEntity,
-    },
-    #[error("{component} does NOT have storage. (Does not have a ComponentStorageComponent)")]
-    ComponentDoesNotHaveStorage {
-        component: ComponentEntity,
-    },
-    #[error("Setting this component on this entity is forbidden: {reason}")]
-    Forbidden {
-        reason: &'static str
-    },
+    EntityIsNotAlive(#[from] EntityIsNotAliveError),
+    TypeMismatched(#[from] TypeMismatchedError),
+    ComponentIsNotAlive(#[from] ComponentIsNotAliveError),
+    ComponentDoesNotHaveStorage(#[from] ComponentDoesNotHaveStorageError),
+    Forbidden(#[from] ForbiddenError),
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 pub enum RemoveComponentError {
-    #[error("Tried to remove a component from a dead entity {entity}")]
-    EntityIsNotAlive {
-        entity: Entity,
-    },
-    #[error("Entity of the component {component} is not alive")]
-    ComponentIsNotAlive {
-        component: ComponentEntity,
-    },
-    #[error("Component from entity {component} is not present in the entity {entity}")]
-    ComponentNotPresent {
-        component: ComponentEntity,
-        entity: Entity,
-    },
-    #[error("Removing this component from this entity is forbidden by the implementation: {reason}")]
-    Forbidden {
-        reason: &'static str,
-    },
+    EntityIsNotAlive(#[from] EntityIsNotAliveError),
+    ComponentIsNotAlive(#[from] ComponentIsNotAliveError),
+    ComponentNotPresent(#[from] ComponentNotPresentError),
+    Forbidden(#[from] ForbiddenError),
 }
 
 const LAST_COMPONENT_TRAITS_ENTITY_INDEX: EntityIndex = EntityIndex(1);
@@ -637,12 +609,13 @@ impl World {
                 }),
             Err(GetComponentTypedError::EntityIsNotAlive { .. })
                 => None,
-            Err(GetComponentTypedError::UnknownComponent { .. })
-                => unreachable!("This component is always registred"),
             Err(GetComponentTypedError::ComponentNotPresent { .. })
                 => Some(ComponentStorageKind::None),
-            Err(GetComponentTypedError::Forbidden { reason })
-                => panic!("Got forbidden when retrieving the component storage component: {reason}"),
+
+            Err(GetComponentTypedError::UnknownComponent { .. })
+                => unreachable!("This component is always registred"),
+            Err(GetComponentTypedError::Forbidden(e))
+                => panic!("Got forbidden when retrieving the component storage component: {e}"),
         }
     }
 
@@ -775,23 +748,23 @@ impl World {
         let entity = entity.into();
 
         if !self.alive(entity) {
-            return Err(GetComponentError::EntityIsNotAlive { entity });
+            return Err(EntityIsNotAliveError { entity }.into());
         }
         let Some(component_storage) = self.component_storage(component)
         else {
-            return Err(GetComponentError::ComponentIsNotAlive { component });
+            return Err(ComponentIsNotAliveError { component }.into());
         };
 
         let archetyp_id = self.entities_archetypes[entity.index()];
         let archetyp = &self.archetypes[archetyp_id];
 
         if !archetyp.components.has(component) {
-            return Err(GetComponentError::ComponentNotPresent { entity, component });
+            return Err(ComponentNotPresentError { entity, component }.into());
         }
 
         match component_storage {
             ComponentStorageKind::None =>
-                return Err(GetComponentError::ComponentHasNoStorage { component, entity }),
+                return Err(ComponentDoesNotHaveStorageError { component }.into()),
 
             // Only accepted state
             ComponentStorageKind::Table { .. } => (),
@@ -806,25 +779,25 @@ impl World {
         let entity = entity.into();
 
         if !self.alive(entity) {
-            return Err(GetComponentError::EntityIsNotAlive { entity });
+            return Err(EntityIsNotAliveError { entity }.into());
         }
         let Some(component_storage) = self.component_storage(component)
         else {
-            return Err(GetComponentError::ComponentIsNotAlive { component });
+            return Err(ComponentIsNotAliveError { component }.into());
         };
 
         let archetyp_id = self.entities_archetypes[entity.index()];
         let archetyp = &mut self.archetypes[archetyp_id];
 
         if !archetyp.components.has(component) {
-            return Err(GetComponentError::ComponentNotPresent { entity, component });
+            return Err(ComponentNotPresentError { entity, component }.into());
         }
 
         match component_storage {
             ComponentStorageKind::None =>
-                return Err(GetComponentError::ComponentHasNoStorage { component, entity }),
+                return Err(ComponentDoesNotHaveStorageError { component }.into()),
             ComponentStorageKind::Table { is_readonly: true, .. } =>
-                return Err(GetComponentError::Forbidden { reason: component_traits::ReadOnly::REASON }),
+                return Err(ForbiddenError { reason: component_traits::ReadOnly::REASON }.into()),
 
             // Only accepted state
             ComponentStorageKind::Table { is_readonly: false, .. } => (),
@@ -999,24 +972,24 @@ impl World {
         let entity = entity.into();
 
         if !self.alive(entity) {
-            return Err(AddComponentError::EntityIsNotAlive { entity });
+            return Err(EntityIsNotAliveError { entity }.into());
         }
 
         if !self.alive(component) {
-            return Err(AddComponentError::ComponentIsNotAlive { component });
+            return Err(ComponentIsNotAliveError { component }.into());
         }
 
         if self.is_internal_component_trait(component) {
             if self.components_entity_to_typeid.contains_key(&ComponentEntity(entity)) {
-                return Err(AddComponentError::Forbidden {
+                return Err(ForbiddenError {
                     reason: "Cannot add compononent traits to an internal component entity.",
-                });
+                }.into());
             }
 
             if self.is_component_in_use(ComponentEntity(entity)) {
-                return Err(AddComponentError::Forbidden {
+                return Err(ForbiddenError {
                     reason: "Cannot add component traits to a component that is in use.",
-                })
+                }.into())
             }
         }
 
@@ -1029,7 +1002,7 @@ impl World {
             } => is_readonly,
 
             ComponentStorageKind::Table { dynvec_meta: DynVecMetadata { default_fn: None, .. }, .. } => {
-                return Err(AddComponentError::ComponentNeedsValue { component });
+                return Err(ComponentRequiresValueError { component }.into());
             },
         };
 
@@ -1045,41 +1018,41 @@ impl World {
         let entity = entity.into();
 
         if !self.alive(entity) {
-            return Err(AddComponentWithError::EntityIsNotAlive { entity });
+            return Err(EntityIsNotAliveError { entity }.into());
         }
 
         let Some(component_storage) = self.component_storage(component)
         else {
-            return Err(AddComponentWithError::ComponentIsNotAlive { component });
+            return Err(ComponentIsNotAliveError { component }.into());
         };
 
         if self.is_internal_component_trait(component) {
             if self.components_entity_to_typeid.contains_key(&ComponentEntity(entity)) {
-                return Err(AddComponentWithError::Forbidden {
+                return Err(ForbiddenError {
                     reason: "Cannot add compononent traits to an internal component entity.",
-                });
+                }.into());
             }
 
             if self.is_component_in_use(ComponentEntity(entity)) {
-                return Err(AddComponentWithError::Forbidden {
+                return Err(ForbiddenError {
                     reason: "Cannot add component traits to a component that is in use.",
-                })
+                }.into())
             }
         }
 
         match component_storage {
             ComponentStorageKind::None =>
-                return Err(AddComponentWithError::ComponentDoesNotHaveStorage {
+                return Err(ComponentDoesNotHaveStorageError {
                     component,
-                }),
+                }.into()),
             ComponentStorageKind::Table {
                 dynvec_meta: DynVecMetadata { type_id, type_name: expected, .. }, ..
             } if type_id != TypeId::of::<V>() =>
-                return Err(AddComponentWithError::TypeMismatched {
+                return Err(TypeMismatchedError {
                     component,
                     given: std::any::type_name::<V>(),
                     expected,
-                }),
+                }.into()),
             _ => (),
         }
 
@@ -1099,41 +1072,41 @@ impl World {
         let entity = entity.into();
 
         if !self.alive(entity) {
-            return Err(SetComponentWithError::EntityIsNotAlive { entity });
+            return Err(EntityIsNotAliveError { entity }.into());
         }
 
         let Some(component_storage) = self.component_storage(component)
         else {
-            return Err(SetComponentWithError::ComponentIsNotAlive { component });
+            return Err(ComponentIsNotAliveError { component }.into());
         };
 
         if self.is_internal_component_trait(component) {
             if self.components_entity_to_typeid.contains_key(&ComponentEntity(entity)) {
-                return Err(SetComponentWithError::Forbidden {
+                return Err(ForbiddenError {
                     reason: "Cannot add compononent traits to an internal component entity.",
-                });
+                }.into());
             }
 
             if self.is_component_in_use(ComponentEntity(entity)) {
-                return Err(SetComponentWithError::Forbidden {
+                return Err(ForbiddenError {
                     reason: "Cannot add component traits to a component that is in use.",
-                })
+                }.into())
             }
         }
 
         match component_storage {
             ComponentStorageKind::None =>
-                return Err(SetComponentWithError::ComponentDoesNotHaveStorage {
+                return Err(ComponentDoesNotHaveStorageError {
                     component,
-                }),
+                }.into()),
             ComponentStorageKind::Table {
                 dynvec_meta: DynVecMetadata { type_id, type_name: expected, .. }, ..
             } if type_id != TypeId::of::<V>() =>
-                return Err(SetComponentWithError::TypeMismatched {
+                return Err(TypeMismatchedError {
                     component,
                     given: std::any::type_name::<V>(),
                     expected,
-                }),
+                }.into()),
             _ => (),
         }
 
@@ -1170,25 +1143,25 @@ impl World {
         let entity = entity.into();
 
         if !self.alive(entity) {
-            return Err(RemoveComponentError::EntityIsNotAlive { entity });
+            return Err(EntityIsNotAliveError { entity }.into());
         }
 
         let Some(component_storage) = self.component_storage(component)
         else {
-            return Err(RemoveComponentError::ComponentIsNotAlive { component });
+            return Err(ComponentIsNotAliveError { component }.into());
         };
 
         if self.is_internal_component_trait(component) {
             if self.components_entity_to_typeid.contains_key(&ComponentEntity(entity)) {
-                return Err(RemoveComponentError::Forbidden {
+                return Err(ForbiddenError {
                     reason: "Cannot remove compononent traits from an internal component entity.",
-                });
+                }.into());
             }
 
             if self.is_component_in_use(ComponentEntity(entity)) {
-                return Err(RemoveComponentError::Forbidden {
+                return Err(ForbiddenError {
                     reason: "Cannot remove component traits from a component that is in use.",
-                })
+                }.into())
             }
         }
 
@@ -1197,7 +1170,7 @@ impl World {
         let old_table_id = old_archetyp.table_id;
 
         if !old_archetyp.components.has(component) {
-            return Err(RemoveComponentError::ComponentNotPresent { component, entity });
+            return Err(ComponentNotPresentError { component, entity }.into());
         }
 
         /*

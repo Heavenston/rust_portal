@@ -1,7 +1,5 @@
 use crate::world::{
-    component::Component, AddComponent, AddComponentWithError, Entity,
-    GetComponentError, HasComponent, OptionalComponentRef, RemoveComponentError,
-    SetComponentWithError, World,
+    component::Component, AddComponent, AddComponentWithError, ComponentNotPresentError, Entity, EntityIsNotAliveError, ForbiddenError, GetComponentError, HasComponent, OptionalComponentRef, RemoveComponentError, SetComponentWithError, World
 };
 
 use std::any::type_name;
@@ -21,97 +19,56 @@ pub enum HasComponentTyped {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error("Component from type '{type_name}' was never registred")]
+pub struct UnknownComponentError {
+    pub type_name: &'static str,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 pub enum GetComponentTypedError {
-    #[error("Tried to get component of dead entity {entity}")]
-    EntityIsNotAlive {
-        entity: Entity,
-    },
-    #[error("Component from type '{type_name}' was never registred")]
-    UnknownComponent {
-        type_name: &'static str,
-    },
-    #[error("Component from type '{type_name}' is not present in the entity {entity}")]
-    ComponentNotPresent {
-        type_name: &'static str,
-        entity: Entity,
-    },
-    #[error("Cannot get this component's value: {reason}")]
-    Forbidden {
-        reason: &'static str,
-    },
+    EntityIsNotAlive(#[from] EntityIsNotAliveError),
+    UnknownComponent(#[from] UnknownComponentError),
+    ComponentNotPresent(#[from] ComponentNotPresentError),
+    Forbidden(#[from] ForbiddenError),
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 pub enum AddComponentTypedError {
-    #[error("Tried to add a component to a dead entity {entity}")]
-    EntityIsNotAlive {
-        entity: Entity,
-    },
-    #[error("Adding this component to this entity is forbidden: {reason}")]
-    Forbidden {
-        reason: &'static str
-    },
+    EntityIsNotAlive(#[from] EntityIsNotAliveError),
+    Forbidden(#[from] ForbiddenError),
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 pub enum GetComponentOrDefaultError {
-    #[error("Tried to add a component to a dead entity {entity}")]
-    EntityIsNotAlive {
-        entity: Entity,
-    },
-    #[error("Adding this component to this entity is forbidden: {reason}")]
-    Forbidden {
-        reason: &'static str
-    },
+    EntityIsNotAlive(#[from] EntityIsNotAliveError),
+    Forbidden(#[from] ForbiddenError),
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 pub enum SetComponentTypedError {
-    #[error("Tried to add a component to a dead entity {entity}")]
-    EntityIsNotAlive {
-        entity: Entity,
-    },
-    #[error("Adding this component to this entity is forbidden: {reason}")]
-    Forbidden {
-        reason: &'static str
-    },
+    EntityIsNotAlive(#[from] EntityIsNotAliveError),
+    Forbidden(#[from] ForbiddenError),
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 pub enum RemoveComponentTypedError {
-    #[error("Tried to remove a component from a dead entity {entity}")]
-    EntityIsNotAlive {
-        entity: Entity,
-    },
-    #[error("Component from type '{type_name}' was never registred")]
-    UnknownComponent {
-        type_name: &'static str,
-    },
-    #[error("Component from type '{type_name}' is not present in the entity {entity}")]
-    ComponentNotPresent {
-        type_name: &'static str,
-        entity: Entity,
-    },
-    #[error("Removing this component from this entity is forbidden by the implementation: {reason}")]
-    Forbidden {
-        reason: &'static str,
-    },
+    EntityIsNotAlive(#[from] EntityIsNotAliveError),
+    UnknownComponent(#[from] UnknownComponentError),
+    ComponentNotPresent(#[from] ComponentNotPresentError),
+    Forbidden(#[from] ForbiddenError),
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error(transparent)]
 pub enum GetSingletonError {
-    #[error("Component from type '{type_name}' was never registred")]
-    UnknownComponent {
-        type_name: &'static str,
-    },
-    #[error("Component's entity from type '{type_name}' does not have itself as component")]
-    ComponentNotPresent {
-        type_name: &'static str,
-    },
-    #[error("Getting this singleton's value is forbidden: {reason}")]
-    Forbidden {
-        reason: &'static str,
-    },
+    UnknownComponent(#[from] UnknownComponentError),
+    ComponentNotPresent(#[from] ComponentNotPresentError),
+    Forbidden(#[from] ForbiddenError),
 }
 
 impl World {
@@ -131,29 +88,20 @@ impl World {
     pub fn get<C: Component>(&self, entity: impl Into<Entity>) -> Result<&C, GetComponentTypedError> {
         let Some(component) = self.try_component::<C>()
         else {
-            return Err(GetComponentTypedError::UnknownComponent {
+            return Err(UnknownComponentError {
                 type_name: type_name::<C>(),
-            });
+            }.into());
         };
 
         match self.get_component(entity, component) {
             Ok(component_ref) => Ok(component_ref.as_typed().expect("Type is correct")),
-            Err(GetComponentError::EntityIsNotAlive { entity }) => {
-                return Err(GetComponentTypedError::EntityIsNotAlive { entity });
-            },
-            Err(GetComponentError::ComponentNotPresent { component: _, entity }) => {
-                return Err(GetComponentTypedError::ComponentNotPresent {
-                    type_name: type_name::<C>(),
-                    entity,
-                });
-            },
-            Err(GetComponentError::Forbidden { reason }) => {
-                return Err(GetComponentTypedError::Forbidden { reason });
-            },
+            Err(GetComponentError::EntityIsNotAlive(e)) => Err(e.into()),
+            Err(GetComponentError::ComponentNotPresent(e)) => Err(e.into()),
+            Err(GetComponentError::Forbidden(e)) => Err(e.into()),
 
-            Err(GetComponentError::ComponentIsNotAlive { .. }) =>
+            Err(GetComponentError::ComponentIsNotAlive(_)) =>
                 unreachable!("World::try_component should not return dead entities."),
-            Err(GetComponentError::ComponentHasNoStorage { .. }) =>
+            Err(GetComponentError::ComponentDoesNotHaveStorage(_)) =>
                 unreachable!("Getting components from types (with World::try_component) will always create storage."),
         }
     }
@@ -161,29 +109,20 @@ impl World {
     pub fn get_mut<C: Component>(&mut self, entity: impl Into<Entity>) -> Result<&mut C, GetComponentTypedError> {
         let Some(component) = self.try_component::<C>()
         else {
-            return Err(GetComponentTypedError::UnknownComponent {
+            return Err(UnknownComponentError {
                 type_name: type_name::<C>(),
-            });
+            }.into());
         };
 
         match self.get_component_mut(entity, component) {
             Ok(component_ref) => Ok(component_ref.as_typed().expect("Type is correct")),
-            Err(GetComponentError::EntityIsNotAlive { entity }) => {
-                return Err(GetComponentTypedError::EntityIsNotAlive { entity });
-            },
-            Err(GetComponentError::ComponentNotPresent { component: _, entity }) => {
-                return Err(GetComponentTypedError::ComponentNotPresent {
-                    type_name: type_name::<C>(),
-                    entity,
-                });
-            },
-            Err(GetComponentError::Forbidden { reason }) => {
-                return Err(GetComponentTypedError::Forbidden { reason });
-            },
+            Err(GetComponentError::EntityIsNotAlive(e)) => Err(e.into()),
+            Err(GetComponentError::ComponentNotPresent(e)) => Err(e.into()),
+            Err(GetComponentError::Forbidden(e)) => Err(e.into()),
 
             Err(GetComponentError::ComponentIsNotAlive { .. }) =>
                 unreachable!("World::try_component should not return dead entities."),
-            Err(GetComponentError::ComponentHasNoStorage { .. }) =>
+            Err(GetComponentError::ComponentDoesNotHaveStorage { .. }) =>
                 unreachable!("Getting components from types (with World::try_component) will always create storage."),
         }
     }
@@ -191,22 +130,18 @@ impl World {
     pub fn get_or_default<C: Component + Default>(&mut self, entity: Entity) -> Result<&mut C, GetComponentOrDefaultError> {
         match self.add_with::<C, _>(entity, default) {
             Ok(AddComponent::Added | AddComponent::AlreadyPresent) => (),
-            Err(AddComponentTypedError::EntityIsNotAlive { entity }) =>
-                return Err(GetComponentOrDefaultError::EntityIsNotAlive { entity }),
-            Err(AddComponentTypedError::Forbidden { reason }) =>
-                return Err(GetComponentOrDefaultError::Forbidden { reason }),
+            Err(AddComponentTypedError::EntityIsNotAlive(e)) => return Err(e.into()),
+            Err(AddComponentTypedError::Forbidden(e)) => return Err(e.into()),
         }
 
         match self.get_mut::<C>(entity) {
             Ok(ref_mut) => Ok(ref_mut),
-            Err(GetComponentTypedError::EntityIsNotAlive { entity }) =>
-                Err(GetComponentOrDefaultError::EntityIsNotAlive { entity }),
-            Err(GetComponentTypedError::Forbidden { reason }) =>
-                Err(GetComponentOrDefaultError::Forbidden { reason }),
+            Err(GetComponentTypedError::EntityIsNotAlive(e)) => Err(e.into()),
+            Err(GetComponentTypedError::Forbidden(e)) => Err(e.into()),
 
             Err(GetComponentTypedError::UnknownComponent { .. }) |
             Err(GetComponentTypedError::ComponentNotPresent { .. }) =>
-                unreachable!("Just "),
+                unreachable!("Just checked"),
         }
     }
     
@@ -221,10 +156,8 @@ impl World {
 
         match self.add_component_with(entity, component, f) {
             Ok(result) => Ok(result),
-            Err(AddComponentWithError::EntityIsNotAlive { entity }) =>
-                Err(AddComponentTypedError::EntityIsNotAlive { entity }),
-            Err(AddComponentWithError::Forbidden { reason }) =>
-                Err(AddComponentTypedError::Forbidden { reason }),
+            Err(AddComponentWithError::EntityIsNotAlive(e)) => Err(e.into()),
+            Err(AddComponentWithError::Forbidden(e)) => Err(e.into()),
 
             Err(AddComponentWithError::TypeMismatched { .. }) |
             Err(AddComponentWithError::ComponentDoesNotHaveStorage { .. }) =>
@@ -247,10 +180,8 @@ impl World {
 
         match self.set_component_with(entity, component, || value) {
             Ok(result) => Ok(result),
-            Err(SetComponentWithError::EntityIsNotAlive { entity }) =>
-                Err(SetComponentTypedError::EntityIsNotAlive { entity }),
-            Err(SetComponentWithError::Forbidden { reason }) =>
-                Err(SetComponentTypedError::Forbidden { reason }),
+            Err(SetComponentWithError::EntityIsNotAlive(e)) => Err(e.into()),
+            Err(SetComponentWithError::Forbidden(e)) => Err(e.into()),
 
             Err(SetComponentWithError::TypeMismatched { .. }) |
             Err(SetComponentWithError::ComponentDoesNotHaveStorage { .. }) =>
@@ -265,9 +196,9 @@ impl World {
     {
         let Some(component) = self.try_component::<C>()
         else {
-            return Err(RemoveComponentTypedError::UnknownComponent {
+            return Err(UnknownComponentError {
                 type_name: type_name::<C>(),
-            })
+            }.into())
         };
 
         match self.remove_component(entity, component) {
@@ -275,20 +206,13 @@ impl World {
                 Ok(value.into_typed::<C>().expect("Correct component type")),
             Ok(OptionalComponentRef::NoStorage) =>
                 unreachable!("Typed components all have storage"),
-            Err(RemoveComponentError::EntityIsNotAlive { entity }) =>
-                Err(RemoveComponentTypedError::EntityIsNotAlive {
-                    entity
-                }),
 
-            Err(RemoveComponentError::ComponentIsNotAlive { component: _ }) =>
+            Err(RemoveComponentError::EntityIsNotAlive(e)) => Err(e.into()),
+            Err(RemoveComponentError::ComponentNotPresent(e)) => Err(e.into()),
+            Err(RemoveComponentError::Forbidden(e)) => Err(e.into()),
+
+            Err(RemoveComponentError::ComponentIsNotAlive(_)) =>
                 unreachable!("World::try_component should not return a dead entity"),
-            Err(RemoveComponentError::ComponentNotPresent { component: _, entity }) =>
-                Err(RemoveComponentTypedError::ComponentNotPresent {
-                    type_name: type_name::<C>(),
-                    entity,
-                }),
-            Err(RemoveComponentError::Forbidden { reason }) =>
-                Err(RemoveComponentTypedError::Forbidden { reason }),
         }
     }
 
@@ -297,8 +221,8 @@ impl World {
 
         match self.set(entity, value) {
             Ok(_) => (),
-            Err(SetComponentTypedError::Forbidden { reason }) =>
-                panic!("Set a singleton returned forbidden: {reason}"),
+            Err(SetComponentTypedError::Forbidden(e)) =>
+                panic!("Set a singleton returned forbidden: {e}"),
             Err(SetComponentTypedError::EntityIsNotAlive { .. }) =>
                 unreachable!("World::component should not return a dead entity"),
         }
@@ -307,42 +231,40 @@ impl World {
     pub fn get_singleton<C: Component>(&self) -> Result<&C, GetSingletonError> {
         let Some(entity) = self.try_component::<C>()
         else {
-            return Err(GetSingletonError::UnknownComponent {
+            return Err(UnknownComponentError {
                 type_name: type_name::<C>()
-            })
+            }.into())
         };
 
         match self.get::<C>(entity) {
             Ok(component_ref) => Ok(component_ref),
+            Err(GetComponentTypedError::ComponentNotPresent(e)) => Err(e.into()),
+            Err(GetComponentTypedError::Forbidden(e)) => Err(e.into()),
+
             Err(GetComponentTypedError::EntityIsNotAlive { .. }) =>
                 unreachable!("World::component should not return a dead entity"),
             Err(GetComponentTypedError::UnknownComponent { .. }) =>
                 unreachable!("Just checked this"),
-            Err(GetComponentTypedError::ComponentNotPresent { type_name, .. }) =>
-                return Err(GetSingletonError::ComponentNotPresent { type_name }),
-            Err(GetComponentTypedError::Forbidden { reason, .. }) =>
-                return Err(GetSingletonError::Forbidden { reason }),
         }
     }
 
     pub fn get_singleton_mut<C: Component>(&mut self) -> Result<&mut C, GetSingletonError> {
         let Some(entity) = self.try_component::<C>()
         else {
-            return Err(GetSingletonError::UnknownComponent {
+            return Err(UnknownComponentError {
                 type_name: type_name::<C>()
-            })
+            }.into())
         };
 
         match self.get_mut::<C>(entity) {
             Ok(component_ref) => Ok(component_ref),
+            Err(GetComponentTypedError::ComponentNotPresent(e)) => Err(e.into()),
+            Err(GetComponentTypedError::Forbidden(e)) => Err(e.into()),
+
             Err(GetComponentTypedError::EntityIsNotAlive { .. }) =>
                 unreachable!("World::component should not return a dead entity"),
             Err(GetComponentTypedError::UnknownComponent { .. }) =>
                 unreachable!("Just checked this"),
-            Err(GetComponentTypedError::ComponentNotPresent { type_name, .. }) =>
-                return Err(GetSingletonError::ComponentNotPresent { type_name }),
-            Err(GetComponentTypedError::Forbidden { reason, .. }) =>
-                return Err(GetSingletonError::Forbidden { reason }),
         }
     }
 }
