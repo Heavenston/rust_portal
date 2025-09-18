@@ -974,6 +974,11 @@ impl World {
             let mut additional_components_values = bundle.into_component_values();
             let additional_table_components = additional_components_values.bundle_values_iter()
                 .zip_eq(new_components.as_ref().iter().copied())
+                // FIXME: 😭 wrote everything before realizing it had to be sorted,
+                // Could be partially fixed by... sorting inside the Bundle trait
+                // on the stack, but there may be a solution somewhere, but i just
+                // want it to work right now
+                .sorted_unstable_by_key(|&(_, comp)| comp)
                 // Skip the new value of components that were already present
                 .filter(|&(_, comp)| override_existing_values || !old_table.table_components.has(comp))
                 // TODO: FIXME: Values that do not pass this check are supposedly

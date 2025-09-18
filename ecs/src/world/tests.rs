@@ -716,7 +716,6 @@ mod bundles {
     }
 
     #[test]
-    #[ignore = "to be fixed"]
     fn couple_comp_bundle_reversed_on_empty_entity() {
         let mut world = World::new();
         let e = world.spawn();
