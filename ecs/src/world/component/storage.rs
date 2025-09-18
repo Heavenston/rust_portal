@@ -4,7 +4,7 @@
 //! Its role is to store a list of lists of components.
 
 use crate::{
-    dyn_option::DynOption,
+    dyn_option::CellDynOption,
     sparse_map::{
         SparseSetDenseStorage, SparseSetDenseStorageInput
     },
@@ -164,10 +164,28 @@ impl Debug for ComponentDenseStorage {
 }
 
 #[derive(From)]
+pub enum ComponentInputDefaultOrNot<'a> {
+    /// Using [`CellDynOption`] instead of [`DynOption`] and so using a shared
+    /// reference allows the enum to be covariant with `'a`.
+    /// As opposed to invariant with a mutable reference.
+    DynOption(&'a dyn CellDynOption),
+    Default,
+}
+
+impl<'a, 'b> Into<ComponentDenseStorageInput<'a, 'b>> for ComponentInputDefaultOrNot<'b> {
+    fn into(self) -> ComponentDenseStorageInput<'a, 'b> {
+        match self {
+            Self::DynOption(dyn_option) => ComponentDenseStorageInput::DynOption(dyn_option),
+            Self::Default => ComponentDenseStorageInput::Default,
+        }
+    }
+}
+
+#[derive(From)]
 pub enum ComponentDenseStorageInput<'a, 'b> {
     RemovedDynVecValue(RemovedDynVecValue<'a>),
     DrainedDynVecValue(DrainedDynVecValue<'a>),
-    DynOption(&'b mut dyn DynOption),
+    DynOption(&'b dyn CellDynOption),
     Default,
 }
 

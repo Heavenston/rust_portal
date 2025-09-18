@@ -18,10 +18,7 @@ use crate::{
 };
 
 use std::{
-    any::TypeId,
-    assert_matches::debug_assert_matches,
-    borrow::Cow,
-    collections::HashMap, ops::Deref
+    any::TypeId, assert_matches::debug_assert_matches, borrow::Cow, cell::Cell, collections::HashMap, ops::Deref
 };
 use utils::{ extract_nth::ExtractNthExt, itertools::Itertools, prelude::* };
 use derive_more::IsVariant;
@@ -840,90 +837,6 @@ impl World {
         ))
     }
 
-    /// If ComponentDenseStorageInput::Default is provided as input the
-    /// component must have a default constructor, otherwise there will be a
-    /// panic internally.
-    fn add_component_internal(
-        &'_ mut self,
-        entity: Entity,
-        component: ComponentEntity,
-        input: ComponentDenseStorageInput<'_, '_>,
-        override_existing_value: bool,
-    ) -> AddComponent {
-        // things that should be checked before calling this function
-        debug_assert!(self.alive(entity));
-        debug_assert!(self.alive(component));
-        // debug_assert_eq!(self.component_storage(component), Some(component_storage)); // -> in theory (it does not implement Eq)
-
-        let old_archetyp_id = self.entities_archetypes[entity.index()];
-        let old_archetyp = &mut self.archetypes[old_archetyp_id];
-        let old_table_id = old_archetyp.table_id;
-
-        if old_archetyp.components.has(component) {
-            if override_existing_value {
-                let old_table = &mut self.tables[old_table_id];
-                if let Some(comp_idx) = old_table.table_components.index_of(component) {
-                    let component_ref = old_table.sparse_map.get_mut(entity.index())
-                        .expect("Got table from the entity's archetyp")
-                        .for_component(comp_idx);
-                    input.assign_onto(component_ref).expect("Correct type");
-                }
-                else {
-                    debug_assert!(matches!(input, ComponentDenseStorageInput::Default));
-                }
-            }
-            return AddComponent::AlreadyPresent;
-        }
-
-        // we have to change the entity's archetyp
-
-        old_archetyp.entities.remove(entity.index());
-        // self.entities_archetypes[entity.index()] = undefined;
-
-        let (_, new_component_set) = old_archetyp.components.clone().with(component);
-        let new_archetyp_id = self.archtyp_for(Cow::Borrowed(&new_component_set));
-        debug_assert_ne!(old_archetyp_id, new_archetyp_id);
-        let new_archetyp = &mut self.archetypes[new_archetyp_id];
-        let new_table_id = new_archetyp.table_id;
-
-        new_archetyp.entities.insert(entity.index());
-        self.entities_archetypes[entity.index()] = new_archetyp_id;
-
-        if !self.component_fragments_tables(component) {
-            // TODO: With sparse storage, also needs to store it in its table
-            debug_assert_eq!(old_table_id, new_table_id);
-            return AddComponent::Added;
-        }
-
-        // The component fragments tables so the tables must be different here
-        let [old_table, new_table] = self.tables.get_disjoint_mut([
-            old_table_id, new_table_id,
-        ]).expect("Old table and new table are not equal");
-
-        let components = old_table.sparse_map.remove(entity.index())
-            .expect("Got table from the entity's archetyp")
-            .map(ComponentDenseStorageInput::RemovedDynVecValue);
-
-        match new_table.table_components.index_of(component) {
-            // This necessarily means that the component uses table storage
-            // as it is in the table components list
-            Some(new_idx) => {
-                // inserts the component into the list at its index
-                let new_components = components.chain_after(new_idx, once(input));
-
-                new_table.sparse_map.insert(entity.index(), new_components);
-            },
-            // This necessarily means that the component uses None storage
-            // unless
-            // TODO: Sparse storage makes this not sufficient
-            None => {
-                new_table.sparse_map.insert(entity.index(), components);
-            },
-        }
-
-        AddComponent::Added
-    }
-
     #[inline(always)] /* < mostly just for explicit intent */
     fn add_bundle_internal(
         &mut self,
@@ -945,21 +858,25 @@ impl World {
                 components.with(new_component).1
             });
 
-        if new_component_set == old_archetyp.components {
-            // Nothing to do, it has all the same components already
-            return;
+        let new_archectyp_id = if new_component_set != old_archetyp.components {
+            old_archetyp.entities.remove(entity.index());
+
+            self.archtyp_for(Cow::Borrowed(&new_component_set))
         }
-
-        old_archetyp.entities.remove(entity.index());
-
-        let new_archectyp_id = self.archtyp_for(Cow::Borrowed(&new_component_set));
-        debug_assert_ne!(old_archetyp_id, new_archectyp_id);
+        else {
+            old_archetyp_id
+        };
         let new_archetyp = &mut self.archetypes[new_archectyp_id];
         let new_table_id = new_archetyp.table_id;
 
-        self.entities_archetypes[entity.index()] = new_archectyp_id;
+        if new_archectyp_id != old_archetyp_id {
+            self.entities_archetypes[entity.index()] = new_archectyp_id;
+            new_archetyp.entities.insert(entity.index());
+        }
 
         if old_table_id != new_table_id {
+            debug_assert_ne!(new_archectyp_id, old_archetyp_id);
+
             let [old_table, new_table] = self.tables.get_disjoint_mut([
                 old_table_id, new_table_id,
             ]).expect("Just checked inequality");
@@ -967,7 +884,7 @@ impl World {
             let old_components = old_table.sparse_map.remove(entity.index())
                 .expect("This is the table of this entity's archetyp!")
                 .zip(old_table.table_components.iter())
-                .filter_map(|(val, comp)| (!override_existing_values || new_components.as_ref().contains(&comp))
+                .filter_map(|(val, comp)| (!override_existing_values || !new_components.as_ref().contains(&comp))
                     .then_some(val)
                 );
 
@@ -985,6 +902,7 @@ impl World {
                 // only components with None storage, so we can just discard them
                 // here
                 .filter_map(|(val, comp)| new_table.table_components.index_of(comp).zip(Some(val)))
+                .tuple_map_nth::<1, _, _>(Into::<ComponentInputDefaultOrNot>::into)
                 .tuple_map_nth::<1, _, _>(Into::<ComponentDenseStorageInput>::into)
             ;
 
@@ -993,8 +911,82 @@ impl World {
 
             new_table.sparse_map.insert(entity.index(), new_components);
         }
+        else if override_existing_values {
+            // In this branch both table are the same, we just need to override
+            // existing values
+            debug_assert_eq!(new_table_id, old_table_id);
+            let table = &mut self.tables[old_table_id];
+
+            let dense_idx = table.sparse_map.dense_index_of(entity.index())
+                .expect("This entity *is* in this table");
+            let (_, storage) = table.sparse_map.split();
+
+            let mut additional_components_values = bundle.into_component_values();
+            additional_components_values.bundle_values_iter()
+                .zip_eq(new_components.as_ref().iter().copied())
+                .filter_map(|(val, comp)| table.table_components.index_of(comp).zip(Some(val)))
+                .for_each(|(component_idx, comp_value)| {
+                    let comp_ref = storage.columns_mut()[component_idx].get_mut(ix!(dense_idx))
+                        .expect("Correct index gotten from table");
+                    Into::<ComponentDenseStorageInput>::into(comp_value.into())
+                        .assign_onto(comp_ref).expect("Correct column with correct type");
+                });
+        }
+        else if new_archectyp_id != old_archetyp_id {
+            todo!("None table fragmenting components changed");
+        }
         else {
-            todo!();
+            // Same archetype and same table (nothing to do)
+            debug_assert_eq!(old_archetyp_id, new_archectyp_id);
+            debug_assert_eq!(old_table_id, new_table_id);
+        }
+    }
+
+    /// If ComponentDenseStorageInput::Default is provided as input the
+    /// component must have a default constructor, otherwise there will be a
+    /// panic internally.
+    fn add_component_internal(
+        &mut self,
+        entity: Entity,
+        component: ComponentEntity,
+        input: ComponentInputDefaultOrNot<'_>,
+        override_existing_value: bool,
+    ) -> AddComponent {
+        // things that should be checked before calling this function
+        debug_assert!(self.alive(entity));
+        debug_assert!(self.alive(component));
+        // debug_assert_eq!(self.component_storage(component), Some(component_storage)); // -> in theory (it does not implement Eq)
+
+        let old_archetyp_id = self.entities_archetypes[entity.index()];
+
+        struct MyCoolBundle<'a> {
+            component: ComponentEntity,
+            input: ComponentInputDefaultOrNot<'a>,
+        }
+
+        impl Bundle for MyCoolBundle<'_> {
+            fn len(&self) -> usize { 1 }
+
+            fn accumulate_components(&self, _world: &mut World) -> [ComponentEntity; 1] {
+                [self.component]
+            }
+
+            fn into_component_values(self) -> impl BundleValueIterable {
+                Some(self.input)
+            }
+        }
+
+        self.add_bundle_internal(entity, MyCoolBundle {
+            component, input,
+        }, override_existing_value);
+
+        let new_archetyp_id = self.entities_archetypes[entity.index()];
+
+        if old_archetyp_id != new_archetyp_id {
+            AddComponent::Added
+        }
+        else {
+            AddComponent::AlreadyPresent
         }
     }
 
@@ -1041,7 +1033,7 @@ impl World {
             },
         };
 
-        Ok(self.add_component_internal(entity, component, ComponentDenseStorageInput::Default, false))
+        Ok(self.add_component_internal(entity, component, ComponentInputDefaultOrNot::Default, false))
     }
 
     pub fn add_component_with<V: 'static>(
@@ -1093,7 +1085,7 @@ impl World {
 
         Ok(self.add_component_internal(
             entity, component,
-            ComponentDenseStorageInput::DynOption(&mut FunDynOption::new(f)),
+            ComponentInputDefaultOrNot::DynOption(&Cell::new(FunDynOption::new(f))),
             false
         ))
     }
@@ -1147,7 +1139,7 @@ impl World {
 
         Ok(self.add_component_internal(
             entity, component,
-            ComponentDenseStorageInput::DynOption(&mut FunDynOption::new(f)),
+            ComponentInputDefaultOrNot::DynOption(&Cell::new(FunDynOption::new(f))),
             true
         ))
     }

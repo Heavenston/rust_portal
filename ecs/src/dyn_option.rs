@@ -1,4 +1,44 @@
+use std::cell::Cell;
+
 use dynvec::DynVec;
+
+pub trait CellDynOption {
+    fn take_and_push_into(
+        &self, into: &mut DynVec
+    ) -> Option<Result<(), dynvec::IncorrectTypeError>>;
+
+    fn take_and_set_into(
+        &self, idx: usize, into: &mut DynVec
+    ) -> Option<Result<(), dynvec::InsertionError>> {
+        match into.get_mut(idx) {
+            Ok(mut_ref) => match self.take_and_assign(mut_ref)? {
+                Ok(()) => Some(Ok(())),
+                Err(error) => Some(Err(dynvec::InsertionError::IncorrectType(error))),
+            },
+            Err(error) => Some(Err(dynvec::InsertionError::IndexOutOfBound(error))),
+        }
+    }
+
+    fn take_and_assign(
+        &self, target: dynvec::DynVecValueRefMut,
+    ) -> Option<Result<(), dynvec::IncorrectTypeError>>;
+}
+
+impl<T> CellDynOption for Cell<T>
+    where T: DynOption + Default
+{
+    fn take_and_push_into(
+        &self, into: &mut DynVec
+    ) -> Option<Result<(), dynvec::IncorrectTypeError>> {
+        self.take().take_and_push_into(into)
+    }
+
+    fn take_and_assign(
+        &self, target: dynvec::DynVecValueRefMut,
+    ) -> Option<Result<(), dynvec::IncorrectTypeError>> {
+        self.take().take_and_assign(target)
+    }
+}
 
 pub trait DynOption {
     fn take_and_push_into(
@@ -39,6 +79,7 @@ impl<T: 'static> DynOption for Option<T> {
 }
 
 #[derive(Debug)]
+#[derive_where::derive_where(Default)]
 pub struct FunDynOption<F>(Option<F>);
 
 impl<F> FunDynOption<F> {
