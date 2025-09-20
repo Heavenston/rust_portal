@@ -9,6 +9,8 @@ pub enum LazyBundleError {
 
 impl BundleErrorFrom<ComponentRequiresValueError> for LazyBundleError {
     const REACHABLE: bool = false;
+
+    #[coverage(off)]
     fn bundle_from(_value: ComponentRequiresValueError) -> Self {
         unreachable!("Lazy bundles always provide a value for components")
     }
@@ -16,6 +18,8 @@ impl BundleErrorFrom<ComponentRequiresValueError> for LazyBundleError {
 
 impl BundleErrorFrom<ComponentDoesNotHaveStorageError> for LazyBundleError {
     const REACHABLE: bool = false;
+
+    #[coverage(off)]
     fn bundle_from(_value: ComponentDoesNotHaveStorageError) -> Self {
         unreachable!("Lazy bundles use World::component to get components which should always return entities with the correct storages")
     }
@@ -23,6 +27,8 @@ impl BundleErrorFrom<ComponentDoesNotHaveStorageError> for LazyBundleError {
 
 impl BundleErrorFrom<TypeMismatchedError> for LazyBundleError {
     const REACHABLE: bool = false;
+
+    #[coverage(off)]
     fn bundle_from(_value: TypeMismatchedError) -> Self {
         unreachable!("Lazy bundles use World::component to get components which should always return entities with the correct storages")
     }
@@ -30,6 +36,8 @@ impl BundleErrorFrom<TypeMismatchedError> for LazyBundleError {
 
 impl BundleErrorFrom<ComponentIsNotAliveError> for LazyBundleError {
     const REACHABLE: bool = false;
+
+    #[coverage(off)]
     fn bundle_from(_value: ComponentIsNotAliveError) -> Self {
         unreachable!("Lazy bundles use World::component to get components which should always return alive entities")
     }

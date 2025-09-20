@@ -8,6 +8,8 @@
 #![feature(min_specialization)]
 #![feature(type_alias_impl_trait)]
 
+#![feature(coverage_attribute)]
+
 pub mod sparse_map;
 pub mod index_map;
 pub mod dyn_option;

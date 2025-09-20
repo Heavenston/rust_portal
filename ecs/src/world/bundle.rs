@@ -28,12 +28,6 @@ pub trait BundleValueIterable {
     fn bundle_values_iter(&mut self) -> impl Iterator<Item = Self::Item<'_>>;
 }
 
-impl BundleValueIterable for Option<ComponentInputDefaultOrNot<'_>> {
-    fn bundle_values_iter<'s>(&'s mut self) -> std::option::IntoIter<Self::Item<'s>> {
-        self.take().into_iter()
-    }
-}
-
 #[doc(hidden)]
 pub trait BundleErrorFrom<T> {
     const REACHABLE: bool;

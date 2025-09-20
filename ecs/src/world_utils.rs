@@ -1,6 +1,4 @@
-use crate::world::{
-    component::Component, AddComponentOutcome, AddComponentWithError, ComponentNotPresentError, Entity, EntityIsNotAliveError, ForbiddenError, GetComponentError, HasComponent, OptionalComponentRef, RemoveComponentError, SetComponentWithError, World
-};
+use crate::world::{ *, component::* };
 
 use std::any::type_name;
 use derive_more::IsVariant;
@@ -152,42 +150,33 @@ impl World {
         where F: FnOnce() -> C,
               C: Component,
     {
-        let component = self.component::<C>();
-
-        match self.add_component_with(entity, component, f) {
-            Ok(result) => Ok(result),
-            Err(AddComponentWithError::EntityIsNotAlive(e)) => Err(e.into()),
-            Err(AddComponentWithError::Forbidden(e)) => Err(e.into()),
-
-            Err(AddComponentWithError::TypeMismatched { .. }) |
-            Err(AddComponentWithError::ComponentDoesNotHaveStorage { .. }) =>
-                unreachable!("World::component should return an entity with the correct storage"),
-            Err(AddComponentWithError::ComponentIsNotAlive { .. }) =>
-                unreachable!("World::component should not return a dead entity"),
+        match self.add_bundle(entity, LazyBundle((f,))) {
+            Ok(AddBundleOutcome::AtLeastOneWasAdded) => Ok(AddComponentOutcome::Added),
+            Ok(AddBundleOutcome::AllWasAlreadyPresent) => Ok(AddComponentOutcome::AlreadyPresent),
+            Err(LazyBundleError::EntityIsNotAlive(e)) => Err(e.into()),
+            Err(LazyBundleError::Forbidden(e)) => Err(e.into()),
         }
     }
 
     /// Gets the component of the given type for the given entity, if the entity
     /// does not have the component, it is inserted with the given value.
     pub fn add<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> Result<AddComponentOutcome, AddComponentTypedError> {
-        self.add_with(entity, || component)
+        match self.add_bundle(entity, (component,)) {
+            Ok(AddBundleOutcome::AtLeastOneWasAdded) => Ok(AddComponentOutcome::Added),
+            Ok(AddBundleOutcome::AllWasAlreadyPresent) => Ok(AddComponentOutcome::AlreadyPresent),
+            Err(TypedBundleError::EntityIsNotAlive(e)) => Err(e.into()),
+            Err(TypedBundleError::Forbidden(e)) => Err(e.into()),
+        }
     }
 
     /// Sets the value for the given component on the given entity, overrides
     /// the component's value if the entity already has it.
     pub fn set<C: Component>(&mut self, entity: impl Into<Entity>, value: C) -> Result<AddComponentOutcome, SetComponentTypedError> {
-        let component = self.component::<C>();
-
-        match self.set_component_with(entity, component, || value) {
-            Ok(result) => Ok(result),
-            Err(SetComponentWithError::EntityIsNotAlive(e)) => Err(e.into()),
-            Err(SetComponentWithError::Forbidden(e)) => Err(e.into()),
-
-            Err(SetComponentWithError::TypeMismatched { .. }) |
-            Err(SetComponentWithError::ComponentDoesNotHaveStorage { .. }) =>
-                unreachable!("World::component should return an entity with the correct storage"),
-            Err(SetComponentWithError::ComponentIsNotAlive { .. }) =>
-                unreachable!("World::component should not return a dead entity"),
+        match self.set_bundle(entity, (value,)) {
+            Ok(AddBundleOutcome::AtLeastOneWasAdded) => Ok(AddComponentOutcome::Added),
+            Ok(AddBundleOutcome::AllWasAlreadyPresent) => Ok(AddComponentOutcome::AlreadyPresent),
+            Err(TypedBundleError::EntityIsNotAlive(e)) => Err(e.into()),
+            Err(TypedBundleError::Forbidden(e)) => Err(e.into()),
         }
     }
 

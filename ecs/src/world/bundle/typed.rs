@@ -12,6 +12,8 @@ pub enum TypedBundleError {
 
 impl BundleErrorFrom<ComponentRequiresValueError> for TypedBundleError {
     const REACHABLE: bool = false;
+
+    #[coverage(off)]
     fn bundle_from(_value: ComponentRequiresValueError) -> Self {
         unreachable!("Typed bundles always provide a value for components")
     }
@@ -19,6 +21,8 @@ impl BundleErrorFrom<ComponentRequiresValueError> for TypedBundleError {
 
 impl BundleErrorFrom<ComponentDoesNotHaveStorageError> for TypedBundleError {
     const REACHABLE: bool = false;
+
+    #[coverage(off)]
     fn bundle_from(_value: ComponentDoesNotHaveStorageError) -> Self {
         unreachable!("Typed bundles use World::component to get components which should always return entities with the correct storages")
     }
@@ -26,6 +30,8 @@ impl BundleErrorFrom<ComponentDoesNotHaveStorageError> for TypedBundleError {
 
 impl BundleErrorFrom<TypeMismatchedError> for TypedBundleError {
     const REACHABLE: bool = false;
+
+    #[coverage(off)]
     fn bundle_from(_value: TypeMismatchedError) -> Self {
         unreachable!("Typed bundles use World::component to get components which should always return entities with the correct storages")
     }
@@ -33,6 +39,8 @@ impl BundleErrorFrom<TypeMismatchedError> for TypedBundleError {
 
 impl BundleErrorFrom<ComponentIsNotAliveError> for TypedBundleError {
     const REACHABLE: bool = false;
+
+    #[coverage(off)]
     fn bundle_from(_value: ComponentIsNotAliveError) -> Self {
         unreachable!("Typed bundles use World::component to get components which should always return alive entities")
     }
