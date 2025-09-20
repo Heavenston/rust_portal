@@ -1,8 +1,11 @@
-use std::cell::Cell;
+use std::{any::TypeId, cell::Cell};
 
 use dynvec::DynVec;
 
 pub trait CellDynOption {
+    fn value_type_id(&self) -> TypeId;
+    fn value_type_name(&self) -> &'static str;
+
     fn take_and_push_into(
         &self, into: &mut DynVec
     ) -> Option<Result<(), dynvec::IncorrectTypeError>>;
@@ -27,6 +30,20 @@ pub trait CellDynOption {
 impl<T> CellDynOption for Cell<T>
     where T: DynOption + Default
 {
+    fn value_type_id(&self) -> TypeId {
+        let val = self.take();
+        let type_id = val.value_type_id();
+        self.set(val);
+        type_id
+    }
+
+    fn value_type_name(&self) -> &'static str {
+        let val = self.take();
+        let type_name = val.value_type_name();
+        self.set(val);
+        type_name
+    }
+
     fn take_and_push_into(
         &self, into: &mut DynVec
     ) -> Option<Result<(), dynvec::IncorrectTypeError>> {
@@ -41,6 +58,9 @@ impl<T> CellDynOption for Cell<T>
 }
 
 pub trait DynOption {
+    fn value_type_id(&self) -> TypeId;
+    fn value_type_name(&self) -> &'static str;
+
     fn take_and_push_into(
         &mut self, into: &mut DynVec
     ) -> Option<Result<(), dynvec::IncorrectTypeError>>;
@@ -63,6 +83,14 @@ pub trait DynOption {
 }
 
 impl<T: 'static> DynOption for Option<T> {
+    fn value_type_id(&self) -> TypeId {
+        TypeId::of::<T>()
+    }
+
+    fn value_type_name(&self) -> &'static str {
+        std::any::type_name::<T>()
+    }
+
     fn take_and_push_into(
         &mut self, into: &mut DynVec
     ) -> Option<Result<(), dynvec::IncorrectTypeError>> {
@@ -91,6 +119,14 @@ impl<F> FunDynOption<F> {
 impl<F, T: 'static> DynOption for FunDynOption<F>
     where F: FnOnce() -> T,
 {
+    fn value_type_id(&self) -> TypeId {
+        TypeId::of::<T>()
+    }
+
+    fn value_type_name(&self) -> &'static str {
+        std::any::type_name::<T>()
+    }
+
     fn take_and_push_into(
         &mut self, into: &mut DynVec
     ) -> Option<Result<(), dynvec::IncorrectTypeError>> {

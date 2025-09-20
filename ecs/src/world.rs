@@ -11,14 +11,11 @@ pub mod query;
 mod bundle;
 pub use bundle::*;
 
-use crate::{
-    dyn_option::FunDynOption,
-    index_map::IndexMap,
-    sparse_map::SparseMap, world_utils::GetComponentTypedError,
-};
+use crate::{ index_map::IndexMap, sparse_map::SparseMap, world_utils::GetComponentTypedError };
 
 use std::{
-    any::TypeId, assert_matches::debug_assert_matches, borrow::Cow, cell::Cell, collections::HashMap, ops::Deref
+    any::TypeId, assert_matches::debug_assert_matches, borrow::Cow,
+    collections::HashMap, ops::Deref
 };
 use utils::{ extract_nth::ExtractNthExt, itertools::Itertools, prelude::* };
 use derive_more::IsVariant;
@@ -167,10 +164,16 @@ impl<C> Deref for MaybeReadOnlyComponentRef<'_, C> {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum AddComponent {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
+pub enum AddComponentOutcome {
     Added,
     AlreadyPresent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
+pub enum AddBundleOutcome {
+    AtLeastOneWasAdded,
+    AllWasAlreadyPresent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
@@ -811,16 +814,79 @@ impl World {
     }
 
     #[inline(always)] /* < mostly just for explicit intent */
-    fn add_bundle_internal(
+    fn add_bundle_internal<B: Bundle>(
         &mut self,
         entity: impl Into<Entity>,
-        bundle: impl Bundle,
+        bundle: B,
         override_existing_values: bool,
-    ) {
+    ) -> Result<AddBundleOutcome, B::Error> {
+        macro_rules! can_err {
+            ($($t: ty)|+) => (( cfg!(debug_assertions) $(|| <B::Error as BundleErrorFrom<$t>>::REACHABLE)+ ));
+        }
+        macro_rules! err {
+            ($err: expr) => (( Err(B::Error::bundle_from($err)) ));
+        }
+
         let entity = entity.into();
-        assert!(self.alive(entity));
+        if can_err!(EntityIsNotAliveError) && !self.alive(entity) {
+            return err!(EntityIsNotAliveError { entity });
+        }
         let new_components = bundle.accumulate_components(self);
-        assert!(new_components.as_ref().iter().copied().all(|comp| self.alive(comp)));
+        if can_err!(ComponentIsNotAliveError) && let Some(&component) =
+            new_components.as_ref().iter().find(|&comp| !self.alive(comp))
+        {
+            return err!(ComponentIsNotAliveError { component });
+        }
+
+        if new_components.as_ref().iter().any(|&comp| self.is_internal_component_trait(comp)) {
+            if self.components_entity_to_typeid.contains_key(&ComponentEntity(entity)) {
+                return err!(ForbiddenError {
+                    reason: "Cannot add compononent traits to an internal component entity.",
+                });
+            }
+
+            if self.is_component_in_use(ComponentEntity(entity)) {
+                return err!(ForbiddenError {
+                    reason: "Cannot add component traits to a component that is in use.",
+                })
+            }
+        }
+
+        // FIXME: PROFILEME: Seems like if there is something to optimize it's
+        // this, because its checked again on insertion, but this requires reading
+        // the storage of each component which wouldn't be necessary otherwise
+        if can_err!(TypeMismatchedError | ComponentDoesNotHaveStorageError | ComponentRequiresValueError) {
+            zip(new_components.as_ref().iter().copied(), bundle.components_value_types())
+                .try_for_each(|(component, type_id)| -> Result<(), B::Error> {
+                    let storage = self.component_storage(component)
+                        .expect("Component is alive (checked before)");
+
+                    match (storage, type_id) {
+                        (ComponentStorageKind::None, None) => Ok(()),
+                        (ComponentStorageKind::Table { dynvec_meta: dmeta, .. }, Some((given_type_id, given_type_name)))
+                            => if can_err!(TypeMismatchedError) && dmeta.type_id != given_type_id {
+                                err!(TypeMismatchedError { component, given: given_type_name, expected: dmeta.type_name })
+                            }
+                            else {
+                                Ok(())
+                            },
+                        (ComponentStorageKind::None, Some(_))
+                            => if can_err!(ComponentDoesNotHaveStorageError) {
+                                err!(ComponentDoesNotHaveStorageError { component })
+                            }
+                            else {
+                                Ok(())
+                            },
+                        (ComponentStorageKind::Table { dynvec_meta, .. }, None)
+                            => if can_err!(ComponentRequiresValueError) && !dynvec_meta.default_fn.is_some() {
+                                err!(ComponentRequiresValueError { component })
+                            }
+                            else {
+                                Ok(())
+                            },
+                    }
+                })?;
+        }
 
         let old_archetyp_id = self.entities_archetypes[entity.index()];
         let old_archetyp: &mut Archetyp = &mut self.archetypes[old_archetyp_id];
@@ -847,7 +913,7 @@ impl World {
             new_archetyp.entities.insert(entity.index());
         }
 
-        if old_table_id != new_table_id {
+        let outcome = if old_table_id != new_table_id {
             debug_assert_ne!(new_archectyp_id, old_archetyp_id);
 
             let [old_table, new_table] = self.tables.get_disjoint_mut([
@@ -883,6 +949,8 @@ impl World {
                 .interleave_indexed(additional_table_components);
 
             new_table.sparse_map.insert(entity.index(), new_components);
+
+            AddBundleOutcome::AtLeastOneWasAdded
         }
         else if override_existing_values {
             // In this branch both table are the same, we just need to override
@@ -904,6 +972,8 @@ impl World {
                     Into::<ComponentDenseStorageInput>::into(comp_value.into())
                         .assign_onto(comp_ref).expect("Correct column with correct type");
                 });
+
+            AddBundleOutcome::AllWasAlreadyPresent
         }
         else if new_archectyp_id != old_archetyp_id {
             todo!("None table fragmenting components changed");
@@ -912,55 +982,11 @@ impl World {
             // Same archetype and same table (nothing to do)
             debug_assert_eq!(old_archetyp_id, new_archectyp_id);
             debug_assert_eq!(old_table_id, new_table_id);
-        }
-    }
 
-    /// If ComponentDenseStorageInput::Default is provided as input the
-    /// component must have a default constructor, otherwise there will be a
-    /// panic internally.
-    fn add_component_internal(
-        &mut self,
-        entity: Entity,
-        component: ComponentEntity,
-        input: ComponentInputDefaultOrNot<'_>,
-        override_existing_value: bool,
-    ) -> AddComponent {
-        // things that should be checked before calling this function
-        debug_assert!(self.alive(entity));
-        debug_assert!(self.alive(component));
-        // debug_assert_eq!(self.component_storage(component), Some(component_storage)); // -> in theory (it does not implement Eq)
+            AddBundleOutcome::AllWasAlreadyPresent
+        };
 
-        let old_archetyp_id = self.entities_archetypes[entity.index()];
-
-        struct MyCoolBundle<'a> {
-            component: ComponentEntity,
-            input: ComponentInputDefaultOrNot<'a>,
-        }
-
-        impl Bundle for MyCoolBundle<'_> {
-            fn len(&self) -> usize { 1 }
-
-            fn accumulate_components(&self, _world: &mut World) -> [ComponentEntity; 1] {
-                [self.component]
-            }
-
-            fn into_component_values(self) -> impl BundleValueIterable {
-                Some(self.input)
-            }
-        }
-
-        self.add_bundle_internal(entity, MyCoolBundle {
-            component, input,
-        }, override_existing_value);
-
-        let new_archetyp_id = self.entities_archetypes[entity.index()];
-
-        if old_archetyp_id != new_archetyp_id {
-            AddComponent::Added
-        }
-        else {
-            AddComponent::AlreadyPresent
-        }
+        Ok(outcome)
     }
 
     /// The component must have no storage or its storage type must implement Default.
@@ -968,45 +994,20 @@ impl World {
         &mut self,
         entity: impl Into<Entity>,
         component: ComponentEntity,
-    ) -> Result<AddComponent, AddComponentError> {
-        let entity = entity.into();
+    ) -> Result<AddComponentOutcome, AddComponentError> {
+        match self.add_bundle_internal(entity, NamedBundle((component,)), false) {
+            Ok(AddBundleOutcome::AtLeastOneWasAdded) => Ok(AddComponentOutcome::Added),
+            Ok(AddBundleOutcome::AllWasAlreadyPresent) => Ok(AddComponentOutcome::AlreadyPresent),
 
-        if !self.alive(entity) {
-            return Err(EntityIsNotAliveError { entity }.into());
+            Err(NamedBundleError::EntityIsNotAlive(e)) => Err(e.into()),
+            Err(NamedBundleError::ComponentIsNotAlive(e)) => Err(e.into()),
+            Err(NamedBundleError::ComponentRequiresValue(e)) => Err(e.into()),
+            Err(NamedBundleError::Forbidden(e)) => Err(e.into()),
+
+            Err(NamedBundleError::TypeMismatchedError(_)) |
+            Err(NamedBundleError::ComponentDoesNotHaveStorage(_)) =>
+                unreachable!("Provided no value for components"),
         }
-
-        if !self.alive(component) {
-            return Err(ComponentIsNotAliveError { component }.into());
-        }
-
-        if self.is_internal_component_trait(component) {
-            if self.components_entity_to_typeid.contains_key(&ComponentEntity(entity)) {
-                return Err(ForbiddenError {
-                    reason: "Cannot add compononent traits to an internal component entity.",
-                }.into());
-            }
-
-            if self.is_component_in_use(ComponentEntity(entity)) {
-                return Err(ForbiddenError {
-                    reason: "Cannot add component traits to a component that is in use.",
-                }.into())
-            }
-        }
-
-        let component_storage = self.component_storage(component).expect("Entity is alive");
-        match component_storage {
-            ComponentStorageKind::None => false,
-            ComponentStorageKind::Table {
-                dynvec_meta: DynVecMetadata { default_fn: Some(_), .. },
-                is_readonly,
-            } => is_readonly,
-
-            ComponentStorageKind::Table { dynvec_meta: DynVecMetadata { default_fn: None, .. }, .. } => {
-                return Err(ComponentRequiresValueError { component }.into());
-            },
-        };
-
-        Ok(self.add_component_internal(entity, component, ComponentInputDefaultOrNot::Default, false))
     }
 
     pub fn add_component_with<V: 'static>(
@@ -1014,53 +1015,20 @@ impl World {
         entity: impl Into<Entity>,
         component: ComponentEntity,
         f: impl FnOnce() -> V,
-    ) -> Result<AddComponent, AddComponentWithError> {
-        let entity = entity.into();
+    ) -> Result<AddComponentOutcome, AddComponentWithError> {
+        match self.add_bundle_internal(entity, LazyNamedBundle(((component, f),)), false) {
+            Ok(AddBundleOutcome::AtLeastOneWasAdded) => Ok(AddComponentOutcome::Added),
+            Ok(AddBundleOutcome::AllWasAlreadyPresent) => Ok(AddComponentOutcome::AlreadyPresent),
 
-        if !self.alive(entity) {
-            return Err(EntityIsNotAliveError { entity }.into());
+            Err(LazyNamedBundleError::EntityIsNotAlive(e)) => Err(e.into()),
+            Err(LazyNamedBundleError::ComponentIsNotAlive(e)) => Err(e.into()),
+            Err(LazyNamedBundleError::ComponentDoesNotHaveStorage(e)) => Err(e.into()),
+            Err(LazyNamedBundleError::TypeMismatchedError(e)) => Err(e.into()),
+            Err(LazyNamedBundleError::Forbidden(e)) => Err(e.into()),
+
+            Err(LazyNamedBundleError::ComponentRequiresValue(_)) =>
+                unreachable!("Provided a value for all components"),
         }
-
-        let Some(component_storage) = self.component_storage(component)
-        else {
-            return Err(ComponentIsNotAliveError { component }.into());
-        };
-
-        if self.is_internal_component_trait(component) {
-            if self.components_entity_to_typeid.contains_key(&ComponentEntity(entity)) {
-                return Err(ForbiddenError {
-                    reason: "Cannot add compononent traits to an internal component entity.",
-                }.into());
-            }
-
-            if self.is_component_in_use(ComponentEntity(entity)) {
-                return Err(ForbiddenError {
-                    reason: "Cannot add component traits to a component that is in use.",
-                }.into())
-            }
-        }
-
-        match component_storage {
-            ComponentStorageKind::None =>
-                return Err(ComponentDoesNotHaveStorageError {
-                    component,
-                }.into()),
-            ComponentStorageKind::Table {
-                dynvec_meta: DynVecMetadata { type_id, type_name: expected, .. }, ..
-            } if type_id != TypeId::of::<V>() =>
-                return Err(TypeMismatchedError {
-                    component,
-                    given: std::any::type_name::<V>(),
-                    expected,
-                }.into()),
-            _ => (),
-        }
-
-        Ok(self.add_component_internal(
-            entity, component,
-            ComponentInputDefaultOrNot::DynOption(&Cell::new(FunDynOption::new(f))),
-            false
-        ))
     }
 
     pub fn set_component_with<V: 'static>(
@@ -1068,71 +1036,38 @@ impl World {
         entity: impl Into<Entity>,
         component: ComponentEntity,
         f: impl FnOnce() -> V,
-    ) -> Result<AddComponent, SetComponentWithError> {
-        let entity = entity.into();
+    ) -> Result<AddComponentOutcome, SetComponentWithError> {
+        match self.add_bundle_internal(entity, LazyNamedBundle(((component, f),)), true) {
+            Ok(AddBundleOutcome::AtLeastOneWasAdded) => Ok(AddComponentOutcome::Added),
+            Ok(AddBundleOutcome::AllWasAlreadyPresent) => Ok(AddComponentOutcome::AlreadyPresent),
 
-        if !self.alive(entity) {
-            return Err(EntityIsNotAliveError { entity }.into());
+            Err(LazyNamedBundleError::EntityIsNotAlive(e)) => Err(e.into()),
+            Err(LazyNamedBundleError::ComponentIsNotAlive(e)) => Err(e.into()),
+            Err(LazyNamedBundleError::ComponentDoesNotHaveStorage(e)) => Err(e.into()),
+            Err(LazyNamedBundleError::TypeMismatchedError(e)) => Err(e.into()),
+            Err(LazyNamedBundleError::Forbidden(e)) => Err(e.into()),
+
+            Err(LazyNamedBundleError::ComponentRequiresValue(_)) =>
+                unreachable!("Provided a value for all components"),
         }
-
-        let Some(component_storage) = self.component_storage(component)
-        else {
-            return Err(ComponentIsNotAliveError { component }.into());
-        };
-
-        if self.is_internal_component_trait(component) {
-            if self.components_entity_to_typeid.contains_key(&ComponentEntity(entity)) {
-                return Err(ForbiddenError {
-                    reason: "Cannot add compononent traits to an internal component entity.",
-                }.into());
-            }
-
-            if self.is_component_in_use(ComponentEntity(entity)) {
-                return Err(ForbiddenError {
-                    reason: "Cannot add component traits to a component that is in use.",
-                }.into())
-            }
-        }
-
-        match component_storage {
-            ComponentStorageKind::None =>
-                return Err(ComponentDoesNotHaveStorageError {
-                    component,
-                }.into()),
-            ComponentStorageKind::Table {
-                dynvec_meta: DynVecMetadata { type_id, type_name: expected, .. }, ..
-            } if type_id != TypeId::of::<V>() =>
-                return Err(TypeMismatchedError {
-                    component,
-                    given: std::any::type_name::<V>(),
-                    expected,
-                }.into()),
-            _ => (),
-        }
-
-        Ok(self.add_component_internal(
-            entity, component,
-            ComponentInputDefaultOrNot::DynOption(&Cell::new(FunDynOption::new(f))),
-            true
-        ))
     }
 
-    pub fn add_bundle(
+    pub fn add_bundle<B: Bundle>(
         &mut self,
         entity: impl Into<Entity>,
-        bundle: impl Bundle,
-    ) {
-        self.add_bundle_internal(entity, bundle, false);
+        bundle: B,
+    ) -> Result<AddBundleOutcome, B::Error> {
+        self.add_bundle_internal(entity, bundle, false)
     }
 
     /// Like [`World::add_bundle`] but overrides components that are already
     /// present.
-    pub fn set_bundle(
+    pub fn set_bundle<B: Bundle>(
         &mut self,
         entity: impl Into<Entity>,
-        bundle: impl Bundle,
-    ) {
-        self.add_bundle_internal(entity, bundle, true);
+        bundle: B,
+    ) -> Result<AddBundleOutcome, B::Error> {
+        self.add_bundle_internal(entity, bundle, true)
     }
 
     pub fn remove_component(

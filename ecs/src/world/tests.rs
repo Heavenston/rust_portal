@@ -202,7 +202,7 @@ mod entities_with_typed_components {
         assert_matches!(world.has::<TestComponent1>(e), HasComponentTyped::NotPresent);
         assert_matches!(world.has::<TestComponent2>(e), HasComponentTyped::UnknownComponent);
         assert_matches!(world.has_component(e, component), HasComponent::NotPresent);
-        assert_matches!(world.add(e, TestComponent1(50)), Ok(AddComponent::Added));
+        assert_matches!(world.add(e, TestComponent1(50)), Ok(AddComponentOutcome::Added));
         assert_matches!(world.has::<TestComponent1>(e), HasComponentTyped::Present);
         assert_matches!(world.has::<TestComponent2>(e), HasComponentTyped::UnknownComponent);
         assert_matches!(world.has_component(e, component), HasComponent::Present);
@@ -225,7 +225,7 @@ mod entities_with_typed_components {
         let e = world.spawn();
 
         assert_matches!(world.has::<TestComponent1>(e), HasComponentTyped::UnknownComponent);
-        assert_matches!(world.add(e, TestComponent1(42)), Ok(AddComponent::Added));
+        assert_matches!(world.add(e, TestComponent1(42)), Ok(AddComponentOutcome::Added));
         assert_matches!(world.has::<TestComponent1>(e), HasComponentTyped::Present);
         world.remove::<TestComponent1>(e).unwrap();
         assert_matches!(world.has::<TestComponent1>(e), HasComponentTyped::NotPresent);
@@ -237,7 +237,7 @@ mod entities_with_typed_components {
         let e = world.spawn();
 
         assert_matches!(world.has::<ZSTComponent>(e), HasComponentTyped::UnknownComponent);
-        assert_matches!(world.add(e, ZSTComponent), Ok(AddComponent::Added));
+        assert_matches!(world.add(e, ZSTComponent), Ok(AddComponentOutcome::Added));
         assert_matches!(world.has::<ZSTComponent>(e), HasComponentTyped::Present);
         world.remove::<ZSTComponent>(e).unwrap();
         assert_matches!(world.has::<ZSTComponent>(e), HasComponentTyped::NotPresent);
@@ -430,7 +430,7 @@ mod torturing_components {
 
         assert_matches!(
             world.add_component_with(e, c, || 53u32),
-            Ok(AddComponent::Added),
+            Ok(AddComponentOutcome::Added),
         );
 
         assert_matches!(
@@ -485,7 +485,7 @@ mod torturing_components {
 
         // can still use the component, it has no storage
 
-        assert_matches!(world.add_component(e, c), Ok(AddComponent::Added));
+        assert_matches!(world.add_component(e, c), Ok(AddComponentOutcome::Added));
         assert_matches!(
             world.get_component(e, c),
             Err(GetComponentError::ComponentDoesNotHaveStorage { .. }),
@@ -587,7 +587,7 @@ mod entities_with_untyped_components {
         let c = world.spawn_component();
 
         assert_eq!(world.has_component(e, c), HasComponent::NotPresent);
-        assert_matches!(world.add_component(e, c), Ok(AddComponent::Added));
+        assert_matches!(world.add_component(e, c), Ok(AddComponentOutcome::Added));
         assert_eq!(world.has_component(e, c), HasComponent::Present);
 
         assert_matches!(world.get_component(e, c), Err(GetComponentError::ComponentDoesNotHaveStorage { .. }));
@@ -616,9 +616,9 @@ mod entities_with_untyped_components {
         let c = world.spawn_component();
 
         assert_eq!(world.has_component(e, c), HasComponent::NotPresent);
-        assert_matches!(world.add_component(e, c), Ok(AddComponent::Added));
+        assert_matches!(world.add_component(e, c), Ok(AddComponentOutcome::Added));
         assert_eq!(world.has_component(e, c), HasComponent::Present);
-        assert_matches!(world.add_component(e, c), Ok(AddComponent::AlreadyPresent));
+        assert_matches!(world.add_component(e, c), Ok(AddComponentOutcome::AlreadyPresent));
         assert_eq!(world.has_component(e, c), HasComponent::Present);
     }
 
@@ -677,7 +677,7 @@ mod bundles {
         let mut world = World::new();
         let e = world.spawn();
         let a_id = world.entities_archetypes[e.index()];
-        world.add_bundle(e, ());
+        assert_matches!(world.add_bundle(e, ()), Ok(AddBundleOutcome::AllWasAlreadyPresent));
         assert_eq!(a_id, world.entities_archetypes[e.index()]);
     }
 
@@ -687,7 +687,7 @@ mod bundles {
         let e = world.spawn();
         world.add(e, TestComponent1(42)).unwrap();
         let a_id = world.entities_archetypes[e.index()];
-        world.add_bundle(e, ());
+        assert_matches!(world.add_bundle(e, ()), Ok(AddBundleOutcome::AllWasAlreadyPresent));
         assert_eq!(a_id, world.entities_archetypes[e.index()]);
         assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(42));
     }
@@ -697,7 +697,7 @@ mod bundles {
         let mut world = World::new();
         let e = world.spawn();
         let a_id = world.entities_archetypes[e.index()];
-        world.add_bundle(e, (TestComponent1(42),));
+        assert_matches!(world.add_bundle(e, (TestComponent1(42),)), Ok(AddBundleOutcome::AtLeastOneWasAdded));
         assert_ne!(a_id, world.entities_archetypes[e.index()]);
         assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(42));
     }
@@ -708,7 +708,7 @@ mod bundles {
         let e = world.spawn();
 
         let a_id = world.entities_archetypes[e.index()];
-        world.add_bundle(e, (TestComponent1(42), TestComponent2(90.)));
+        assert_matches!(world.add_bundle(e, (TestComponent1(42), TestComponent2(90.))), Ok(AddBundleOutcome::AtLeastOneWasAdded));
         assert_ne!(a_id, world.entities_archetypes[e.index()]);
 
         assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(42));
@@ -724,7 +724,7 @@ mod bundles {
         world.component::<TestComponent2>();
 
         let a_id = world.entities_archetypes[e.index()];
-        world.add_bundle(e, (TestComponent2(90.), TestComponent1(42)));
+        assert_matches!(world.add_bundle(e, (TestComponent2(90.), TestComponent1(42))), Ok(AddBundleOutcome::AtLeastOneWasAdded));
         assert_ne!(a_id, world.entities_archetypes[e.index()]);
 
         assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(42));
@@ -739,7 +739,7 @@ mod bundles {
         world.add(e, TestComponent1(42)).unwrap();
 
         let a_id = world.entities_archetypes[e.index()];
-        world.add_bundle(e, (TestComponent2(90.),));
+        assert_matches!(world.add_bundle(e, (TestComponent2(90.),)), Ok(AddBundleOutcome::AtLeastOneWasAdded));
         assert_ne!(a_id, world.entities_archetypes[e.index()]);
 
         assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(42));
@@ -754,7 +754,7 @@ mod bundles {
         world.add(e, DefaultComponent(format!("feur"))).unwrap();
 
         let a_id = world.entities_archetypes[e.index()];
-        world.add_bundle(e, (TestComponent1(42), TestComponent2(90.)));
+        assert_matches!(world.add_bundle(e, (TestComponent1(42), TestComponent2(90.))), Ok(AddBundleOutcome::AtLeastOneWasAdded));
         assert_ne!(a_id, world.entities_archetypes[e.index()]);
 
         assert_eq!(world.get::<DefaultComponent>(e).unwrap(), &DefaultComponent(format!("feur")));
@@ -770,7 +770,7 @@ mod bundles {
         world.add(e, TestComponent1(50)).unwrap();
 
         let a_id = world.entities_archetypes[e.index()];
-        world.add_bundle(e, (TestComponent1(42),));
+        assert_matches!(world.add_bundle(e, (TestComponent1(42),)), Ok(AddBundleOutcome::AllWasAlreadyPresent));
         assert_eq!(a_id, world.entities_archetypes[e.index()]);
 
         assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(50));
@@ -784,7 +784,7 @@ mod bundles {
         world.add(e, TestComponent1(50)).unwrap();
 
         let a_id = world.entities_archetypes[e.index()];
-        world.add_bundle(e, (TestComponent1(42), TestComponent2(90.)));
+        assert_matches!(world.add_bundle(e, (TestComponent1(42), TestComponent2(90.))), Ok(AddBundleOutcome::AtLeastOneWasAdded));
         assert_ne!(a_id, world.entities_archetypes[e.index()]);
 
         assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(50));
@@ -800,7 +800,7 @@ mod bundles {
         world.add(e, TestComponent2(30.)).unwrap();
 
         let a_id = world.entities_archetypes[e.index()];
-        world.add_bundle(e, (TestComponent1(42), TestComponent2(90.)));
+        assert_matches!(world.add_bundle(e, (TestComponent1(42), TestComponent2(90.))), Ok(AddBundleOutcome::AllWasAlreadyPresent));
         assert_eq!(a_id, world.entities_archetypes[e.index()]);
 
         assert_eq!(world.get::<TestComponent1>(e).unwrap(), &TestComponent1(50));
@@ -829,7 +829,7 @@ mod misc {
 
         assert_matches!(world.get::<TestComponent1>(e), Err(GetComponentTypedError::EntityIsNotAlive { .. }));
         assert_matches!(world.get::<TestComponent1>(e2), Err(GetComponentTypedError::ComponentNotPresent { .. }));
-        assert_matches!(world.add(e2, TestComponent1(52)), Ok(AddComponent::Added));
+        assert_matches!(world.add(e2, TestComponent1(52)), Ok(AddComponentOutcome::Added));
         assert_matches!(world.get::<TestComponent1>(e), Err(GetComponentTypedError::EntityIsNotAlive { .. }));
         assert_matches!(world.get::<TestComponent1>(e2), Ok(&TestComponent1(52)));
     }

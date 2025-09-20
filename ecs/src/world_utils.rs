@@ -1,5 +1,5 @@
 use crate::world::{
-    component::Component, AddComponent, AddComponentWithError, ComponentNotPresentError, Entity, EntityIsNotAliveError, ForbiddenError, GetComponentError, HasComponent, OptionalComponentRef, RemoveComponentError, SetComponentWithError, World
+    component::Component, AddComponentOutcome, AddComponentWithError, ComponentNotPresentError, Entity, EntityIsNotAliveError, ForbiddenError, GetComponentError, HasComponent, OptionalComponentRef, RemoveComponentError, SetComponentWithError, World
 };
 
 use std::any::type_name;
@@ -129,7 +129,7 @@ impl World {
 
     pub fn get_or_default<C: Component + Default>(&mut self, entity: Entity) -> Result<&mut C, GetComponentOrDefaultError> {
         match self.add_with::<C, _>(entity, default) {
-            Ok(AddComponent::Added | AddComponent::AlreadyPresent) => (),
+            Ok(AddComponentOutcome::Added | AddComponentOutcome::AlreadyPresent) => (),
             Err(AddComponentTypedError::EntityIsNotAlive(e)) => return Err(e.into()),
             Err(AddComponentTypedError::Forbidden(e)) => return Err(e.into()),
         }
@@ -148,7 +148,7 @@ impl World {
     /// Gets the component of the given type for the given entity, if the entity
     /// does not have the component, then the given function is called
     /// for adding the component to the entity.
-    pub fn add_with<C, F>(&mut self, entity: impl Into<Entity>, f: F) -> Result<AddComponent, AddComponentTypedError>
+    pub fn add_with<C, F>(&mut self, entity: impl Into<Entity>, f: F) -> Result<AddComponentOutcome, AddComponentTypedError>
         where F: FnOnce() -> C,
               C: Component,
     {
@@ -169,13 +169,13 @@ impl World {
 
     /// Gets the component of the given type for the given entity, if the entity
     /// does not have the component, it is inserted with the given value.
-    pub fn add<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> Result<AddComponent, AddComponentTypedError> {
+    pub fn add<C: Component>(&mut self, entity: impl Into<Entity>, component: C) -> Result<AddComponentOutcome, AddComponentTypedError> {
         self.add_with(entity, || component)
     }
 
     /// Sets the value for the given component on the given entity, overrides
     /// the component's value if the entity already has it.
-    pub fn set<C: Component>(&mut self, entity: impl Into<Entity>, value: C) -> Result<AddComponent, SetComponentTypedError> {
+    pub fn set<C: Component>(&mut self, entity: impl Into<Entity>, value: C) -> Result<AddComponentOutcome, SetComponentTypedError> {
         let component = self.component::<C>();
 
         match self.set_component_with(entity, component, || value) {

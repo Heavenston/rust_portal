@@ -3,6 +3,41 @@
 
 use super::*;
 
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub enum TypedBundleError {
+    EntityIsNotAlive(#[from] EntityIsNotAliveError),
+    Forbidden(#[from] ForbiddenError),
+}
+
+impl BundleErrorFrom<ComponentRequiresValueError> for TypedBundleError {
+    const REACHABLE: bool = false;
+    fn bundle_from(_value: ComponentRequiresValueError) -> Self {
+        unreachable!("Typed bundles always provide a value for components")
+    }
+}
+
+impl BundleErrorFrom<ComponentDoesNotHaveStorageError> for TypedBundleError {
+    const REACHABLE: bool = false;
+    fn bundle_from(_value: ComponentDoesNotHaveStorageError) -> Self {
+        unreachable!("Typed bundles use World::component to get components which should always return entities with the correct storages")
+    }
+}
+
+impl BundleErrorFrom<TypeMismatchedError> for TypedBundleError {
+    const REACHABLE: bool = false;
+    fn bundle_from(_value: TypeMismatchedError) -> Self {
+        unreachable!("Typed bundles use World::component to get components which should always return entities with the correct storages")
+    }
+}
+
+impl BundleErrorFrom<ComponentIsNotAliveError> for TypedBundleError {
+    const REACHABLE: bool = false;
+    fn bundle_from(_value: ComponentIsNotAliveError) -> Self {
+        unreachable!("Typed bundles use World::component to get components which should always return alive entities")
+    }
+}
+
 /// Private struct implementing `BundleValueIterable` for each tuple bundle 
 struct BundleValueIterator<Tuple> {
     tuple: Tuple,
@@ -15,6 +50,8 @@ macro_rules! bundle_impl {
         impl<$($T),*> Bundle for ($($T,)*)
             where $($T: Component,)*
         {
+            type Error = TypedBundleError;
+
             fn len(&self) -> usize {
                 count_args_literal!($($T),*)
             }
@@ -23,6 +60,10 @@ macro_rules! bundle_impl {
                 let _ = world;
 
                 [$(world.component::<$T>()),*]
+            }
+
+            fn components_value_types(&self) -> impl Iterator<Item = Option<(TypeId, &'static str)>> {
+                [$(Some((TypeId::of::<$T>(), std::any::type_name::<$T>())),)*].into_iter()
             }
 
             fn into_component_values(self) -> impl BundleValueIterable {

@@ -1,5 +1,16 @@
 use super::*;
 
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub enum NamedBundleError {
+    EntityIsNotAlive(#[from] EntityIsNotAliveError),
+    ComponentIsNotAlive(#[from] ComponentIsNotAliveError),
+    ComponentRequiresValue(#[from] ComponentRequiresValueError),
+    ComponentDoesNotHaveStorage(#[from] ComponentDoesNotHaveStorageError),
+    TypeMismatchedError(#[from] TypeMismatchedError),
+    Forbidden(#[from] ForbiddenError),
+}
+
 /// Private struct implementing `BundleValueIterable` for each tuple for `NamedBundle`
 struct BundleValueIterator<Tuple>(Tuple);
 
@@ -8,6 +19,7 @@ pub trait NamedBundleItem {
     type O: PartialOption<Self::T>;
 
     fn component_entity(&self, world: &mut World) -> ComponentEntity;
+    fn value_type_info(&self) -> Option<(TypeId, &'static str)>;
     /// If None is returned from this, then the Default value will be used
     /// as the value, otherwise the given value will be used.
     fn into_value(self) -> impl PartialOption<Self::T>;
@@ -19,6 +31,10 @@ impl NamedBundleItem for ComponentEntity {
 
     fn component_entity(&self, _world: &mut World) -> ComponentEntity {
         *self
+    }
+
+    fn value_type_info(&self) -> Option<(TypeId, &'static str)> {
+        None
     }
 
     fn into_value(self) -> NeverOption {
@@ -34,6 +50,10 @@ impl<T: 'static> NamedBundleItem for (ComponentEntity, T) {
         self.0
     }
 
+    fn value_type_info(&self) -> Option<(TypeId, &'static str)> {
+        Some((TypeId::of::<T>(), std::any::type_name::<T>()))
+    }
+
     fn into_value(self) -> AlwaysOption<T> {
         AlwaysOption::Some(self.1)
     }
@@ -46,6 +66,8 @@ macro_rules! impl_named_bundle {
         impl<$($T,)*> Bundle for NamedBundle<($($T,)*)>
             where $($T: NamedBundleItem,)*
         {
+            type Error = NamedBundleError;
+
             fn len(&self) -> usize {
                 count_args_literal!($($T),*)
             }
@@ -53,6 +75,10 @@ macro_rules! impl_named_bundle {
             fn accumulate_components(&self, world: &mut World) -> [ComponentEntity; count_args_literal!($($T),*)] {
                 let _ = world;
                 [$(self.0.$I.component_entity(world),)*]
+            }
+
+            fn components_value_types(&self) -> impl Iterator<Item = Option<(TypeId, &'static str)>> {
+                [$(self.0.$I.value_type_info(),)*].into_iter()
             }
 
             fn into_component_values(self) -> impl BundleValueIterable {
