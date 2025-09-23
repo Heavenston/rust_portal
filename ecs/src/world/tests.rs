@@ -1459,7 +1459,9 @@ mod queries {
             e
         }).collect_vec();
         
-        let query = q::Query::<q::And<(q::EntityHandle, q::HasComponent)>>::new_with_config(&ctx.world, ((), comp));
+        // TODO: use unwrap_infallible
+        let query = q::Query::<q::And<(q::EntityHandle, q::HasComponent)>>::new_with_config(&ctx.world, ((), comp))
+            .unwrap();
 
         assert_eq!(
             query.iter(&ctx.world).map(|(entity, ())| entity).collect_vec(),
@@ -1482,7 +1484,9 @@ mod queries {
             (e, value)
         }).collect_vec();
         
-        let query = q::Query::<q::And<(q::EntityHandle, q::ComponentRef)>>::new_with_config(&ctx.world, ((), comp));
+        // TODO: use unwrap_infallible
+        let query = q::Query::<q::And<(q::EntityHandle, q::ComponentRef)>>::new_with_config(&ctx.world, ((), comp))
+            .unwrap();
 
         assert_eq!(
             query.iter(&ctx.world).map(|(entity, ref_)| (entity, ref_.as_typed::<String>().unwrap().as_str())).collect_vec(),
@@ -1505,7 +1509,9 @@ mod queries {
             (e, value)
         }).collect_vec();
         
-        let query = q::Query::<q::And<(q::EntityHandle, q::ComponentRefMut)>>::new_with_config(&ctx.world, ((), comp));
+        // TODO: use unwrap_infallible
+        let query = q::Query::<q::And<(q::EntityHandle, q::ComponentRefMut)>>::new_with_config(&ctx.world, ((), comp))
+            .unwrap();
 
         assert_eq!(
             query.iter_mut(&mut ctx.world).map(|(entity, ref_)| (entity, ref_.as_typed::<String>().unwrap().as_str())).collect_vec(),
@@ -1682,7 +1688,9 @@ mod queries {
         let test_entity = ctx.world.spawn();
         ctx.world.add_component_with(test_entity, comp, || 42u32).unwrap();
         
-        let query = q::Query::<q::And<(q::EntityHandle, q::ComponentRef)>>::new_with_config(&ctx.world, ((), comp));
+        // TODO: use unwrap_infallible
+        let query = q::Query::<q::And<(q::EntityHandle, q::ComponentRef)>>::new_with_config(&ctx.world, ((), comp))
+            .unwrap();
         
         let result = query.get(&ctx.world, test_entity);
         assert!(result.is_ok());
@@ -1706,7 +1714,9 @@ mod queries {
         let test_entity = ctx.world.spawn();
         ctx.world.add_component_with(test_entity, comp, || "initial".to_string()).unwrap();
         
-        let query = q::Query::<q::And<(q::EntityHandle, q::ComponentRefMut)>>::new_with_config(&ctx.world, ((), comp));
+        // TODO: use unwrap_infallible
+        let query = q::Query::<q::And<(q::EntityHandle, q::ComponentRefMut)>>::new_with_config(&ctx.world, ((), comp))
+            .unwrap();
         
         if let Ok((entity, comp_ref)) = query.get_mut(&mut ctx.world, test_entity) {
             assert_eq!(entity, test_entity);

@@ -31,14 +31,14 @@ impl<C> QueryParameterImpl for Ref<C>
     type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = impl Iterator<Item = Self::Value<'a>>;
     type Value<'a> = &'a C;
 
-    fn new(world: &World, (): ()) -> Self {
+    fn new(world: &World, (): ()) -> Result<Self, Self::CreationError> {
         let component = world.try_component::<C>();
         // TODO
         assert!(component.is_none_or(|component| world.component_fragments_tables(component)));
-        Self {
+        Ok(Self {
             _component_type: PhantomData,
             component,
-        }
+        })
     }
 
     fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
@@ -160,14 +160,14 @@ impl<C> QueryParameterImpl for RefMut<C>
     type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = impl Iterator<Item = Self::Value<'a>>;
     type Value<'a> = &'a mut C;
 
-    fn new(world: &World, (): ()) -> Self {
+    fn new(world: &World, (): ()) -> Result<Self, Self::CreationError> {
         let component = world.try_component::<C>();
         // TODO
         assert!(component.is_none_or(|component| world.component_fragments_tables(component)));
-        Self {
+        Ok(Self {
             _component_type: PhantomData,
             component,
-        }
+        })
     }
 
     fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {

@@ -422,6 +422,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "concat-idents"
+version = "1.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f76990911f2267d837d9d0ad060aa63aaad170af40904b29461734c339030d4d"
+dependencies = [
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2183,6 +2193,7 @@ dependencies = [
 name = "portal-ecs"
 version = "0.1.0"
 dependencies = [
+ "concat-idents",
  "derive-where",
  "derive_more",
  "portal-dynvec",

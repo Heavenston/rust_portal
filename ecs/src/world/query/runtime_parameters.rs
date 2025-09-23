@@ -22,8 +22,8 @@ impl QueryParameterImpl for EntityHandle {
     type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = impl Iterator<Item = Self::Value<'a>>;
     type Value<'a> = Entity;
 
-    fn new(world: &World, (): ()) -> Self {
-        Self
+    fn new(world: &World, (): ()) -> Result<Self, Self::CreationError> {
+        Ok(Self)
     }
 
     fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
@@ -89,12 +89,12 @@ impl QueryParameterImpl for ComponentRef {
     type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = impl Iterator<Item = Self::Value<'a>>;
     type Value<'a> = dynvec::DynVecValueRef<'a>;
 
-    fn new(world: &World, component: ComponentEntity) -> Self {
+    fn new(world: &World, component: ComponentEntity) -> Result<Self, Self::CreationError> {
         // TODO
         assert!(world.component_fragments_tables(component));
-        Self {
+        Ok(Self {
             component,
-        }
+        })
     }
 
     fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
@@ -180,12 +180,12 @@ impl QueryParameterImpl for ComponentRefMut {
     type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = impl Iterator<Item = Self::Value<'a>>;
     type Value<'a> = dynvec::DynVecValueRefMut<'a>;
 
-    fn new(world: &World, component: ComponentEntity) -> Self {
+    fn new(world: &World, component: ComponentEntity) -> Result<Self, Self::CreationError> {
         // TODO
         assert!(world.component_fragments_tables(component));
-        Self {
+        Ok(Self {
             component,
-        }
+        })
     }
 
     fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {

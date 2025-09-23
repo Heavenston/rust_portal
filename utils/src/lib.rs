@@ -15,7 +15,9 @@
 
 pub mod prelude {
     pub use crate::{
-        ix, trait_alias, macros::TryClone, uid::Uid,
+        ix, trait_alias,
+        macros::{ TryClone, optional_enum_fields },
+        uid::Uid,
         count_args_literal,
         default, concat_arrays, flatten_array, hash_value,
         itertools::Itertools as _,

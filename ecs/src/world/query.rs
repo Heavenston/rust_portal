@@ -7,11 +7,13 @@ mod typed_parameters;
 pub use typed_parameters::*;
 mod modifiers;
 pub use modifiers::*;
+mod errors;
+pub use errors::*;
 
 use super::{
-    World, TableId, ArchetypId, Table, Archetyp,
-    entity_storage::{ EntityStorage, Entity, EntityIndex },
-    ComponentSet, ComponentEntity,
+    entity_storage::{ Entity, EntityIndex, EntityStorage },
+    Archetyp, ArchetypId, ComponentEntity, ComponentSet, EntityIsNotAliveError,
+    Table, TableId, World
 };
 use crate::index_map::IndexMap;
 
@@ -120,8 +122,10 @@ mod private {
     // NOTE: 'static is Required to make the GATs work easily, no query
     // parameter uses lifetimes but if that usecase comes up, it probably would
     // require a *lot* of rust tinkering to make this trait work
-    pub trait QueryParameterImpl: 'static /* */ {
+    pub trait QueryParameterImpl: Sized + 'static {
         type CreationConfig;
+        type CreationError: AnyQueryError = EmptyQueryError;
+
         type ArchetypIterator<'s, 'w>: Iterator<Item = ArchetypId>;
         type ArchetypMatchBool: PartialBool;
 
@@ -130,7 +134,7 @@ mod private {
         type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>>: Iterator<Item = Self::Value<'a>>;
         type Value<'a>;
 
-        fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self;
+        fn new(world: &World, creation_cfg: Self::CreationConfig) -> Result<Self, Self::CreationError>;
         fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w>;
         fn match_archetyp(&self, world: &ImmutableWorldRef<'_>, archetyp_id: ArchetypId) -> Self::ArchetypMatchBool;
 
@@ -158,18 +162,6 @@ use private::*;
 trait_alias!(pub trait QueryParameter = QueryParameterImpl);
 trait_alias!(pub trait QueryParameterImmutable = QueryParameterImmutableImpl);
 
-#[derive(Debug, thiserror::Error)]
-pub enum QueryGetError {
-    #[error("Tried to get components of a dead entity {entity}")]
-    EntityIsNotAlive {
-        entity: Entity,
-    },
-    #[error("{entity} does not match the query.")]
-    NotMatched {
-        entity: Entity,
-    },
-}
-
 #[derive(Debug, Clone)]
 struct CachedQueryData {
     matching_archetypes: BitSet<ArchetypId>,
@@ -181,18 +173,24 @@ pub struct Query<P: QueryParameter> {
     cache: Option<CachedQueryData>,
 }
 
-impl<P: QueryParameterImpl> Query<P> {
+impl<P: QueryParameter> Query<P> {
     pub fn new(world: &World) -> Self
         where P::CreationConfig: OnlyUnit + Default,
+              // P::CreationError: Infallible,
     {
-        Self::new_with_config(world, default())
+        // TODO: Incomment the Infallible trait bound and use this
+        // let Ok(this) = Self::new_with_config(world, default())
+        //     .map_err(Infallible::into_never);
+        let this = Self::new_with_config(world, default())
+            .map_err(|_| ()).expect("TODO");
+        this
     }
 
-    pub fn new_with_config(world: &World, config: P::CreationConfig) -> Self {
-        Self {
-            parameters: P::new(world, config),
+    pub fn new_with_config(world: &World, config: P::CreationConfig) -> Result<Self, P::CreationError> {
+        Ok(Self {
+            parameters: P::new(world, config)?,
             cache: None,
-        }
+        })
     }
 
     fn generate_cache(&self, world: &World) -> CachedQueryData {
@@ -299,12 +297,12 @@ impl<P: QueryParameterImpl> Query<P> {
         where P: QueryParameterImmutable,
     {
         if !world.alive(entity) {
-            return Err(QueryGetError::EntityIsNotAlive { entity });
+            return Err(EntityIsNotAliveError { entity }.into());
         }
 
         let archetyp_id = world.entities_archetypes[entity.index()];
         if !self.parameters.match_archetyp(&borrow_world!(world), archetyp_id).is_true() {
-            return Err(QueryGetError::NotMatched { entity });
+            return Err(EntityDoesNotMatchQueryError { entity }.into());
         }
         let table_id = world.archetypes[archetyp_id].table_id;
 
@@ -317,12 +315,12 @@ impl<P: QueryParameterImpl> Query<P> {
 
     pub fn get_mut<'b>(&self, world: &'b mut World, entity: Entity) -> Result<P::Value<'b>, QueryGetError> {
         if !world.alive(entity) {
-            return Err(QueryGetError::EntityIsNotAlive { entity });
+            return Err(EntityIsNotAliveError { entity }.into());
         }
 
         let archetyp_id = world.entities_archetypes[entity.index()];
         if !self.parameters.match_archetyp(&borrow_world!(world), archetyp_id).is_true() {
-            return Err(QueryGetError::NotMatched { entity });
+            return Err(EntityDoesNotMatchQueryError { entity }.into());
         }
 
         let tables = &mut world.tables;

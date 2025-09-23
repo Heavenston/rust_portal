@@ -2,6 +2,8 @@ use super::{
     QueryParameterImpl, QueryParameterImmutableImpl, QueryParameter,
     ImmutableIterParameters, ImmutableWorldRef, ColumnSelectParameters,
     MutableIterParameters, MutableGetParameters,
+
+    AllQueryError,
 };
 use crate::world::{ ArchetypId, Entity, World };
 
@@ -35,6 +37,8 @@ impl<C> QueryParameterImpl for Optional<C>
     where C: QueryParameterImpl,
 {
     type CreationConfig = C::CreationConfig;
+    type CreationError = C::CreationError;
+
     type ArchetypIterator<'s, 'w> = impl Iterator<Item = ArchetypId> + use<'w, C>;
     type ArchetypMatchBool = True;
 
@@ -43,10 +47,10 @@ impl<C> QueryParameterImpl for Optional<C>
     type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = impl Iterator<Item = Self::Value<'a>>;
     type Value<'a> = Option<C::Value<'a>>;
 
-    fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
-        Self {
-            child: C::new(world, creation_cfg),
-        }
+    fn new(world: &World, creation_cfg: Self::CreationConfig) -> Result<Self, Self::CreationError> {
+        Ok(Self {
+            child: C::new(world, creation_cfg)?,
+        })
     }
 
     fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
@@ -124,6 +128,8 @@ impl<C> QueryParameterImpl for NoFetch<C>
     where C: QueryParameterImpl,
 {
     type CreationConfig = C::CreationConfig;
+    type CreationError = C::CreationError;
+
     type ArchetypIterator<'s, 'w> = C::ArchetypIterator<'s, 'w>;
     type ArchetypMatchBool = C::ArchetypMatchBool;
 
@@ -132,10 +138,10 @@ impl<C> QueryParameterImpl for NoFetch<C>
     type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = RepeatN<()>;
     type Value<'a> = ();
 
-    fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
-        Self {
-            child: C::new(world, creation_cfg),
-        }
+    fn new(world: &World, creation_cfg: Self::CreationConfig) -> Result<Self, Self::CreationError> {
+        Ok(Self {
+            child: C::new(world, creation_cfg)?,
+        })
     }
 
     fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
@@ -186,6 +192,8 @@ impl<C> QueryParameterImpl for Not<C>
     where C: QueryParameterImpl,
 {
     type CreationConfig = C::CreationConfig;
+    type CreationError = C::CreationError;
+
     type ArchetypIterator<'s, 'w> = impl Iterator<Item = ArchetypId>;
     type ArchetypMatchBool = BoolNot<C::ArchetypMatchBool>;
 
@@ -194,10 +202,10 @@ impl<C> QueryParameterImpl for Not<C>
     type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = RepeatN<()>;
     type Value<'a> = ();
 
-    fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
-        Self {
-            child: C::new(world, creation_cfg),
-        }
+    fn new(world: &World, creation_cfg: Self::CreationConfig) -> Result<Self, Self::CreationError> {
+        Ok(Self {
+            child: C::new(world, creation_cfg)?,
+        })
     }
 
     fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
@@ -298,6 +306,8 @@ macro_rules! impl_and {
             where $($T: QueryParameterImpl,)*
         {
             type CreationConfig = ($($T::CreationConfig,)*);
+            type CreationError = AllQueryError;
+
             type ArchetypIterator<'s, 'w> = impl Iterator<Item = ArchetypId>;
             type ArchetypMatchBool = bool_and_all!($($T::ArchetypMatchBool),*);
 
@@ -306,10 +316,11 @@ macro_rules! impl_and {
             type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = impl Iterator<Item = Self::Value<'a>>;
             type Value<'a> = ($($T::Value<'a>,)*);
 
-            fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
-                Self {
-                    tuple: ($($T::new(world, creation_cfg.${index()}),)*),
-                }
+            fn new(world: &World, creation_cfg: Self::CreationConfig) -> Result<Self, Self::CreationError> {
+                Ok(Self {
+                    tuple: ($($T::new(world, creation_cfg.${index()})
+                        .map_err(Into::<AllQueryError>::into)?,)*),
+                })
             }
 
             fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
@@ -370,6 +381,8 @@ macro_rules! impl_or {
             where $($T: QueryParameterImpl,)*
         {
             type CreationConfig = ($($T::CreationConfig,)*);
+            type CreationError = AllQueryError;
+
             type ArchetypIterator<'s, 'w> = impl Iterator<Item = ArchetypId>;
             type ArchetypMatchBool = bool_or_all!($($T::ArchetypMatchBool),*);
 
@@ -378,10 +391,11 @@ macro_rules! impl_or {
             type ValueMutIterator<'a, I: Iterator<Item = &'a mut dynvec::DynVec>> = EitherIterator<either_of!($($T::ValueMutIterator<'a, I>),*)>;
             type Value<'a> = either_of!($($T::Value<'a>),*);
 
-            fn new(world: &World, creation_cfg: Self::CreationConfig) -> Self {
-                Self {
-                    tuple: ($($T::new(world, creation_cfg.${index()}),)*),
-                }
+            fn new(world: &World, creation_cfg: Self::CreationConfig) -> Result<Self, Self::CreationError> {
+                Ok(Self {
+                    tuple: ($($T::new(world, creation_cfg.${index()})
+                        .map_err(Into::<AllQueryError>::into)?,)*),
+                })
             }
 
             fn matching_archetypes<'s, 'w>(&'s self, world: &ImmutableWorldRef<'w>) -> Self::ArchetypIterator<'s, 'w> {
