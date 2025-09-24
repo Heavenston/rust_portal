@@ -48,6 +48,7 @@ pub mod prelude {
         partial_option::{ SomePartialOption, PartialOption, AlwaysOption, NeverOption },
         either_utils::{ OptionExt, zip_left, zip_right },
         try_clone::{ try_clone_boxed_slice, TryClone },
+        infallible::{ Infallible, InfallibleUnwrap },
     };
 
     pub use itertools::{ ZipEq, zip_eq };
@@ -90,6 +91,7 @@ pub mod partial_bool;
 pub mod partial_option;
 pub mod either_utils;
 pub mod try_clone;
+pub mod infallible;
 
 use std::hash::{ DefaultHasher, Hash, Hasher };
 
