@@ -3,7 +3,7 @@ use super::{
     ImmutableIterParameters, ImmutableWorldRef, ColumnSelectParameters,
     MutableIterParameters, MutableGetParameters,
 
-    AllQueryError,
+    AllQueryError, AnyQueryError,
 };
 use crate::world::{ ArchetypId, Entity, World };
 
@@ -249,6 +249,15 @@ impl<C> QueryParameterImmutableImpl for Not<C>
     fn get(&self, parameters: ImmutableIterParameters<'_>, entity: Entity) { }
 }
 
+type ErrAnd<A, B> = <A as AnyQueryError>::And<B>;
+
+macro_rules! err_and_all {
+    ($first: ty) => { $first };
+    ($first: ty $(, $rest: ty)+) => {
+        ErrAnd<$first, err_and_all!($($rest),*)>
+    };
+}
+
 macro_rules! bool_or_all {
     ($first: ty) => { Bool<<$first as PartialBool>::T, <$first as PartialBool>::F> };
     ($first: ty $(, $rest: ty)+) => {
@@ -306,7 +315,7 @@ macro_rules! impl_and {
             where $($T: QueryParameterImpl,)*
         {
             type CreationConfig = ($($T::CreationConfig,)*);
-            type CreationError = AllQueryError;
+            type CreationError = err_and_all!($($T::CreationError),*);
 
             type ArchetypIterator<'s, 'w> = impl Iterator<Item = ArchetypId>;
             type ArchetypMatchBool = bool_and_all!($($T::ArchetypMatchBool),*);
@@ -318,8 +327,7 @@ macro_rules! impl_and {
 
             fn new(world: &World, creation_cfg: Self::CreationConfig) -> Result<Self, Self::CreationError> {
                 Ok(Self {
-                    tuple: ($($T::new(world, creation_cfg.${index()})
-                        .map_err(Into::<AllQueryError>::into)?,)*),
+                    tuple: ($($T::new(world, creation_cfg.${index()})?,)*),
                 })
             }
 

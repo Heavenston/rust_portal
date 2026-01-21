@@ -71,70 +71,7 @@ pub(super) use sealed::AnyQueryError;
 
 macro_rules! for_every {
     ($macro: ident $delem:tt $(, $($args: tt)+)?) => {
-        $macro!(0,0,0,0,0,0$(, $($args)+)?)$delem
-        $macro!(0,0,0,0,0,1$(, $($args)+)?)$delem
-        $macro!(0,0,0,0,1,0$(, $($args)+)?)$delem
-        $macro!(0,0,0,0,1,1$(, $($args)+)?)$delem
-        $macro!(0,0,0,1,0,0$(, $($args)+)?)$delem
-        $macro!(0,0,0,1,0,1$(, $($args)+)?)$delem
-        $macro!(0,0,0,1,1,0$(, $($args)+)?)$delem
-        $macro!(0,0,0,1,1,1$(, $($args)+)?)$delem
-        $macro!(0,0,1,0,0,0$(, $($args)+)?)$delem
-        $macro!(0,0,1,0,0,1$(, $($args)+)?)$delem
-        $macro!(0,0,1,0,1,0$(, $($args)+)?)$delem
-        $macro!(0,0,1,0,1,1$(, $($args)+)?)$delem
-        $macro!(0,0,1,1,0,0$(, $($args)+)?)$delem
-        $macro!(0,0,1,1,0,1$(, $($args)+)?)$delem
-        $macro!(0,0,1,1,1,0$(, $($args)+)?)$delem
-        $macro!(0,0,1,1,1,1$(, $($args)+)?)$delem
-        $macro!(0,1,0,0,0,0$(, $($args)+)?)$delem
-        $macro!(0,1,0,0,0,1$(, $($args)+)?)$delem
-        $macro!(0,1,0,0,1,0$(, $($args)+)?)$delem
-        $macro!(0,1,0,0,1,1$(, $($args)+)?)$delem
-        $macro!(0,1,0,1,0,0$(, $($args)+)?)$delem
-        $macro!(0,1,0,1,0,1$(, $($args)+)?)$delem
-        $macro!(0,1,0,1,1,0$(, $($args)+)?)$delem
-        $macro!(0,1,0,1,1,1$(, $($args)+)?)$delem
-        $macro!(0,1,1,0,0,0$(, $($args)+)?)$delem
-        $macro!(0,1,1,0,0,1$(, $($args)+)?)$delem
-        $macro!(0,1,1,0,1,0$(, $($args)+)?)$delem
-        $macro!(0,1,1,0,1,1$(, $($args)+)?)$delem
-        $macro!(0,1,1,1,0,0$(, $($args)+)?)$delem
-        $macro!(0,1,1,1,0,1$(, $($args)+)?)$delem
-        $macro!(0,1,1,1,1,0$(, $($args)+)?)$delem
-        $macro!(0,1,1,1,1,1$(, $($args)+)?)$delem
-        $macro!(1,0,0,0,0,0$(, $($args)+)?)$delem
-        $macro!(1,0,0,0,0,1$(, $($args)+)?)$delem
-        $macro!(1,0,0,0,1,0$(, $($args)+)?)$delem
-        $macro!(1,0,0,0,1,1$(, $($args)+)?)$delem
-        $macro!(1,0,0,1,0,0$(, $($args)+)?)$delem
-        $macro!(1,0,0,1,0,1$(, $($args)+)?)$delem
-        $macro!(1,0,0,1,1,0$(, $($args)+)?)$delem
-        $macro!(1,0,0,1,1,1$(, $($args)+)?)$delem
-        $macro!(1,0,1,0,0,0$(, $($args)+)?)$delem
-        $macro!(1,0,1,0,0,1$(, $($args)+)?)$delem
-        $macro!(1,0,1,0,1,0$(, $($args)+)?)$delem
-        $macro!(1,0,1,0,1,1$(, $($args)+)?)$delem
-        $macro!(1,0,1,1,0,0$(, $($args)+)?)$delem
-        $macro!(1,0,1,1,0,1$(, $($args)+)?)$delem
-        $macro!(1,0,1,1,1,0$(, $($args)+)?)$delem
-        $macro!(1,0,1,1,1,1$(, $($args)+)?)$delem
-        $macro!(1,1,0,0,0,0$(, $($args)+)?)$delem
-        $macro!(1,1,0,0,0,1$(, $($args)+)?)$delem
-        $macro!(1,1,0,0,1,0$(, $($args)+)?)$delem
-        $macro!(1,1,0,0,1,1$(, $($args)+)?)$delem
-        $macro!(1,1,0,1,0,0$(, $($args)+)?)$delem
-        $macro!(1,1,0,1,0,1$(, $($args)+)?)$delem
-        $macro!(1,1,0,1,1,0$(, $($args)+)?)$delem
-        $macro!(1,1,0,1,1,1$(, $($args)+)?)$delem
-        $macro!(1,1,1,0,0,0$(, $($args)+)?)$delem
-        $macro!(1,1,1,0,0,1$(, $($args)+)?)$delem
-        $macro!(1,1,1,0,1,0$(, $($args)+)?)$delem
-        $macro!(1,1,1,0,1,1$(, $($args)+)?)$delem
-        $macro!(1,1,1,1,0,0$(, $($args)+)?)$delem
-        $macro!(1,1,1,1,0,1$(, $($args)+)?)$delem
-        $macro!(1,1,1,1,1,0$(, $($args)+)?)$delem
-        $macro!(1,1,1,1,1,1$(, $($args)+)?)$delem
+        $macro!(0,0,0,0,0,0$(, $($args)+)?)$delem $macro!(0,0,0,0,0,1$(, $($args)+)?)$delem $macro!(0,0,0,0,1,0$(, $($args)+)?)$delem $macro!(0,0,0,0,1,1$(, $($args)+)?)$delem $macro!(0,0,0,1,0,0$(, $($args)+)?)$delem $macro!(0,0,0,1,0,1$(, $($args)+)?)$delem $macro!(0,0,0,1,1,0$(, $($args)+)?)$delem $macro!(0,0,0,1,1,1$(, $($args)+)?)$delem $macro!(0,0,1,0,0,0$(, $($args)+)?)$delem $macro!(0,0,1,0,0,1$(, $($args)+)?)$delem $macro!(0,0,1,0,1,0$(, $($args)+)?)$delem $macro!(0,0,1,0,1,1$(, $($args)+)?)$delem $macro!(0,0,1,1,0,0$(, $($args)+)?)$delem $macro!(0,0,1,1,0,1$(, $($args)+)?)$delem $macro!(0,0,1,1,1,0$(, $($args)+)?)$delem $macro!(0,0,1,1,1,1$(, $($args)+)?)$delem $macro!(0,1,0,0,0,0$(, $($args)+)?)$delem $macro!(0,1,0,0,0,1$(, $($args)+)?)$delem $macro!(0,1,0,0,1,0$(, $($args)+)?)$delem $macro!(0,1,0,0,1,1$(, $($args)+)?)$delem $macro!(0,1,0,1,0,0$(, $($args)+)?)$delem $macro!(0,1,0,1,0,1$(, $($args)+)?)$delem $macro!(0,1,0,1,1,0$(, $($args)+)?)$delem $macro!(0,1,0,1,1,1$(, $($args)+)?)$delem $macro!(0,1,1,0,0,0$(, $($args)+)?)$delem $macro!(0,1,1,0,0,1$(, $($args)+)?)$delem $macro!(0,1,1,0,1,0$(, $($args)+)?)$delem $macro!(0,1,1,0,1,1$(, $($args)+)?)$delem $macro!(0,1,1,1,0,0$(, $($args)+)?)$delem $macro!(0,1,1,1,0,1$(, $($args)+)?)$delem $macro!(0,1,1,1,1,0$(, $($args)+)?)$delem $macro!(0,1,1,1,1,1$(, $($args)+)?)$delem $macro!(1,0,0,0,0,0$(, $($args)+)?)$delem $macro!(1,0,0,0,0,1$(, $($args)+)?)$delem $macro!(1,0,0,0,1,0$(, $($args)+)?)$delem $macro!(1,0,0,0,1,1$(, $($args)+)?)$delem $macro!(1,0,0,1,0,0$(, $($args)+)?)$delem $macro!(1,0,0,1,0,1$(, $($args)+)?)$delem $macro!(1,0,0,1,1,0$(, $($args)+)?)$delem $macro!(1,0,0,1,1,1$(, $($args)+)?)$delem $macro!(1,0,1,0,0,0$(, $($args)+)?)$delem $macro!(1,0,1,0,0,1$(, $($args)+)?)$delem $macro!(1,0,1,0,1,0$(, $($args)+)?)$delem $macro!(1,0,1,0,1,1$(, $($args)+)?)$delem $macro!(1,0,1,1,0,0$(, $($args)+)?)$delem $macro!(1,0,1,1,0,1$(, $($args)+)?)$delem $macro!(1,0,1,1,1,0$(, $($args)+)?)$delem $macro!(1,0,1,1,1,1$(, $($args)+)?)$delem $macro!(1,1,0,0,0,0$(, $($args)+)?)$delem $macro!(1,1,0,0,0,1$(, $($args)+)?)$delem $macro!(1,1,0,0,1,0$(, $($args)+)?)$delem $macro!(1,1,0,0,1,1$(, $($args)+)?)$delem $macro!(1,1,0,1,0,0$(, $($args)+)?)$delem $macro!(1,1,0,1,0,1$(, $($args)+)?)$delem $macro!(1,1,0,1,1,0$(, $($args)+)?)$delem $macro!(1,1,0,1,1,1$(, $($args)+)?)$delem $macro!(1,1,1,0,0,0$(, $($args)+)?)$delem $macro!(1,1,1,0,0,1$(, $($args)+)?)$delem $macro!(1,1,1,0,1,0$(, $($args)+)?)$delem $macro!(1,1,1,0,1,1$(, $($args)+)?)$delem $macro!(1,1,1,1,0,0$(, $($args)+)?)$delem $macro!(1,1,1,1,0,1$(, $($args)+)?)$delem $macro!(1,1,1,1,1,0$(, $($args)+)?)$delem $macro!(1,1,1,1,1,1$(, $($args)+)?)$delem
     };
 }
 
